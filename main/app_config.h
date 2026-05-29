@@ -23,7 +23,7 @@ extern "C" {
  * NB: in productie (230V + Add-on) MOET dit 0 zijn!
  */
 #ifndef BENCH_MODE
-#define BENCH_MODE 1
+#define BENCH_MODE 0
 #endif
 
 /* Add-on inputs — TTP223 en LD2410 hebben elk een eigen GPIO, altijd actief. */
