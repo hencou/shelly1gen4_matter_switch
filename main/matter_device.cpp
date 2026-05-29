@@ -1,11 +1,10 @@
 /*
  * Matter device implementatie voor Shelly 1 Gen4 (ESP32-C6).
  *
- * 4 endpoints:
+ * 3 endpoints:
  *   EP1 = OnOff Light Switch  + OnOff client + LevelControl client + Binding cluster
  *   EP2 = Temperature Sensor  (server)
  *   EP3 = Occupancy Sensor    (server)
- *   EP4 = Dimmer Switch       + OnOff client + LevelControl client + Binding cluster
  *
  * Commando-emit naar bound nodes/groups:
  *   - app_main.c roept matter_send_onoff_toggle(ep) / matter_send_level_move/stop(ep)
@@ -71,7 +70,7 @@ using namespace chip::app::Clusters;
 static uint16_t s_ep_drukker = 0;
 static uint16_t s_ep_temp    = 0;
 static uint16_t s_ep_occ     = 0;
-static uint16_t s_ep_touch   = 0;
+
 
 /* ---------------- Binding-mediated command emit ---------------- */
 
@@ -294,7 +293,7 @@ extern "C" void matter_factory_reset(void)
 }
 
 extern "C" uint16_t matter_ep_drukker(void) { return s_ep_drukker; }
-extern "C" uint16_t matter_ep_touch(void)   { return s_ep_touch;   }
+
 
 /* ---------------- Endpoint setup ---------------- */
 
@@ -376,16 +375,6 @@ extern "C" esp_err_t matter_start(void)
     endpoint_t *ep_occ = occupancy_sensor::create(node, &o_cfg, ENDPOINT_FLAG_NONE, NULL);
     s_ep_occ = endpoint::get_id(ep_occ);
     ESP_LOGI(TAG, "EP%u = Occupancy Sensor (LD2410)", s_ep_occ);
-
-    /* EP4 — Dimmer Switch + Binding (TTP223 op GPIO12) */
-    dimmer_switch::config_t d_cfg;
-    endpoint_t *ep_touch = dimmer_switch::create(node, &d_cfg, ENDPOINT_FLAG_NONE, NULL);
-    {
-        binding::config_t bind_cfg;
-        binding::create(ep_touch, &bind_cfg, CLUSTER_FLAG_SERVER);
-    }
-    s_ep_touch = endpoint::get_id(ep_touch);
-    ESP_LOGI(TAG, "EP%u = Dimmer Switch (TTP223 touch)", s_ep_touch);
 
     /* OTA-cluster requestor (optioneel: voor Matter OTA via TBR — werkt naast onze WiFi-OTA) */
     esp_matter_ota_requestor_init();

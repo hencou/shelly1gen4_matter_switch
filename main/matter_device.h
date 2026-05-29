@@ -9,11 +9,10 @@ extern "C" {
 #endif
 
 /**
- * Matter-stack starten met 4 endpoints:
+ * Matter-stack starten met 3 endpoints:
  *   EP1 = OnOff Light Switch (drukker) + Binding cluster
  *   EP2 = Temperature Sensor
  *   EP3 = Occupancy Sensor
- *   EP4 = Dimmer Switch (touch) + Binding cluster
  */
 esp_err_t matter_start(void);
 
@@ -31,7 +30,6 @@ void matter_factory_reset(void);
 
 /* Endpoint-ID lookups voor app_main.c (na matter_start). */
 uint16_t matter_ep_drukker(void);
-uint16_t matter_ep_touch(void);
 
 #ifdef __cplusplus
 }
