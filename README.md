@@ -2,9 +2,9 @@
 
 **Custom Matter-over-Thread firmware** voor de **Shelly 1 Gen4** (ESP32-C6).
 
-1. **Matter OnOff/Dimmer Light Switch** (drukker GPIO10) — bind-client, kort drukken = toggle, lang = dimmen
-2. **Matter Temperature Sensor** — DS18B20 op 1-Wire GPIO16 (centi-°C)
-3. **Matter Occupancy Sensor** — HLK-LD2410 op GPIO17 (binary)
+1. **Matter OnOff/Dimmer Light Switch** (Wandschakelaar op SW) — bind-client, kort drukken = toggle, lang = dimmen
+2. **Matter Temperature Sensor** — DS18B20 op 1-Wire GPIO16 (Analog in Addon)
+3. **Matter Occupancy Sensor** — HLK-LD2410 op GPIO17 (Data ingang Addon)
 4. Lokaal relais (GPIO5) mee-schakelen op de drukker-toggle (optioneel bedraad last)
 
 Alle 3 endpoints zijn altijd actief — geen compile-time keuze nodig. Universele firmware voor alle configuraties.
