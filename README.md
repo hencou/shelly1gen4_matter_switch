@@ -1,8 +1,6 @@
 # shelly1gen4_matter_switch
 
-**Custom Matter-over-Thread firmware** voor de **Shelly 1 Gen4** (ESP32-C6) — parallel project naast `shelly1gen4_zigbee_switch` voor de toekomstige Matter-migratie.
-
-Hetzelfde device-concept, maar dan over Matter-over-Thread in plaats van Zigbee:
+**Custom Matter-over-Thread firmware** voor de **Shelly 1 Gen4** (ESP32-C6).
 
 1. **Matter OnOff Light Switch** (drukker GPIO10) — bind-client, kort drukken = toggle, lang = dimmen
 2. **Matter Dimmer Switch** (touch GPIO12, optioneel via Add-on) — bind-client, kort drukken = toggle, lang = dimmen
@@ -40,7 +38,7 @@ Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter
 | **GPIO5** | Relais-uitgang (active-high) | Shelly 1 Gen4 onboard (canonical-validated) |
 | **GPIO10** | Drukker-input / SW-terminal | Shelly 1 Gen4 onboard — **externe pull op PCB, geen interne pull** |
 | **GPIO15** | Status LED onboard (active-low) | Shelly 1 Gen4 onboard PCB-LED (canonical-validated) |
-| GPIO4 | PCB-knop (active-low) | Shelly 1 Gen4 onboard — nog niet geïmplementeerd |
+| **GPIO4** | PCB-knop (active-low) | Shelly 1 Gen4 onboard |
 
 **Shelly Plus Add-on** pinnen (alleen actief wanneer Add-on aangesloten):
 
