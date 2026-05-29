@@ -46,7 +46,7 @@ Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter
 | GPIO | Functie | Status |
 |---|---|---|
 | **GPIO16** | 1-Wire bus voor DS18B20 | Altijd actief |
-| **GPIO12** | TTP223 capacitive touch button (EP4 Dimmer Switch) | Altijd actief |
+| **GPIO12** | TTP223 capacitive touch button (stuurt via EP1) | Altijd actief |
 | **GPIO17** | HLK-LD2410 mmWave occupancy sensor (EP3 Occupancy) | Altijd actief |
 
 Alle pinnen zijn aanpasbaar via `idf.py menuconfig` → **"Shelly 1 Gen4 Matter Switch configuration"**.
@@ -64,7 +64,7 @@ Status-LED-patronen (`status_led.c`):
 | **EP 2** | 0x0302 Temperature Sensor | TemperatureMeasurement | — | DS18B20 report |
 | **EP 3** | 0x0107 Occupancy Sensor | OccupancySensing | — | LD2410 binary |
 
-Beide switch-endpoints hebben de **Binding cluster** (server). De Binding-tabel wordt door HA Matter Server of `chip-tool` ingevuld met:
+EP1 heeft de **Binding cluster** (server). De Binding-tabel wordt door HA Matter Server of `chip-tool` ingevuld met:
 - Unicast-binding (1 specifiek bulb, identified by node-ID + endpoint)
 - Multicast-binding (1 group-ID — alle bulbs in die group reageren tegelijk)
 
@@ -87,7 +87,7 @@ Alle 3 inputs doen **precies hetzelfde** — ze sturen allemaal via EP1 (drukker
 | Loslaten | `LevelControl.Stop` |
 | 6× snel (< 2,5 s) | **Mode toggle** — in Matter-mode: reboot naar OTA-mode; in OTA-mode: factory reset (wipe nvs + chip_kvs) |
 
-> ℹ️ Alle 3 inputs lopen via dezelfde callback in `app_main.cpp` en gebruiken hetzelfde Matter endpoint (EP1). Eén binding in HA is voldoende voor alle inputs. EP4 (Dimmer Switch) wordt aangemaakt maar is momenteel niet apart aangestuurd vanuit de TTP223.
+> ℹ️ Alle 3 inputs lopen via dezelfde callback in `app_main.cpp` en gebruiken hetzelfde Matter endpoint (EP1). Eén binding in HA is voldoende voor alle inputs.
 
 ## Commissioning in Home Assistant Matter Server
 
@@ -95,7 +95,7 @@ Alle 3 inputs doen **precies hetzelfde** — ze sturen allemaal via EP1 (drukker
 2. Open Home Assistant → Settings → Devices & Services → Matter → "Add device".
 3. Voer setup-code in: **20202021** (default test passcode, configureerbaar in `sdkconfig.defaults`).
 4. HA Matter Server pairt via BLE, provisioneert Thread-credentials (vraag aan Google TV Streamer als TBR), het apparaat join het Thread-netwerk.
-5. Na ~30-60 s verschijnt het apparaat in HA met 4 entities: switch×2 (drukker, touch), temperature sensor, occupancy sensor.
+5. Na ~30-60 s verschijnt het apparaat in HA met 3 entities: switch (drukker), temperature sensor, occupancy sensor.
 
 ⚠️ **Het Thread-netwerk moet al bestaan** — Google TV Streamer is je TBR. Als HA Matter Server zelf nog niet aan datzelfde Thread-netwerk gekoppeld is, gebruik dan HA Connect ZBT-2 of een vergelijkbare dongle als secondary TBR (delen automatisch het Thread-credentialset via de Thread-credentials API).
 
@@ -118,12 +118,6 @@ chip-tool binding write binding \
     {"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":8}]' \
   $SWITCH_NODE $SWITCH_EP
 
-# Step 2: idem voor touch (EP4)
-SWITCH_EP=4
-chip-tool binding write binding \
-  '[{"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":6},
-    {"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":8}]' \
-  $SWITCH_NODE $SWITCH_EP
 ```
 
 `cluster:6` = OnOff, `cluster:8` = LevelControl.
@@ -207,7 +201,7 @@ Overriden bij compilatie: `idf.py build -DBENCH_MODE=1` (of pas `app_config.h` t
 
 ## Bekende limitaties / TODO
 
-- **Color Control** niet geïmplementeerd in v1 (gebruiker-keuze). Later toe te voegen: `cluster::color_control::create(ep, &cfg, CLUSTER_FLAG_CLIENT)` op EP1 en EP4 + extra commando-emit-helpers.
+- **Color Control** niet geïmplementeerd in v1 (gebruiker-keuze). Later toe te voegen: `cluster::color_control::create(ep, &cfg, CLUSTER_FLAG_CLIENT)` op EP1 + extra commando-emit-helpers.
 - **`chip-tool` binding-UI**: Home Assistant Matter integratie heeft binding-UI nog niet, zelf chip-tool commando's draaien is even nodig. Begin 2026 update verwacht.
 - **Matter OTA Provider**: requestor zit erin, maar er is geen lokale provider in HA standaard — voor automatische OTA's via Thread heb je een Matter OTA Provider nodig (komt in HA Matter Server roadmap).
 - **DCL (Distributed Compliance Ledger)**: deze firmware gebruikt test vendor ID 0xFFF1. Voor publicatie op Google/Apple Home moet een echte vendor ID aangevraagd worden via CSA membership.

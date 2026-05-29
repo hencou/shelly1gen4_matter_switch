@@ -55,7 +55,6 @@ extern "C" {
 #define EP_SWITCH_DRUKKER   1
 #define EP_TEMPERATURE      2
 #define EP_OCCUPANCY        3
-#define EP_SWITCH_TOUCH     4
 
 /* Logical input source identifiers.
  * Alle 3 inputs hebben uniform gedrag (zie on_button_event in app_main.cpp):
