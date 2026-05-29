@@ -173,6 +173,7 @@ shelly1gen4_matter_switch/
 │   ├── Kconfig.projbuild
 │   ├── app_config.h        # pins, timings, BENCH_MODE (productie=0, bench=1)
 │   ├── app_main.cpp        # C++ entrypoint, hergebruikt C-modules
+│   ├── CHIPProjectConfig.h # vendor/product-naam overrides (i.p.v. TEST_VENDOR/TEST_PRODUCT)
 │   ├── matter_device.cpp   # 3 endpoints + Binding cluster + bound-command emit
 │   ├── matter_device.h
 │   ├── button.c/.h         # hergebruikt uit Zigbee project
