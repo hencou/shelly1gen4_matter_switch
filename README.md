@@ -3,10 +3,12 @@
 **Custom Matter-over-Thread firmware** voor de **Shelly 1 Gen4** (ESP32-C6).
 
 1. **Matter OnOff Light Switch** (drukker GPIO10) — bind-client, kort drukken = toggle, lang = dimmen
-2. **Matter Dimmer Switch** (touch GPIO12, optioneel via Add-on) — bind-client, kort drukken = toggle, lang = dimmen
-3. **Matter Temperature Sensor** — DS18B20 op 1-Wire (centi-°C)
-4. **Matter Occupancy Sensor** — HLK-LD2410 binary
+2. **Matter Dimmer Switch** (touch GPIO12 via Add-on) — bind-client, kort drukken = toggle, lang = dimmen
+3. **Matter Temperature Sensor** — DS18B20 op 1-Wire GPIO16 (centi-°C)
+4. **Matter Occupancy Sensor** — HLK-LD2410 op GPIO17 (binary)
 5. Lokaal relais (GPIO5) mee-schakelen op de drukker-toggle (optioneel bedraad last)
+
+Alle 4 endpoints zijn altijd actief — geen compile-time keuze nodig. Universele firmware voor alle configuraties.
 
 Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter Server, Google TV Streamer, mag offline — direct Thread-mesh-multicast naar de gebonden bulbs.
 
@@ -22,7 +24,7 @@ Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter
 | Component | Status |
 |---|---|
 | Shelly 1 Gen4 (ESP32-C6, 8 MB flash) | Doel-hardware |
-| Shelly Plus Add-on | Voor DS18B20 + secundaire input (touch / radar / drukker) |
+| Shelly Plus Add-on | Voor DS18B20 (GPIO16) + TTP223 touch (GPIO12) + LD2410 radar (GPIO17) |
 | Thread Border Router | **Google TV Streamer 4K** (heb je al) |
 | Matter primary admin | **Home Assistant Matter Server** add-on |
 | Matter-Thread bulb | **IKEA KAJPLATS** (Thread-mode via setup-code) |
@@ -40,29 +42,15 @@ Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter
 | **GPIO15** | Status LED onboard (active-low) | Shelly 1 Gen4 onboard PCB-LED (canonical-validated) |
 | **GPIO4** | PCB-knop (active-low) | Shelly 1 Gen4 onboard |
 
-**Shelly Plus Add-on** pinnen (alleen actief wanneer Add-on aangesloten):
+**Shelly Plus Add-on** pinnen:
 
 | GPIO | Functie | Status |
 |---|---|---|
-| GPIO16 | 1-Wire bus voor DS18B20 | Bench-test default, hardware nog te valideren |
-| GPIO12 | Secundaire digitale input — TTP223 / LD2410 / drukker | Bench-test default, hardware nog te valideren |
-| GPIO17 | Analog input — niet gebruikt | — |
-
-> ⚠️ **De Add-on digital-input pin (GPIO12)** is een educated guess — de canonical-repo gebruikt de Add-on niet, dus er is geen externe validatie. Bevestig met multimeter voordat je hardware aansluit, of pas aan via menuconfig.
+| **GPIO16** | 1-Wire bus voor DS18B20 | Altijd actief |
+| **GPIO12** | TTP223 capacitive touch button (EP4 Dimmer Switch) | Altijd actief |
+| **GPIO17** | HLK-LD2410 mmWave occupancy sensor (EP3 Occupancy) | Altijd actief |
 
 Alle pinnen zijn aanpasbaar via `idf.py menuconfig` → **"Shelly 1 Gen4 Matter Switch configuration"**.
-
-### Secondary input (TTP223 óf LD2410)
-
-GPIO12 wordt **exclusief** door één van twee sensors gebruikt — bij compile-time gekozen via `SECONDARY_INPUT_TYPE`:
-
-| Keuze | Default | Endpoint dat actief is |
-|---|---|---|
-| `SECONDARY_INPUT_NONE` | **default** (bench, geen Add-on) | Geen secundaire endpoint; pin blijft floating |
-| `SECONDARY_INPUT_TTP223` | — | EP4 Dimmer Switch (touch → toggle/dim via binding) |
-| `SECONDARY_INPUT_LD2410` | — | EP3 Occupancy Sensor (binary aanwezigheid) |
-
-Wisselen: `idf.py menuconfig` → "Secondary input device" → kies. Daarna `idf.py build` + flash.
 
 Status-LED-patronen (`status_led.c`):
 - **Snelle knipper (5 Hz)** tijdens boot/initialisatie
@@ -83,7 +71,7 @@ Status-LED-patronen (`status_led.c`):
 | Many-to-many groups | ✅ | ✅ (Group multicast) |
 | Rollback-veilig OTA | ✅ WiFi STA + SoftAP | ✅ WiFi STA + SoftAP (zelfde flow) |
 
-De **C-modules** (`button.c`, `relay.c`, `sensors.c`, `ota.c`) zijn **identiek** aan het Zigbee-project. Alleen `matter_device.cpp` (C++) vervangt `zb_device.c`.
+De **C-modules** (`button.c`, `relay.c`, `sensors.c`, `ota.c`) zijn gebaseerd op het Zigbee-project. `matter_device.cpp` (C++) vervangt `zb_device.c`. TTP223 (GPIO12) en LD2410 (GPIO17) hebben elk een eigen pin en zijn altijd actief — geen compile-time keuze nodig.
 
 ## Matter device-structuur
 

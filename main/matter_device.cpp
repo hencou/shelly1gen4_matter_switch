@@ -371,18 +371,13 @@ extern "C" esp_err_t matter_start(void)
     s_ep_temp = endpoint::get_id(ep_temp);
     ESP_LOGI(TAG, "EP%u = Temperature Sensor", s_ep_temp);
 
-#if SECONDARY_INPUT_IS_LD2410
-    /* EP3 — Occupancy Sensor (alleen wanneer LD2410 gekozen is) */
+    /* EP3 — Occupancy Sensor (LD2410 op GPIO17) */
     occupancy_sensor::config_t o_cfg;
     endpoint_t *ep_occ = occupancy_sensor::create(node, &o_cfg, ENDPOINT_FLAG_NONE, NULL);
     s_ep_occ = endpoint::get_id(ep_occ);
     ESP_LOGI(TAG, "EP%u = Occupancy Sensor (LD2410)", s_ep_occ);
-#else
-    ESP_LOGI(TAG, "Occupancy endpoint overgeslagen (secondary input != LD2410)");
-#endif
 
-#if SECONDARY_INPUT_IS_TTP223
-    /* EP4 — Dimmer Switch + Binding (alleen wanneer TTP223 gekozen is) */
+    /* EP4 — Dimmer Switch + Binding (TTP223 op GPIO12) */
     dimmer_switch::config_t d_cfg;
     endpoint_t *ep_touch = dimmer_switch::create(node, &d_cfg, ENDPOINT_FLAG_NONE, NULL);
     {
@@ -391,9 +386,6 @@ extern "C" esp_err_t matter_start(void)
     }
     s_ep_touch = endpoint::get_id(ep_touch);
     ESP_LOGI(TAG, "EP%u = Dimmer Switch (TTP223 touch)", s_ep_touch);
-#else
-    ESP_LOGI(TAG, "Dimmer-Switch endpoint overgeslagen (secondary input != TTP223)");
-#endif
 
     /* OTA-cluster requestor (optioneel: voor Matter OTA via TBR — werkt naast onze WiFi-OTA) */
     esp_matter_ota_requestor_init();

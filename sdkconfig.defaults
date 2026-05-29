@@ -76,7 +76,6 @@ CONFIG_PIN_ONEWIRE=16
 # Status LED op onboard PCB-LED (active-low)
 CONFIG_PIN_STATUS_LED=15
 # STATUS_LED_ACTIVE_HIGH: default n (active-low) — geen extra regel nodig
-# Bench-test default: geen secundaire input bedraad (Add-on niet aangesloten).
-# Zet om naar CONFIG_SECONDARY_INPUT_TTP223=y of CONFIG_SECONDARY_INPUT_LD2410=y
-# zodra de Add-on hardware is aangesloten.
-CONFIG_SECONDARY_INPUT_NONE=y
+# Add-on inputs: TTP223 touch op GPIO12, LD2410 occupancy op GPIO17 — beide altijd actief
+CONFIG_PIN_TOUCH_INPUT=12
+CONFIG_PIN_LD2410_INPUT=17

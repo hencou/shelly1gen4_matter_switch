@@ -136,9 +136,6 @@ static void temp_task(void *arg)
 }
 
 /* ========================== Occupancy / LD2410 ========================== */
-/* Alleen actief wanneer SECONDARY_INPUT_IS_LD2410 — anders deelt TTP223 de pin. */
-
-#if SECONDARY_INPUT_IS_LD2410
 
 static QueueHandle_t    s_occ_q;
 static occupancy_cb_t   s_occ_cb;
@@ -154,13 +151,13 @@ static void IRAM_ATTR occ_isr(void *arg)
 static void occ_task(void *arg)
 {
     gpio_config_t cfg = {
-        .pin_bit_mask = (1ULL << PIN_SECONDARY_INPUT),
+        .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
         .mode = GPIO_MODE_INPUT,
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
         .intr_type = GPIO_INTR_ANYEDGE,
     };
     gpio_config(&cfg);
-    gpio_isr_handler_add(PIN_SECONDARY_INPUT, occ_isr, NULL);
+    gpio_isr_handler_add(PIN_LD2410_INPUT, occ_isr, NULL);
 
     int64_t last = 0;
     int last_level = -1;
@@ -169,7 +166,7 @@ static void occ_task(void *arg)
         if (xQueueReceive(s_occ_q, &t, portMAX_DELAY) != pdTRUE) continue;
         if ((t - last) / 1000 < OCC_DEBOUNCE_MS) continue;
         last = t;
-        int level = gpio_get_level(PIN_SECONDARY_INPUT);
+        int level = gpio_get_level(PIN_LD2410_INPUT);
         if (level != last_level) {
             last_level = level;
             if (s_occ_cb) s_occ_cb(level == 1);
@@ -178,14 +175,11 @@ static void occ_task(void *arg)
     }
 }
 
-#endif /* SECONDARY_INPUT_IS_LD2410 */
-
 /* ========================== init ========================== */
 
 void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
 {
     s_temp_cb = temp_cb;
-    (void)occ_cb;
 
 #if BENCH_MODE
     ESP_LOGW(TAG, "BENCH_MODE: DS18B20 temp_task overgeslagen (geen sensor op 1-Wire)");
@@ -193,11 +187,7 @@ void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
     xTaskCreate(temp_task, "temp_task", 3072, NULL, 5, NULL);
 #endif
 
-#if SECONDARY_INPUT_IS_LD2410
     s_occ_cb  = occ_cb;
     s_occ_q = xQueueCreate(8, sizeof(int64_t));
     xTaskCreate(occ_task,  "occ_task",  2560, NULL, 6, NULL);
-#else
-    ESP_LOGI(TAG, "Occupancy task niet gestart (secondary input != LD2410)");
-#endif
 }
