@@ -1,0 +1,67 @@
+menu "Shelly 1 Gen4 Matter Switch configuration"
+
+    config PIN_RELAY
+        int "GPIO for relay output"
+        default 5
+
+    config PIN_SWITCH_INPUT
+        int "GPIO for System 55 drukker input"
+        default 10
+
+    config PIN_ONEWIRE
+        int "GPIO for 1-Wire bus (DS18B20) — Shelly Plus Add-on data pin"
+        default 16
+
+    choice SECONDARY_INPUT_TYPE
+        prompt "Secondary input device (Add-on digital input)"
+        default SECONDARY_INPUT_NONE
+        help
+            Selecteer welk apparaat op de gedeelde Add-on digital-input pin
+            (PIN_SECONDARY_INPUT) is aangesloten. Slechts één van TTP223 of
+            LD2410 kan tegelijk gebruikt worden — ze delen dezelfde GPIO.
+            Default is NONE voor bench testing zonder Add-on; zet op TTP223
+            of LD2410 zodra de juiste hardware is aangesloten.
+        config SECONDARY_INPUT_NONE
+            bool "None — geen secundaire input bedraad"
+        config SECONDARY_INPUT_TTP223
+            bool "TTP223 capacitive touch button (Matter Dimmer Switch / Zigbee Touch EP)"
+        config SECONDARY_INPUT_LD2410
+            bool "HLK-LD2410 mmWave occupancy sensor (Matter/Zigbee Occupancy EP)"
+    endchoice
+
+    config PIN_SECONDARY_INPUT
+        int "GPIO for secondary input (TTP223 of LD2410) — Shelly Plus Add-on digital input"
+        default 12
+        depends on !SECONDARY_INPUT_NONE
+
+    config PIN_STATUS_LED
+        int "GPIO for status LED (-1 = disabled)"
+        default 15
+        help
+            Default is GPIO15 — de onboard PCB-LED van de Shelly 1 Gen4
+            (canonical-validated). Voor de Shelly Plus Add-on LED-pin kan
+            een ander nummer gekozen worden zodra die mapping bekend is.
+            Zet op -1 om de status-LED helemaal uit te zetten.
+
+    config STATUS_LED_ACTIVE_HIGH
+        bool "Status LED is active-high (LED aan bij GPIO=1)"
+        default n
+        help
+            De onboard Shelly 1 Gen4 status-LED op GPIO15 is active-low
+            (canonical-validated): GPIO=0 → LED aan. Voor andere boards
+            (b.v. Add-on LED) kan dit n of y zijn afhankelijk van de
+            externe schakeling.
+
+    config LONG_PRESS_MS
+        int "Long-press detection threshold (ms)"
+        default 500
+
+    config OCC_DEBOUNCE_MS
+        int "Occupancy debounce window (ms)"
+        default 200
+
+    config TEMP_REPORT_INTERVAL_S
+        int "Temperature report interval (s)"
+        default 60
+
+endmenu

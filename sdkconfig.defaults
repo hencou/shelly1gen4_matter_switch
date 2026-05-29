@@ -1,0 +1,82 @@
+# Target = ESP32-C6 (Shelly 1 Gen4)
+CONFIG_IDF_TARGET="esp32c6"
+
+# Shelly 1 Gen4 heeft 8 MB flash, default in ESP-IDF is 2 MB
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# ---------- Matter + Thread ----------
+CONFIG_ENABLE_CHIPOBLE=y
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_EXT_ADV=n
+CONFIG_BT_NIMBLE_HCI_EVT_BUF_SIZE=70
+CONFIG_USE_MINIMAL_MDNS=n
+CONFIG_ENABLE_EXTENDED_DISCOVERY=y
+# Master toggle: Thread-only Matter device. Excludes alle WiFi-Matter-paden
+# (NetworkCommissioningDriver_WiFi, ConnectivityManagerImpl_WiFi, etc.)
+CONFIG_ENABLE_MATTER_OVER_THREAD=y
+CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING=y
+CONFIG_ENABLE_WIFI_STATION=n
+CONFIG_ENABLE_WIFI_AP=n
+CONFIG_OPENTHREAD_ENABLED=y
+CONFIG_OPENTHREAD_FTD=y
+CONFIG_OPENTHREAD_DNS_CLIENT=y
+CONFIG_OPENTHREAD_SRP_CLIENT=y
+# Logging: dynamic OFF, fixed at NOTE level (matches canonical Thread firmware)
+CONFIG_OPENTHREAD_LOG_LEVEL_DYNAMIC=n
+CONFIG_OPENTHREAD_LOG_LEVEL_NOTE=y
+CONFIG_OPENTHREAD_CLI=n
+# LwIP config for OpenThread (canonical defaults)
+CONFIG_LWIP_IPV6_AUTOCONFIG=n
+CONFIG_LWIP_IPV6_NUM_ADDRESSES=8
+CONFIG_LWIP_MULTICAST_PING=y
+CONFIG_LIBSODIUM_USE_MBEDTLS_SHA=y
+CONFIG_MBEDTLS_HKDF_C=y
+
+# Matter logs
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_CHIP_LOG_DEFAULT_LEVEL_INFO=y
+
+# ---------- Partities ----------
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ---------- App-rollback / OTA ----------
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
+CONFIG_ESP_TLS_INSECURE=y
+CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+
+# ---------- Stack/heap tuning ----------
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120
+
+# ---------- Matter device basics (overschrijfbaar via chip-factory) ----------
+CONFIG_DEVICE_VENDOR_ID=0xFFF1
+CONFIG_DEVICE_PRODUCT_ID=0x8001
+CONFIG_DEVICE_TYPE_ON_OFF_LIGHT_SWITCH=y
+
+# Voor development setup-code = 20202021 (test vendor passcode)
+CONFIG_DEFAULT_SETUP_PASSCODE=20202021
+CONFIG_DEFAULT_SETUP_DISCRIMINATOR=3840
+
+# Storage backend voor CHIP key-value store
+CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL="chip_factory"
+CONFIG_CHIP_KVS_NAMESPACE_PARTITION_LABEL="chip_kvs"
+
+# ---------- Shelly 1 Gen4 pinout (canonical-validated, zie main/Kconfig.projbuild) ----------
+# Drukker (System 55 / wall switch) op de SW-terminal — externe pull op PCB
+CONFIG_PIN_SWITCH_INPUT=10
+# Relay output (mains-switching, active-high)
+CONFIG_PIN_RELAY=5
+# 1-Wire DS18B20 op Shelly Plus Add-on data pin
+CONFIG_PIN_ONEWIRE=16
+# Status LED op onboard PCB-LED (active-low)
+CONFIG_PIN_STATUS_LED=15
+# STATUS_LED_ACTIVE_HIGH: default n (active-low) — geen extra regel nodig
+# Bench-test default: geen secundaire input bedraad (Add-on niet aangesloten).
+# Zet om naar CONFIG_SECONDARY_INPUT_TTP223=y of CONFIG_SECONDARY_INPUT_LD2410=y
+# zodra de Add-on hardware is aangesloten.
+CONFIG_SECONDARY_INPUT_NONE=y
