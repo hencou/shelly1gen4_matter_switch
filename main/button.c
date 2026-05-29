@@ -18,6 +18,13 @@
  *
  * Driver gebruikt ISR-to-queue met een eigen FreeRTOS-task zodat
  * Matter-stack-calls in task-context gebeuren.
+ *
+ * NOOT over System 55 drukker (optocoupler, active-high):
+ *   De drukker stuurt een puls: pin gaat HOOG bij indrukken, LAAG bij loslaten.
+ *   ANYEDGE vangt beide flanken. De opgaande flank (indrukken) start de
+ *   long-press timer; de neergaande flank (loslaten) beslist short vs long.
+ *   Zo werkt dimmen correct: lang ingedrukt houden -> LONG_PRESS_START tijdens
+ *   de puls, loslaten -> LONG_PRESS_STOP.
  */
 
 #include "button.h"
@@ -86,21 +93,31 @@ static void handle_edge(btn_isr_msg_t *m)
     bool pressed_now = level_is_pressed(s, m->level);
 
     if (pressed_now && !s->pressed) {
-        /* press down */
-        s->pressed              = true;
-        s->press_start_us       = m->t_us;
-        s->long_fired           = false;
+        /* --- opgaande flank: knop ingedrukt --- */
+        s->pressed        = true;
+        s->press_start_us = m->t_us;
+        s->long_fired     = false;
+
     } else if (!pressed_now && s->pressed) {
-        /* release */
+        /* --- neergaande flank: knop losgelaten --- */
         int64_t dur_ms = (m->t_us - s->press_start_us) / 1000;
         s->pressed = false;
 
         if (s->long_fired) {
-            /* long press released */
+            /* lang ingedrukt gehouden -> stop dimmen */
             if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_STOP);
-        } else if (dur_ms < LONG_PRESS_MS && dur_ms > 20 /* debounce */) {
-            /* short press — log timestamp in ring buffer, daarna kijk hoeveel
-             * clicks er binnen het MODE_TOGGLE-window vallen. */
+
+        } else if (dur_ms >= LONG_PRESS_MS) {
+            /* Rand-geval: long_fired nog net niet gezet door check_long_press()
+             * maar duur is wel >= drempel. Fire START + STOP samen. */
+            s->long_fired = true;
+            if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_START);
+            if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_STOP);
+
+        } else if (dur_ms > 20 /* debounce */) {
+            /* kort ingedrukt -> short press
+             * Log timestamp in ring buffer en kijk hoeveel clicks er
+             * binnen het MODE_TOGGLE-window vallen. */
             s->click_hist[s->click_idx] = m->t_us;
             s->click_idx = (s->click_idx + 1) % CLICK_HISTORY;
 
@@ -113,14 +130,14 @@ static void handle_edge(btn_isr_msg_t *m)
             }
 
             if (cnt >= MODE_TOGGLE_CLICKS) {
-                /* 6x gehaald: trigger MODE_TOGGLE en wis history (anders
-                 * fired de 7e klik direct weer). */
+                /* 6x gehaald: wis history (anders fired 7e klik direct weer) */
                 memset(s->click_hist, 0, sizeof(s->click_hist));
                 if (s_cb) s_cb(m->id, BTN_EVT_MODE_TOGGLE);
             } else {
                 if (s_cb) s_cb(m->id, BTN_EVT_SHORT_PRESS);
             }
         }
+        /* dur_ms <= 20: debounce ruis, stil negeren */
     }
 }
 
@@ -128,11 +145,10 @@ static void check_long_press(int64_t now_us)
 {
     for (int i = 0; i < INPUT_COUNT; i++) {
         btn_state_t *s = &s_state[i];
-        if (!s->enabled || !s->pressed) continue;
-        int64_t dur_ms = (now_us - s->press_start_us) / 1000;
+        if (!s->enabled || !s->pressed || s->long_fired) continue;
 
-        /* LONG_PRESS_START fires at LONG_PRESS_MS */
-        if (!s->long_fired && dur_ms >= LONG_PRESS_MS) {
+        int64_t dur_ms = (now_us - s->press_start_us) / 1000;
+        if (dur_ms >= LONG_PRESS_MS) {
             s->long_fired = true;
             if (s_cb) s_cb((input_id_t)i, BTN_EVT_LONG_PRESS_START);
         }
@@ -143,7 +159,7 @@ static void btn_task(void *arg)
 {
     btn_isr_msg_t msg;
     for (;;) {
-        /* Wake up at least every 50 ms to service long-press / FR timing */
+        /* Wake up elke 50 ms voor long-press timing */
         if (xQueueReceive(s_evt_q, &msg, pdMS_TO_TICKS(50)) == pdTRUE) {
             handle_edge(&msg);
         }
@@ -157,23 +173,14 @@ void button_driver_init(button_cb_t cb)
 
     /* ---------- per-input configuratie ---------- */
 
-    /* INPUT_DRUKKER op GPIO10 (System 55).
-     * Productie: 230V via optocoupler -> active-high, geen interne pulls.
-     * BENCH_MODE: pin floating -> interne pull-up actief, active-low
-     * (knop = pin <-> GND kortsluiten op de bench). */
     s_state[INPUT_DRUKKER].gpio       = PIN_SWITCH_INPUT;
     s_state[INPUT_DRUKKER].enabled    = true;
     s_state[INPUT_DRUKKER].active_low = (BENCH_MODE != 0);
 
-    /* INPUT_TOUCH op TTP223 (Add-on digital in). Active-high momentary,
-     * interne pulldown om in rust laag te blijven. */
     s_state[INPUT_TOUCH].gpio       = PIN_TOUCH_INPUT;
     s_state[INPUT_TOUCH].enabled    = true;
     s_state[INPUT_TOUCH].active_low = false;
 
-    /* INPUT_DEVICE_BTN op GPIO4 (onboard pair-knop). Altijd active-low
-     * met interne pull-up; gedraagt zich verder identiek aan de andere
-     * 2 inputs (6x klik = mode toggle, geen aparte FR-gesture). */
     s_state[INPUT_DEVICE_BTN].gpio       = 4;
     s_state[INPUT_DEVICE_BTN].enabled    = true;
     s_state[INPUT_DEVICE_BTN].active_low = true;
@@ -206,7 +213,6 @@ void button_driver_init(button_cb_t cb)
     };
     gpio_config(&touch_cfg);
 
-    /* Device Button GPIO4: active-low, interne pull-up. */
     gpio_config_t devbtn_cfg = {
         .pin_bit_mask = (1ULL << s_state[INPUT_DEVICE_BTN].gpio),
         .mode         = GPIO_MODE_INPUT,
@@ -224,10 +230,14 @@ void button_driver_init(button_cb_t cb)
     esp_err_t isr_svc_err = gpio_install_isr_service(0);
     ESP_LOGI(TAG, "BD-STEP-4: gpio_install_isr_service -> %d (0=OK)", isr_svc_err);
 
-    gpio_isr_handler_add(PIN_SWITCH_INPUT, btn_isr, (void *)(uintptr_t)INPUT_DRUKKER);
-    ESP_LOGI(TAG, "BD-STEP-5a: isr_handler_add drukker (GPIO%d) done", PIN_SWITCH_INPUT);
-    gpio_isr_handler_add(PIN_TOUCH_INPUT, btn_isr, (void *)(uintptr_t)INPUT_TOUCH);
-    ESP_LOGI(TAG, "BD-STEP-5b: isr_handler_add touch (GPIO%d) done", PIN_TOUCH_INPUT);
+    gpio_isr_handler_add(PIN_SWITCH_INPUT, btn_isr,
+                         (void *)(uintptr_t)INPUT_DRUKKER);
+    ESP_LOGI(TAG, "BD-STEP-5a: isr_handler_add drukker (GPIO%d) done",
+             PIN_SWITCH_INPUT);
+    gpio_isr_handler_add(PIN_TOUCH_INPUT, btn_isr,
+                         (void *)(uintptr_t)INPUT_TOUCH);
+    ESP_LOGI(TAG, "BD-STEP-5b: isr_handler_add touch (GPIO%d) done",
+             PIN_TOUCH_INPUT);
     gpio_isr_handler_add(s_state[INPUT_DEVICE_BTN].gpio,
                          btn_isr, (void *)(uintptr_t)INPUT_DEVICE_BTN);
     ESP_LOGI(TAG, "BD-STEP-5c: isr_handler_add device_btn (GPIO%d) done",
