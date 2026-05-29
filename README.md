@@ -2,13 +2,12 @@
 
 **Custom Matter-over-Thread firmware** voor de **Shelly 1 Gen4** (ESP32-C6).
 
-1. **Matter OnOff Light Switch** (drukker GPIO10) — bind-client, kort drukken = toggle, lang = dimmen
-2. **Matter Dimmer Switch** (touch GPIO12 via Add-on) — bind-client, kort drukken = toggle, lang = dimmen
-3. **Matter Temperature Sensor** — DS18B20 op 1-Wire GPIO16 (centi-°C)
-4. **Matter Occupancy Sensor** — HLK-LD2410 op GPIO17 (binary)
-5. Lokaal relais (GPIO5) mee-schakelen op de drukker-toggle (optioneel bedraad last)
+1. **Matter OnOff/Dimmer Light Switch** (drukker GPIO10) — bind-client, kort drukken = toggle, lang = dimmen
+2. **Matter Temperature Sensor** — DS18B20 op 1-Wire GPIO16 (centi-°C)
+3. **Matter Occupancy Sensor** — HLK-LD2410 op GPIO17 (binary)
+4. Lokaal relais (GPIO5) mee-schakelen op de drukker-toggle (optioneel bedraad last)
 
-Alle 4 endpoints zijn altijd actief — geen compile-time keuze nodig. Universele firmware voor alle configuraties.
+Alle 3 endpoints zijn altijd actief — geen compile-time keuze nodig. Universele firmware voor alle configuraties.
 
 Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter Server, Google TV Streamer, mag offline — direct Thread-mesh-multicast naar de gebonden bulbs.
 
@@ -33,14 +32,14 @@ Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter
 
 ## Pin-mapping
 
-**Onboard Shelly 1 Gen4** pinnen zijn canonical-validated tegen [automatous-io/shelly-1-gen4-matter-thread](https://github.com/automatous-io/shelly-1-gen4-matter-thread):
+**Onboard Shelly 1 Gen4** pinnen:
 
 | GPIO | Functie | Bron |
 |---|---|---|
-| **GPIO5** | Relais-uitgang (active-high) | Shelly 1 Gen4 onboard (canonical-validated) |
-| **GPIO10** | Drukker-input / SW-terminal | Shelly 1 Gen4 onboard — **externe pull op PCB, geen interne pull** |
-| **GPIO15** | Status LED onboard (active-low) | Shelly 1 Gen4 onboard PCB-LED (canonical-validated) |
 | **GPIO4** | PCB-knop (active-low) | Shelly 1 Gen4 onboard |
+| **GPIO5** | Relais-uitgang (active-high) | Shelly 1 Gen4 onboard |
+| **GPIO10** | Drukker-input / SW-terminal | Shelly 1 Gen4 onboard — **externe pull op PCB, geen interne pull** |
+| **GPIO15** | Status LED onboard (active-low) | Shelly 1 Gen4 onboard PCB-LED  |
 
 **Shelly Plus Add-on** pinnen:
 
@@ -57,22 +56,6 @@ Status-LED-patronen (`status_led.c`):
 - **Langzame knipper (1 Hz)** tijdens commissioning (BLE-pairing window)
 - **Korte flits** bij elke short-press
 
-## Vergelijk met `shelly1gen4_zigbee_switch`
-
-| Aspect | Zigbee firmware | Matter firmware |
-|---|---|---|
-| Radio protocol | Zigbee 3.0 (IEEE 802.15.4) | Matter-over-Thread (IEEE 802.15.4) |
-| Bind-mechanisme | Zigbee Find&Bind + Groups | Matter Binding cluster + Group multicast |
-| Stack-grootte (binary) | ~1.2 MB | ~1.8 MB |
-| Build-tijd (eerste keer) | ~3 min | ~20-30 min (connectedhomeip compileren) |
-| Commissioning | open netwerk + permit_join | BLE pairing met setup-code (20202021 default) |
-| Binding setup UI | Z2M / ZHA in HA | chip-tool commandline (HA Matter UI volgt) |
-| Standalone na binding | ✅ Zigbee mesh | ✅ Thread mesh |
-| Many-to-many groups | ✅ | ✅ (Group multicast) |
-| Rollback-veilig OTA | ✅ WiFi STA + SoftAP | ✅ WiFi STA + SoftAP (zelfde flow) |
-
-De **C-modules** (`button.c`, `relay.c`, `sensors.c`, `ota.c`) zijn gebaseerd op het Zigbee-project. `matter_device.cpp` (C++) vervangt `zb_device.c`. TTP223 (GPIO12) en LD2410 (GPIO17) hebben elk een eigen pin en zijn altijd actief — geen compile-time keuze nodig.
-
 ## Matter device-structuur
 
 | Endpoint | Device type | Server clusters | Client clusters | Doel |
@@ -80,7 +63,6 @@ De **C-modules** (`button.c`, `relay.c`, `sensors.c`, `ota.c`) zijn gebaseerd op
 | **EP 1** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff, LevelControl | Drukker → bind → lamp |
 | **EP 2** | 0x0302 Temperature Sensor | TemperatureMeasurement | — | DS18B20 report |
 | **EP 3** | 0x0107 Occupancy Sensor | OccupancySensing | — | LD2410 binary |
-| **EP 4** | 0x0104 Dimmer Switch | Descriptor, Binding | OnOff, LevelControl | Touch → bind → lamp |
 
 Beide switch-endpoints hebben de **Binding cluster** (server). De Binding-tabel wordt door HA Matter Server of `chip-tool` ingevuld met:
 - Unicast-binding (1 specifiek bulb, identified by node-ID + endpoint)
@@ -127,7 +109,7 @@ Op je laptop (chip-tool wordt meegeleverd door esp-matter, of bouw eigen):
 # Bulb (KAJPLATS) node-ID:        bv. 0x00112233AABBCCDD
 SWITCH_NODE=0x0123456789ABCDEF
 BULB_NODE=0x00112233AABBCCDD
-SWITCH_EP=1   # drukker = EP1, touch = EP4
+SWITCH_EP=1   # drukker = EP1
 BULB_EP=1     # KAJPLATS light = EP1
 
 # Step 1: bind drukker (EP1) aan de bulb
