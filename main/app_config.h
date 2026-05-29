@@ -10,19 +10,20 @@ extern "C" {
 #define PIN_ONEWIRE         CONFIG_PIN_ONEWIRE         /* Shelly Add-on data */
 
 /* Bench-mode: tijdens 3V3-USB-UART-testen (zonder 230V op de drukker en
- * zonder DS18B20 op 1-Wire) hangen GPIO10 en de 1-Wire pin floating.
- * GPIO10-ANYEDGE → ISR-storm; 1-Wire bus zonder pull-up → tight error-loop.
+ * zonder DS18B20/LD2410 op de Add-on) hangen GPIO10, GPIO16 en GPIO17 floating.
+ * GPIO10-ANYEDGE → ISR-storm; GPIO16/17 zijn ook de UART0 TX/RX pins op de
+ * ESP32-C6 — als sensors.c ze herconfigureert sterft de serial output.
  * BENCH_MODE=1:
  *   - GPIO10 krijgt interne pull-up (rust-toestand high = released)
- *   - sensors_init() slaat 1-Wire temp-task over
+ *   - sensors_init() slaat temp_task en occ_task over (GPIO16/17 = UART0)
  * BENCH_MODE=0 (productie): originele paden, externe pull op GPIO10
  * gedreven door 230V-optocoupler is dan correct.
  *
- * NB: in productie (230V-optocoupler actief op GPIO10) MOET dit 0 zijn!
- * Anders klopt de polariteit niet en detecteert de drukker geen pulsen.
+ * Build: idf.py build -DBENCH_MODE=1  (of pas deze default aan)
+ * NB: in productie (230V + Add-on) MOET dit 0 zijn!
  */
 #ifndef BENCH_MODE
-#define BENCH_MODE 0
+#define BENCH_MODE 1
 #endif
 
 /* Add-on inputs — TTP223 en LD2410 hebben elk een eigen GPIO, altijd actief. */

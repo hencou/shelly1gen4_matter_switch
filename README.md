@@ -173,7 +173,7 @@ shelly1gen4_matter_switch/
 │   ├── Kconfig.projbuild
 │   ├── app_config.h        # pins, timings, BENCH_MODE (productie=0, bench=1)
 │   ├── app_main.cpp        # C++ entrypoint, hergebruikt C-modules
-│   ├── matter_device.cpp   # 4 endpoints + Binding cluster + bound-command emit
+│   ├── matter_device.cpp   # 3 endpoints + Binding cluster + bound-command emit
 │   ├── matter_device.h
 │   ├── button.c/.h         # hergebruikt uit Zigbee project
 │   ├── relay.c/.h          # idem
@@ -188,16 +188,20 @@ shelly1gen4_matter_switch/
 
 ## BENCH_MODE — ontwikkeling vs. productie
 
-`BENCH_MODE` in `app_config.h` bepaalt de GPIO10-polariteit en 1-Wire-initialisatie:
+`BENCH_MODE` in `app_config.h` bepaalt de GPIO10-polariteit en sensor-initialisatie.
 
-| BENCH_MODE | GPIO10 (drukker) | 1-Wire (DS18B20) | Wanneer |
+Op de ESP32-C6 zijn **GPIO16 (U0TXD) en GPIO17 (U0RXD) de standaard UART0-pins** — dit is je seriële verbinding via PuTTY / minicom. In productie worden deze pins hergebruikt voor DS18B20 (1-Wire) resp. LD2410 (occupancy). Zodra `sensors_init()` ze herconfigureert, stopt de UART-output. In BENCH_MODE worden de sensor-tasks overgeslagen zodat serial debugging beschikbaar blijft.
+
+| BENCH_MODE | GPIO10 (drukker) | Sensor-tasks (GPIO16/17) | Wanneer |
 |---|---|---|---|
-| **0** (default) | Active-high — 230V optocoupler drijft pin | Normaal gestart | **Productie** (Shelly op 230V) |
-| **1** | Active-low + interne pull-up | Overgeslagen | **Bench** (USB-UART zonder 230V) |
+| **0** | Active-high — 230V optocoupler drijft pin | Gestart (temp + occ) | **Productie** (Shelly op 230V + Add-on) |
+| **1** (default) | Active-low + interne pull-up | Overgeslagen (UART0 blijft actief) | **Bench** (USB-UART via J6, zonder 230V/Add-on) |
 
-> ⚠️ Met `BENCH_MODE=1` in productie detecteert GPIO10 geen drukker-pulsen (verkeerde polariteit). Zorg dat `BENCH_MODE=0` staat voor productie-firmware.
+> ⚠️ Met `BENCH_MODE=1` in productie: GPIO10 detecteert geen drukker-pulsen (verkeerde polariteit) en sensor-data wordt niet gerapporteerd. Zet `BENCH_MODE=0` voor productie-firmware.
 
-Overriden bij compilatie: `idf.py build -DBENCH_MODE=1` (of pas `app_config.h` tijdelijk aan).
+> ℹ️ De Shelly Plus Add-on en J6 (UART debug header) delen GPIO16/17 en kunnen niet tegelijk worden gebruikt.
+
+Overriden bij compilatie: `idf.py build -DBENCH_MODE=0` (of pas `app_config.h` aan).
 
 ## Bekende limitaties / TODO
 
