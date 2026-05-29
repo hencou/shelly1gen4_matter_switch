@@ -111,8 +111,7 @@ Identiek aan het Zigbee-project:
 | Kort drukken (< 500 ms) | Matter `OnOff.Toggle` naar alle binding-entries + lokaal relais (alleen EP1) |
 | Lang drukken (> 500 ms) | `LevelControl.Move` (up/down, alternerend) |
 | Loslaten | `LevelControl.Stop` |
-| 6× snel (< 2,5 s) | Matter factory reset (wist fabric + reboot) |
-| 10× snel (< 5 s) | WiFi-OTA-mode (zie OTA-sectie) |
+| 6× snel (< 2,5 s) | **Mode toggle** — in Matter-mode: reboot naar OTA-mode; in OTA-mode: factory reset (wipe nvs + chip_kvs) |
 
 ## Commissioning in Home Assistant Matter Server
 
@@ -181,7 +180,7 @@ Eenmaal ingesteld: drukker → multicast `OnOff.Toggle` op group 0x0001 → alle
 
 ## OTA — WiFi-update zonder kabel
 
-Identiek aan het Zigbee-project: WiFi staat normaal **uit**. Trigger via **10× snelle clicks** op de drukker → reboot in OTA-mode → directe STA-fetch (met opgeslagen creds) of SoftAP `shelly-ota-XXXXXX` voor eerste provisioning.
+WiFi staat normaal **uit**. Trigger via **6× snelle clicks** (MODE_TOGGLE) op de drukker → reboot in OTA-mode → directe STA-fetch (met opgeslagen creds) of SoftAP `shelly-ota-XXXXXX` voor eerste provisioning. Nogmaals 6× klikken in OTA-mode → factory reset.
 
 Naast deze WiFi-OTA is er **ook Matter OTA** mogelijk: `esp_matter_ota_requestor_init()` wordt aangeroepen in `matter_start()`, dus zodra HA Matter Server of Google TV Streamer een OTA-image aanbiedt via het Matter OTA Provider cluster (1.3+ standaard), kan dat ook via Thread. Voor de meeste gebruikers blijft WiFi-OTA praktischer (sneller, lokaal HTTP-bestand).
 
@@ -202,7 +201,7 @@ shelly1gen4_matter_switch/
 ├── main/
 │   ├── CMakeLists.txt
 │   ├── Kconfig.projbuild
-│   ├── app_config.h        # pins, timings (identiek aan Zigbee project)
+│   ├── app_config.h        # pins, timings, BENCH_MODE (productie=0, bench=1)
 │   ├── app_main.cpp        # C++ entrypoint, hergebruikt C-modules
 │   ├── matter_device.cpp   # 4 endpoints + Binding cluster + bound-command emit
 │   ├── matter_device.h
@@ -216,6 +215,19 @@ shelly1gen4_matter_switch/
 ├── INSTALL.md
 └── INSTALL_VSCODE_WINDOWS.md
 ```
+
+## BENCH_MODE — ontwikkeling vs. productie
+
+`BENCH_MODE` in `app_config.h` bepaalt de GPIO10-polariteit en 1-Wire-initialisatie:
+
+| BENCH_MODE | GPIO10 (drukker) | 1-Wire (DS18B20) | Wanneer |
+|---|---|---|---|
+| **0** (default) | Active-high — 230V optocoupler drijft pin | Normaal gestart | **Productie** (Shelly op 230V) |
+| **1** | Active-low + interne pull-up | Overgeslagen | **Bench** (USB-UART zonder 230V) |
+
+> ⚠️ Met `BENCH_MODE=1` in productie detecteert GPIO10 geen drukker-pulsen (verkeerde polariteit). Zorg dat `BENCH_MODE=0` staat voor productie-firmware.
+
+Overriden bij compilatie: `idf.py build -DBENCH_MODE=1` (of pas `app_config.h` tijdelijk aan).
 
 ## Bekende limitaties / TODO
 
