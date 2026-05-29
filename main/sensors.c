@@ -180,14 +180,18 @@ static void occ_task(void *arg)
 void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
 {
     s_temp_cb = temp_cb;
+    s_occ_cb  = occ_cb;
 
 #if BENCH_MODE
-    ESP_LOGW(TAG, "BENCH_MODE: DS18B20 temp_task overgeslagen (geen sensor op 1-Wire)");
+    /* BENCH_MODE: skip sensor-tasks zodat GPIO16 (U0TXD) en GPIO17 (U0RXD)
+     * beschikbaar blijven voor UART0 serial debugging via PuTTY / minicom.
+     * Op de ESP32-C6 zijn GPIO16/17 de standaard UART0-pins; temp_task en
+     * occ_task herconfigureren ze als 1-Wire resp. GPIO-input, wat de
+     * seriële output doodt. */
+    ESP_LOGW(TAG, "BENCH_MODE: sensor-tasks overgeslagen (GPIO16/17 = UART0)");
 #else
     xTaskCreate(temp_task, "temp_task", 3072, NULL, 5, NULL);
-#endif
-
-    s_occ_cb  = occ_cb;
     s_occ_q = xQueueCreate(8, sizeof(int64_t));
     xTaskCreate(occ_task,  "occ_task",  2560, NULL, 6, NULL);
+#endif
 }
