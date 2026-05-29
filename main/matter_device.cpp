@@ -32,7 +32,6 @@ extern "C" {
 #include <app/server/Server.h>
 #include <app/util/binding-table.h>
 #include <app/clusters/bindings/BindingManager.h>
-#include <app/CASESessionManager.h>
 #include <app-common/zap-generated/cluster-objects.h>
 #include <controller/InvokeInteraction.h>
 #include <credentials/FabricTable.h>
@@ -198,8 +197,6 @@ static void SwitchWorkerFunction(intptr_t context)
     /* Tel binding-entries voor dit endpoint+cluster + dump ELKE entry voor diagnose. */
     uint32_t matching = 0;
     uint32_t total    = 0;
-    bool     command_sent = false;
-
     for (const auto & e : chip::BindingTable::GetInstance()) {
         total++;
         ESP_LOGI(TAG, "BindingTable[%lu]: type=%u local=%u remote=%u nodeId=0x%llx group=%u cluster=0x%lx fabric=%u",
@@ -209,57 +206,27 @@ static void SwitchWorkerFunction(intptr_t context)
                  (unsigned) e.groupId,
                  (unsigned long) e.clusterId.value_or(0),
                  (unsigned) e.fabricIndex);
-        if (e.local != d->localEndpointId) continue;
-        if (e.clusterId.HasValue() && e.clusterId.Value() != d->clusterId) continue;
-        matching++;
-
-        /* --- Direct send: bypass NotifyBoundClusterChanged callback dispatch --- */
-        if (e.type == MATTER_UNICAST_BINDING) {
-            chip::ScopedNodeId peer(e.nodeId, e.fabricIndex);
-            auto * caseMgr = chip::Server::GetInstance().GetCASESessionManager();
-            chip::OperationalDeviceProxy * proxy = (caseMgr != nullptr)
-                ? caseMgr->FindExistingSession(peer) : nullptr;
-            if (proxy) {
-                ESP_LOGI(TAG, "SwitchWorker: direct send to node 0x%llx ep=%u cluster=0x%lx cmd=0x%lx",
-                         (unsigned long long) e.nodeId, e.remote,
-                         (unsigned long) d->clusterId, (unsigned long) d->commandId);
-                if (d->clusterId == OnOff::Id)
-                    send_onoff_unicast(d, e, proxy);
-                else if (d->clusterId == LevelControl::Id)
-                    send_level_unicast(d, e, proxy);
-                command_sent = true;
-            } else {
-                ESP_LOGW(TAG, "SwitchWorker: no session to node 0x%llx, will use NotifyBoundClusterChanged",
-                         (unsigned long long) e.nodeId);
-            }
-        } else if (e.type == MATTER_MULTICAST_BINDING) {
-            ESP_LOGI(TAG, "SwitchWorker: multicast send group=%u cluster=0x%lx cmd=0x%lx",
-                     e.groupId, (unsigned long) d->clusterId, (unsigned long) d->commandId);
-            if (d->clusterId == OnOff::Id)
-                send_onoff_multicast(d, e);
-            else if (d->clusterId == LevelControl::Id)
-                send_level_multicast(d, e);
-            command_sent = true;
+        if (e.local == d->localEndpointId &&
+            e.clusterId.value_or(d->clusterId) == d->clusterId) {
+            matching++;
         }
     }
-
-    ESP_LOGI(TAG, "SwitchWorker: total_entries=%lu matching=%lu command_sent=%s",
-             (unsigned long) total, (unsigned long) matching,
-             command_sent ? "yes" : "no");
-
-    if (!command_sent && matching > 0) {
-        /* Fallback: geen bestaande sessie gevonden — laat BindingManager
-         * de CASE-connectie initiëren en via callback afhandelen. */
-        ESP_LOGI(TAG, "SwitchWorker: fallback NotifyBoundClusterChanged ep=%u cluster=0x%lx",
+    ESP_LOGI(TAG, "SwitchWorker: notify ep=%u cluster=0x%lx cmd=0x%lx total_entries=%lu matching=%lu",
+             d->localEndpointId, (unsigned long) d->clusterId,
+             (unsigned long) d->commandId, (unsigned long) total, (unsigned long) matching);
+    if (matching == 0) {
+        ESP_LOGW(TAG, "SwitchWorker: no binding entries for ep=%u cluster=0x%lx",
                  d->localEndpointId, (unsigned long) d->clusterId);
-        CHIP_ERROR err = chip::BindingManager::GetInstance().NotifyBoundClusterChanged(
-            d->localEndpointId, d->clusterId, static_cast<void *>(d));
-        ESP_LOGI(TAG, "SwitchWorker: NotifyBoundClusterChanged returned %" CHIP_ERROR_FORMAT, err.Format());
-        /* d wordt vrijgegeven door LightSwitchContextReleaseHandler */
-    } else {
-        /* Direct verstuurd of geen bindings: ruim context zelf op */
+        chip::Platform::Delete(d);
+        return;
+    }
+    CHIP_ERROR err = chip::BindingManager::GetInstance().NotifyBoundClusterChanged(
+        d->localEndpointId, d->clusterId, static_cast<void *>(d));
+    ESP_LOGI(TAG, "SwitchWorker: NotifyBoundClusterChanged returned %" CHIP_ERROR_FORMAT, err.Format());
+    if (err != CHIP_NO_ERROR) {
         chip::Platform::Delete(d);
     }
+    /* Bij succes wordt d vrijgegeven door LightSwitchContextReleaseHandler */
 }
 
 static void switch_send(uint16_t local_ep, chip::ClusterId cluster, chip::CommandId cmd,
