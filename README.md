@@ -90,14 +90,22 @@ Bij elke knop-event roept `matter_device.cpp` `chip::BindingManager::NotifyBound
 
 ## Gebruikers-interactie
 
-Identiek aan het Zigbee-project:
+Alle 3 inputs doen **precies hetzelfde** — ze sturen allemaal via EP1 (drukker endpoint):
+
+| GPIO | Input | Omschrijving |
+|---|---|---|
+| **GPIO10** | System 55 drukker | 230V impulsdrukker op de SW-terminal (via optocoupler) |
+| **GPIO12** | TTP223 touch | Capacitieve touch-knop op Shelly Plus Add-on digital input |
+| **GPIO4** | PCB-knop | Onboard knopje op de Shelly 1 Gen4 printplaat |
 
 | Actie | Effect |
 |---|---|
-| Kort drukken (< 500 ms) | Matter `OnOff.Toggle` naar alle binding-entries + lokaal relais (alleen EP1) |
+| Kort drukken (< 500 ms) | Matter `OnOff.Toggle` naar alle binding-entries (EP1) + lokaal relais tikken |
 | Lang drukken (> 500 ms) | `LevelControl.Move` (up/down, alternerend) |
 | Loslaten | `LevelControl.Stop` |
 | 6× snel (< 2,5 s) | **Mode toggle** — in Matter-mode: reboot naar OTA-mode; in OTA-mode: factory reset (wipe nvs + chip_kvs) |
+
+> ℹ️ Alle 3 inputs lopen via dezelfde callback in `app_main.cpp` en gebruiken hetzelfde Matter endpoint (EP1). Eén binding in HA is voldoende voor alle inputs. EP4 (Dimmer Switch) wordt aangemaakt maar is momenteel niet apart aangestuurd vanuit de TTP223.
 
 ## Commissioning in Home Assistant Matter Server
 
