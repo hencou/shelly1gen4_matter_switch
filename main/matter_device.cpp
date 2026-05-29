@@ -8,10 +8,15 @@
  *
  * Commando-emit naar bound nodes/groups:
  *   - app_main.c roept matter_send_onoff_toggle(ep) / matter_send_level_move/stop(ep)
- *   - die data wordt naar de CHIP-thread gescheduled (BindingManager::NotifyBoundClusterChanged)
- *   - LightSwitchChangedHandler ontvangt elke binding-entry (unicast óf multicast)
- *     en stuurt het juiste Matter-commando via chip::Controller::InvokeCommandRequest /
- *     Controller::InvokeGroupCommandRequest.
+ *   - die data wordt naar de CHIP-thread gescheduled
+ *   - SwitchWorkerFunction itereert de BindingTable en stuurt commando's
+ *     direct via FindOrEstablishSession + InvokeCommandRequest.
+ *
+ * NB: BindingManager::NotifyBoundClusterChanged() wordt NIET gebruikt.
+ * In esp-matter v1.4 roept de interne PendingNotificationMap dispatch
+ * de handler soms niet aan ondanks een actieve CASE-sessie. We omzeilen
+ * dit door FindOrEstablishSession + InvokeCommandRequest direct aan te
+ * roepen vanuit SwitchWorkerFunction.
  */
 
 #include "matter_device.h"
@@ -31,6 +36,7 @@ extern "C" {
 #include <app/server/Server.h>
 #include <app/util/binding-table.h>
 #include <app/clusters/bindings/BindingManager.h>
+#include <app/OperationalSessionSetup.h>
 #include <app-common/zap-generated/cluster-objects.h>
 #include <controller/InvokeInteraction.h>
 #include <credentials/FabricTable.h>
@@ -103,129 +109,138 @@ static auto make_on_error() {
     };
 }
 
-static void send_onoff_unicast(BindingCommandData *d, const EmberBindingTableEntry &b,
-                               chip::OperationalDeviceProxy *peer)
-{
-    if (d->commandId == OnOff::Commands::Toggle::Id) {
-        OnOff::Commands::Toggle::Type cmd;
-        chip::Controller::InvokeCommandRequest(peer->GetExchangeManager(),
-            peer->GetSecureSession().Value(), b.remote, cmd, make_on_success(), make_on_error());
-    }
-}
+/* ------------- Multicast helpers (geen CASE-sessie nodig) ------------- */
 
-static void send_level_unicast(BindingCommandData *d, const EmberBindingTableEntry &b,
-                               chip::OperationalDeviceProxy *peer)
+static void send_onoff_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
 {
-    if (d->commandId == LevelControl::Commands::Move::Id) {
-        LevelControl::Commands::Move::Type cmd;
-        cmd.moveMode = (d->moveMode == 0) ? LevelControl::MoveModeEnum::kUp
-                                          : LevelControl::MoveModeEnum::kDown;
-        cmd.rate.SetNonNull(d->rate);
-        /* optionsMask/optionsOverride default-init naar lege BitMask */
-        chip::Controller::InvokeCommandRequest(peer->GetExchangeManager(),
-            peer->GetSecureSession().Value(), b.remote, cmd, make_on_success(), make_on_error());
-    } else if (d->commandId == LevelControl::Commands::Stop::Id) {
-        LevelControl::Commands::Stop::Type cmd;
-        chip::Controller::InvokeCommandRequest(peer->GetExchangeManager(),
-            peer->GetSecureSession().Value(), b.remote, cmd, make_on_success(), make_on_error());
-    }
-}
-
-static void send_onoff_multicast(BindingCommandData *d, const EmberBindingTableEntry &b)
-{
-    if (d->commandId == OnOff::Commands::Toggle::Id) {
+    if (d.commandId == OnOff::Commands::Toggle::Id) {
         OnOff::Commands::Toggle::Type cmd;
         chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
     }
 }
 
-static void send_level_multicast(BindingCommandData *d, const EmberBindingTableEntry &b)
+static void send_level_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
 {
-    if (d->commandId == LevelControl::Commands::Move::Id) {
+    if (d.commandId == LevelControl::Commands::Move::Id) {
         LevelControl::Commands::Move::Type cmd;
-        cmd.moveMode = (d->moveMode == 0) ? LevelControl::MoveModeEnum::kUp
-                                          : LevelControl::MoveModeEnum::kDown;
-        cmd.rate.SetNonNull(d->rate);
+        cmd.moveMode = (d.moveMode == 0) ? LevelControl::MoveModeEnum::kUp
+                                         : LevelControl::MoveModeEnum::kDown;
+        cmd.rate.SetNonNull(d.rate);
         chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
-    } else if (d->commandId == LevelControl::Commands::Stop::Id) {
+    } else if (d.commandId == LevelControl::Commands::Stop::Id) {
         LevelControl::Commands::Stop::Type cmd;
         chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
     }
 }
 
-static void LightSwitchChangedHandler(const EmberBindingTableEntry & binding,
-                                      chip::OperationalDeviceProxy * peer,
-                                      void * context)
-{
-    /* ESP_LOGE forceert dat dit log altijd zichtbaar is, ongeacht log-level. */
-    ESP_LOGE(TAG, ">>> BindingHandler CALLED <<< local=%u type=%u remote-ep=%u cluster=0x%lx fabric=%u nodeId=0x%llx group=%u peer=%s ctx=%p",
-             binding.local, binding.type, binding.remote,
-             (unsigned long) binding.clusterId.value_or(0),
-             binding.fabricIndex,
-             (unsigned long long) binding.nodeId,
-             binding.groupId,
-             peer ? "yes" : "no",
-             context);
-    BindingCommandData *d = static_cast<BindingCommandData *>(context);
-    if (d->localEndpointId != binding.local) {
-        ESP_LOGW(TAG, "BindingHandler skip: local %u != binding.local %u",
-                 d->localEndpointId, binding.local);
-        return;
+/* ------------- Direct-send via FindOrEstablishSession ------------- */
+/*
+ * Omzeilt BindingManager::NotifyBoundClusterChanged() die in esp-matter
+ * v1.4 de registered handler soms niet aanroept ondanks een actieve
+ * CASE-sessie. In plaats daarvan gebruiken we FindOrEstablishSession
+ * direct, zodat we bij de OnDeviceConnected callback meteen het commando
+ * versturen via InvokeCommandRequest.
+ */
+struct DirectSendCtx {
+    BindingCommandData cmd;
+    EmberBindingTableEntry entry;
+    chip::Callback::Callback<chip::OnDeviceConnected> connCb;
+    chip::Callback::Callback<chip::OnDeviceConnectionFailure> failCb;
+
+    DirectSendCtx(const BindingCommandData &d, const EmberBindingTableEntry &e)
+        : cmd(d), entry(e),
+          connCb(OnConn, this), failCb(OnFail, this) {}
+
+    static void OnConn(void *raw, chip::Messaging::ExchangeManager &em,
+                       const chip::SessionHandle &sh)
+    {
+        auto *self = static_cast<DirectSendCtx *>(raw);
+        auto &d = self->cmd;
+        auto &b = self->entry;
+        ESP_LOGI(TAG, "DirectSend: session ready -> remote ep %u cluster 0x%lx cmd 0x%lx",
+                 b.remote, (unsigned long)d.clusterId, (unsigned long)d.commandId);
+
+        if (d.clusterId == OnOff::Id) {
+            if (d.commandId == OnOff::Commands::Toggle::Id) {
+                OnOff::Commands::Toggle::Type c;
+                chip::Controller::InvokeCommandRequest(
+                    em, sh, b.remote, c, make_on_success(), make_on_error());
+            }
+        } else if (d.clusterId == LevelControl::Id) {
+            if (d.commandId == LevelControl::Commands::Move::Id) {
+                LevelControl::Commands::Move::Type c;
+                c.moveMode = (d.moveMode == 0) ? LevelControl::MoveModeEnum::kUp
+                                               : LevelControl::MoveModeEnum::kDown;
+                c.rate.SetNonNull(d.rate);
+                chip::Controller::InvokeCommandRequest(
+                    em, sh, b.remote, c, make_on_success(), make_on_error());
+            } else if (d.commandId == LevelControl::Commands::Stop::Id) {
+                LevelControl::Commands::Stop::Type c;
+                chip::Controller::InvokeCommandRequest(
+                    em, sh, b.remote, c, make_on_success(), make_on_error());
+            }
+        }
+        chip::Platform::Delete(self);
     }
 
-    if (binding.type == MATTER_MULTICAST_BINDING) {
-        if (d->clusterId == OnOff::Id)            send_onoff_multicast(d, binding);
-        else if (d->clusterId == LevelControl::Id) send_level_multicast(d, binding);
-    } else if (binding.type == MATTER_UNICAST_BINDING && peer) {
-        if (d->clusterId == OnOff::Id)            send_onoff_unicast(d, binding, peer);
-        else if (d->clusterId == LevelControl::Id) send_level_unicast(d, binding, peer);
-    } else {
-        ESP_LOGW(TAG, "BindingHandler: no-op (type=%u peer=%s)",
-                 binding.type, peer ? "yes" : "no");
+    static void OnFail(void *raw, const chip::ScopedNodeId &peer, CHIP_ERROR err)
+    {
+        ESP_LOGE(TAG, "DirectSend: CASE failed [%u:0x%llx]: %" CHIP_ERROR_FORMAT,
+                 peer.GetFabricIndex(),
+                 (unsigned long long)peer.GetNodeId(),
+                 err.Format());
+        chip::Platform::Delete(static_cast<DirectSendCtx *>(raw));
     }
-}
-
-static void LightSwitchContextReleaseHandler(void *context)
-{
-    chip::Platform::Delete(static_cast<BindingCommandData *>(context));
-}
+};
 
 static void SwitchWorkerFunction(intptr_t context)
 {
     BindingCommandData *d = reinterpret_cast<BindingCommandData *>(context);
-    /* Tel binding-entries voor dit endpoint+cluster + dump ELKE entry voor diagnose. */
-    uint32_t matching = 0;
-    uint32_t total    = 0;
+    uint32_t sent  = 0;
+    uint32_t total = 0;
+
     for (const auto & e : chip::BindingTable::GetInstance()) {
         total++;
-        ESP_LOGI(TAG, "BindingTable[%lu]: type=%u local=%u remote=%u nodeId=0x%llx group=%u cluster=0x%lx fabric=%u",
+        ESP_LOGI(TAG, "BindingTable[%lu]: type=%u local=%u remote=%u "
+                 "nodeId=0x%llx group=%u cluster=0x%lx fabric=%u",
                  (unsigned long) total,
                  (unsigned) e.type, e.local, e.remote,
                  (unsigned long long) e.nodeId,
                  (unsigned) e.groupId,
                  (unsigned long) e.clusterId.value_or(0),
                  (unsigned) e.fabricIndex);
-        if (e.local == d->localEndpointId &&
-            e.clusterId.value_or(d->clusterId) == d->clusterId) {
-            matching++;
+
+        if (e.local != d->localEndpointId) continue;
+        if (e.clusterId.HasValue() && e.clusterId.Value() != d->clusterId) continue;
+
+        if (e.type == MATTER_UNICAST_BINDING) {
+            auto *ctx = chip::Platform::New<DirectSendCtx>(*d, e);
+            if (!ctx) {
+                ESP_LOGE(TAG, "SwitchWorker: OOM DirectSendCtx");
+                continue;
+            }
+            chip::ScopedNodeId peer(e.nodeId, e.fabricIndex);
+            ESP_LOGI(TAG, "SwitchWorker: FindOrEstablishSession [%u:0x%llx]",
+                     peer.GetFabricIndex(),
+                     (unsigned long long) peer.GetNodeId());
+            chip::Server::GetInstance().GetCASESessionManager()->
+                FindOrEstablishSession(peer, &ctx->connCb, &ctx->failCb);
+            sent++;
+        } else if (e.type == MATTER_MULTICAST_BINDING) {
+            if (d->clusterId == OnOff::Id)            send_onoff_multicast(*d, e);
+            else if (d->clusterId == LevelControl::Id) send_level_multicast(*d, e);
+            sent++;
         }
     }
-    ESP_LOGI(TAG, "SwitchWorker: notify ep=%u cluster=0x%lx cmd=0x%lx total_entries=%lu matching=%lu",
+
+    ESP_LOGI(TAG, "SwitchWorker: ep=%u cluster=0x%lx cmd=0x%lx total=%lu sent=%lu",
              d->localEndpointId, (unsigned long) d->clusterId,
-             (unsigned long) d->commandId, (unsigned long) total, (unsigned long) matching);
-    if (matching == 0) {
-        ESP_LOGW(TAG, "SwitchWorker: no binding entries for ep=%u cluster=0x%lx",
-                 d->localEndpointId, (unsigned long) d->clusterId);
-        chip::Platform::Delete(d);
-        return;
+             (unsigned long) d->commandId, (unsigned long) total, (unsigned long) sent);
+    if (sent == 0) {
+        ESP_LOGW(TAG, "SwitchWorker: geen matching binding entries voor ep=%u",
+                 d->localEndpointId);
     }
-    CHIP_ERROR err = chip::BindingManager::GetInstance().NotifyBoundClusterChanged(
-        d->localEndpointId, d->clusterId, static_cast<void *>(d));
-    ESP_LOGI(TAG, "SwitchWorker: NotifyBoundClusterChanged returned %" CHIP_ERROR_FORMAT, err.Format());
-    if (err != CHIP_NO_ERROR) {
-        chip::Platform::Delete(d);
-    }
-    /* Bij succes wordt d vrijgegeven door LightSwitchContextReleaseHandler */
+    chip::Platform::Delete(d);
 }
 
 static void switch_send(uint16_t local_ep, chip::ClusterId cluster, chip::CommandId cmd,
@@ -331,11 +346,11 @@ static void init_binding_handler_internal(intptr_t /*arg*/)
         ESP_LOGE(TAG, "BindingManager::Init failed: %" CHIP_ERROR_FORMAT, err.Format());
         return;
     }
-    mgr.RegisterBoundDeviceChangedHandler(LightSwitchChangedHandler);
-    mgr.RegisterBoundDeviceContextReleaseHandler(LightSwitchContextReleaseHandler);
-    ESP_LOGI(TAG, "BindingManager initialised on CHIP-task (handler=%p ctx-release=%p)",
-             (void *) &LightSwitchChangedHandler,
-             (void *) &LightSwitchContextReleaseHandler);
+    /* Handler-registratie is niet nodig: we gebruiken DirectSendCtx
+     * in SwitchWorkerFunction i.p.v. NotifyBoundClusterChanged.
+     * BindingManager::Init is nog steeds nuttig voor het laden van de
+     * binding table uit NVS en het pre-establischen van CASE sessies. */
+    ESP_LOGI(TAG, "BindingManager initialised on CHIP-task");
 }
 
 static esp_err_t init_binding_handler(void)
