@@ -164,7 +164,7 @@ struct DirectSendCtx {
             if (d.commandId == OnOff::Commands::Toggle::Id) {
                 OnOff::Commands::Toggle::Type c;
                 chip::Controller::InvokeCommandRequest(
-                    em, sh, b.remote, c, make_on_success(), make_on_error());
+                    &em, sh, b.remote, c, make_on_success(), make_on_error());
             }
         } else if (d.clusterId == LevelControl::Id) {
             if (d.commandId == LevelControl::Commands::Move::Id) {
@@ -173,11 +173,11 @@ struct DirectSendCtx {
                                                : LevelControl::MoveModeEnum::kDown;
                 c.rate.SetNonNull(d.rate);
                 chip::Controller::InvokeCommandRequest(
-                    em, sh, b.remote, c, make_on_success(), make_on_error());
+                    &em, sh, b.remote, c, make_on_success(), make_on_error());
             } else if (d.commandId == LevelControl::Commands::Stop::Id) {
                 LevelControl::Commands::Stop::Type c;
                 chip::Controller::InvokeCommandRequest(
-                    em, sh, b.remote, c, make_on_success(), make_on_error());
+                    &em, sh, b.remote, c, make_on_success(), make_on_error());
             }
         }
         chip::Platform::Delete(self);
@@ -211,7 +211,7 @@ static void SwitchWorkerFunction(intptr_t context)
                  (unsigned) e.fabricIndex);
 
         if (e.local != d->localEndpointId) continue;
-        if (e.clusterId.HasValue() && e.clusterId.Value() != d->clusterId) continue;
+        if (e.clusterId.has_value() && e.clusterId.value() != d->clusterId) continue;
 
         if (e.type == MATTER_UNICAST_BINDING) {
             auto *ctx = chip::Platform::New<DirectSendCtx>(*d, e);
