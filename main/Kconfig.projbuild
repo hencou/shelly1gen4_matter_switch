@@ -12,27 +12,13 @@ menu "Shelly 1 Gen4 Matter Switch configuration"
         int "GPIO for 1-Wire bus (DS18B20) — Shelly Plus Add-on data pin"
         default 16
 
-    choice SECONDARY_INPUT_TYPE
-        prompt "Secondary input device (Add-on digital input)"
-        default SECONDARY_INPUT_NONE
-        help
-            Selecteer welk apparaat op de gedeelde Add-on digital-input pin
-            (PIN_SECONDARY_INPUT) is aangesloten. Slechts één van TTP223 of
-            LD2410 kan tegelijk gebruikt worden — ze delen dezelfde GPIO.
-            Default is NONE voor bench testing zonder Add-on; zet op TTP223
-            of LD2410 zodra de juiste hardware is aangesloten.
-        config SECONDARY_INPUT_NONE
-            bool "None — geen secundaire input bedraad"
-        config SECONDARY_INPUT_TTP223
-            bool "TTP223 capacitive touch button (Matter Dimmer Switch / Zigbee Touch EP)"
-        config SECONDARY_INPUT_LD2410
-            bool "HLK-LD2410 mmWave occupancy sensor (Matter/Zigbee Occupancy EP)"
-    endchoice
-
-    config PIN_SECONDARY_INPUT
-        int "GPIO for secondary input (TTP223 of LD2410) — Shelly Plus Add-on digital input"
+    config PIN_TOUCH_INPUT
+        int "GPIO for TTP223 capacitive touch button — Shelly Plus Add-on digital input"
         default 12
-        depends on !SECONDARY_INPUT_NONE
+
+    config PIN_LD2410_INPUT
+        int "GPIO for HLK-LD2410 occupancy sensor — Shelly Plus Add-on analog input"
+        default 17
 
     config PIN_STATUS_LED
         int "GPIO for status LED (-1 = disabled)"

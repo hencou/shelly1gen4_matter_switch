@@ -25,20 +25,9 @@ extern "C" {
 #define BENCH_MODE 0
 #endif
 
-/* Secondary input (TTP223 óf LD2410, exclusief) op Add-on digital in. */
-#if defined(CONFIG_SECONDARY_INPUT_TTP223) || defined(CONFIG_SECONDARY_INPUT_LD2410)
-#define PIN_SECONDARY_INPUT CONFIG_PIN_SECONDARY_INPUT
-#endif
-#if defined(CONFIG_SECONDARY_INPUT_TTP223)
-#define SECONDARY_INPUT_IS_TTP223 1
-#else
-#define SECONDARY_INPUT_IS_TTP223 0
-#endif
-#if defined(CONFIG_SECONDARY_INPUT_LD2410)
-#define SECONDARY_INPUT_IS_LD2410 1
-#else
-#define SECONDARY_INPUT_IS_LD2410 0
-#endif
+/* Add-on inputs — TTP223 en LD2410 hebben elk een eigen GPIO, altijd actief. */
+#define PIN_TOUCH_INPUT     CONFIG_PIN_TOUCH_INPUT      /* TTP223 capacitive touch (GPIO12) */
+#define PIN_LD2410_INPUT    CONFIG_PIN_LD2410_INPUT      /* HLK-LD2410 occupancy   (GPIO17) */
 
 #define PIN_STATUS_LED      CONFIG_PIN_STATUS_LED      /* Shelly Add-on LED, -1 = uit */
 
@@ -62,14 +51,11 @@ extern "C" {
 #define MODE_TOGGLE_CLICKS      6
 #define MODE_TOGGLE_WINDOW_MS   2500
 
-/* Zigbee endpoints */
+/* Matter endpoints */
 #define EP_SWITCH_DRUKKER   1
 #define EP_TEMPERATURE      2
 #define EP_OCCUPANCY        3
 #define EP_SWITCH_TOUCH     4
-
-/* Zigbee profile */
-#define APP_PROFILE_ID      0x0104  /* Home Automation */
 
 /* Logical input source identifiers.
  * Alle 3 inputs hebben uniform gedrag (zie on_button_event in app_main.cpp):

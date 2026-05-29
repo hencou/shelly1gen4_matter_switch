@@ -167,14 +167,9 @@ void button_driver_init(button_cb_t cb)
 
     /* INPUT_TOUCH op TTP223 (Add-on digital in). Active-high momentary,
      * interne pulldown om in rust laag te blijven. */
-#if SECONDARY_INPUT_IS_TTP223
-    s_state[INPUT_TOUCH].gpio       = PIN_SECONDARY_INPUT;
+    s_state[INPUT_TOUCH].gpio       = PIN_TOUCH_INPUT;
     s_state[INPUT_TOUCH].enabled    = true;
     s_state[INPUT_TOUCH].active_low = false;
-#else
-    s_state[INPUT_TOUCH].gpio    = -1;
-    s_state[INPUT_TOUCH].enabled = false;
-#endif
 
     /* INPUT_DEVICE_BTN op GPIO4 (onboard pair-knop). Altijd active-low
      * met interne pull-up; gedraagt zich verder identiek aan de andere
@@ -202,16 +197,14 @@ void button_driver_init(button_cb_t cb)
     gpio_config(&drukker_cfg);
     ESP_LOGI(TAG, "BD-STEP-2: gpio_config drukker done");
 
-#if SECONDARY_INPUT_IS_TTP223
     gpio_config_t touch_cfg = {
-        .pin_bit_mask = (1ULL << PIN_SECONDARY_INPUT),
+        .pin_bit_mask = (1ULL << PIN_TOUCH_INPUT),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
         .intr_type    = GPIO_INTR_ANYEDGE,
     };
     gpio_config(&touch_cfg);
-#endif
 
     /* Device Button GPIO4: active-low, interne pull-up. */
     gpio_config_t devbtn_cfg = {
@@ -233,10 +226,8 @@ void button_driver_init(button_cb_t cb)
 
     gpio_isr_handler_add(PIN_SWITCH_INPUT, btn_isr, (void *)(uintptr_t)INPUT_DRUKKER);
     ESP_LOGI(TAG, "BD-STEP-5a: isr_handler_add drukker (GPIO%d) done", PIN_SWITCH_INPUT);
-#if SECONDARY_INPUT_IS_TTP223
-    gpio_isr_handler_add(PIN_SECONDARY_INPUT, btn_isr, (void *)(uintptr_t)INPUT_TOUCH);
-    ESP_LOGI(TAG, "BD-STEP-5b: isr_handler_add touch (GPIO%d) done", PIN_SECONDARY_INPUT);
-#endif
+    gpio_isr_handler_add(PIN_TOUCH_INPUT, btn_isr, (void *)(uintptr_t)INPUT_TOUCH);
+    ESP_LOGI(TAG, "BD-STEP-5b: isr_handler_add touch (GPIO%d) done", PIN_TOUCH_INPUT);
     gpio_isr_handler_add(s_state[INPUT_DEVICE_BTN].gpio,
                          btn_isr, (void *)(uintptr_t)INPUT_DEVICE_BTN);
     ESP_LOGI(TAG, "BD-STEP-5c: isr_handler_add device_btn (GPIO%d) done",
@@ -246,12 +237,7 @@ void button_driver_init(button_cb_t cb)
     ESP_LOGI(TAG, "BD-STEP-6: xTaskCreate btn_task -> %s",
              btn_r == pdPASS ? "OK" : "FAIL");
 
-    ESP_LOGI(TAG, "button driver init (drukker=GPIO%d touch=%s device_btn=GPIO%d)",
-             PIN_SWITCH_INPUT,
-#if SECONDARY_INPUT_IS_TTP223
-             "GPIO" "12",
-#else
-             "n/a",
-#endif
+    ESP_LOGI(TAG, "button driver init (drukker=GPIO%d touch=GPIO%d device_btn=GPIO%d)",
+             PIN_SWITCH_INPUT, PIN_TOUCH_INPUT,
              s_state[INPUT_DEVICE_BTN].gpio);
 }
