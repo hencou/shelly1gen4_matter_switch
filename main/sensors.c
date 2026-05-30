@@ -9,16 +9,10 @@
  * De 1-Wire-driver hier is een minimale implementatie die één DS18B20 op
  * de bus verwacht. Voor multi-drop bussen kan je ESP-IDF's driver/onewire
  * gebruiken via de component manager.
- *
- * DEBUG: temp_task knippert de status LED om DS18B20 aanwezigheid te tonen:
- *   1x knipper = sensor gelezen, temperatuur gerapporteerd
- *   3x knipper = sensor niet gevonden (ow_reset() failed)
- * Verwijder de status_led_blip() aanroepen na succesvolle hardware test.
  */
 
 #include "sensors.h"
 #include "app_config.h"
-#include "status_led.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -121,7 +115,8 @@ static bool ds18b20_read_centi_c(int16_t *out)
 static temp_cb_t s_temp_cb;
 static void temp_task(void *arg)
 {
-    /* configure 1-Wire pin with pull-up (external 4.7k recommended) */
+    /* configure 1-Wire pin with pull-up (Add-on heeft eigen pull-up,
+     * interne pull-up als fallback voor gebruik zonder Add-on) */
     gpio_config_t cfg = {
         .pin_bit_mask = (1ULL << OW_PIN),
         .mode = GPIO_MODE_INPUT,
@@ -134,16 +129,8 @@ static void temp_task(void *arg)
         if (ds18b20_read_centi_c(&centi)) {
             if (s_temp_cb) s_temp_cb(centi);
             ESP_LOGI(TAG, "temp = %d.%02d °C", centi / 100, abs(centi % 100));
-            /* DEBUG: 1x knipper = sensor OK */
-            status_led_blip();
         } else {
             ESP_LOGW(TAG, "DS18B20 read failed");
-            /* DEBUG: 3x knipper = sensor niet gevonden */
-            status_led_blip();
-            vTaskDelay(pdMS_TO_TICKS(200));
-            status_led_blip();
-            vTaskDelay(pdMS_TO_TICKS(200));
-            status_led_blip();
         }
         vTaskDelay(pdMS_TO_TICKS(TEMP_REPORT_INT_S * 1000));
     }
