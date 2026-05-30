@@ -17,6 +17,7 @@
 #include <string.h>
 #include "esp_log.h"
 #include "esp_rom_sys.h"
+#include "driver/uart.h"
 #include "esp_timer.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -115,6 +116,13 @@ static bool ds18b20_read_centi_c(int16_t *out)
 static temp_cb_t s_temp_cb;
 static void temp_task(void *arg)
 {
+    /* GPIO16 is standaard UART0 TX op de ESP32-C6. Verwijder de UART0
+     * driver zodat de peripheral GPIO16 loslaat voordat we hem als
+     * 1-Wire pin herconfigureren. Zonder deze stap blijft UART0 de pin
+     * bezet en reageert de DS18B20 niet. Na uart_driver_delete is J6
+     * TXD niet meer bruikbaar — dat is acceptabel in productie (BENCH_MODE=0). */
+    uart_driver_delete(UART_NUM_0);
+
     /* configure 1-Wire pin with pull-up (Add-on heeft eigen pull-up,
      * interne pull-up als fallback voor gebruik zonder Add-on) */
     gpio_config_t cfg = {
