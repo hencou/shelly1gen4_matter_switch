@@ -85,10 +85,10 @@ Nummering loopt **van het pin het verst van het J6-label (pin 1) naar het pin di
 |---|---|---|---|
 | 1 | **ESP_DBG_UART** | GPIO15 (UART1)? | niet gebruikt voor flashen |
 | 2 | **TXD** | GPIO16 (UART0 TX // OneWire DATA) | Shelly TXD → CP2102 RXD |
-| 3 | **RXD** | GPIO17 (UART0 RX) | Shelly RXD ← CP2102 TXD |
+| 3 | **RXD** | GPIO17 (UART0 RX // Analog IN) | Shelly RXD ← CP2102 TXD |
 | 4 | **3.3V** | -- | voeding (alleen 3.3V — **géén 5V**) |
 | 5 | **RESET** | EN | EN — niet nodig voor handmatig flashen |
-| 6 | **GPIO0 (BOOT)** | GPIO0 | low bij power-up → flash mode |
+| 6 | **GPIO0 (BOOT)** | GPIO0 (Digital IN) | low bij power-up → flash mode |
 | 7 | **GND** | -- | massa — pin direct naast het `J6` silkscreen |
 
 ⚠️ **Pin 7 = GND is je oriëntatie-anker**: zet een multimeter op continuïteit, zoek de pin die piept tegen de metalen shield van het ESP-module of een bekende GND-traceringspad — dat is pin 7. Tel vandaar terug naar pin 1 in tegengestelde richting.
