@@ -24,11 +24,11 @@ Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter
 |---|---|
 | Shelly 1 Gen4 (ESP32-C6, 8 MB flash) | Doel-hardware |
 | Shelly Plus Add-on | Voor DS18B20 (GPIO16) + TTP223 touch (GPIO12) + LD2410 radar (GPIO17) |
-| Thread Border Router | **Google TV Streamer 4K** (heb je al) |
+| Thread Border Router | **Google TV Streamer 4K** |
 | Matter primary admin | **Home Assistant Matter Server** add-on |
 | Matter-Thread bulb | **IKEA KAJPLATS** (Thread-mode via setup-code) |
 | Commissioning tool | HA Matter Server UI of `chip-tool` commandline |
-| Binding setup tool | `chip-tool` (HA Matter integration heeft binding UI nog niet) |
+| Binding setup tool | `HA Python Matter Server` |
 
 ## Pin-mapping
 
