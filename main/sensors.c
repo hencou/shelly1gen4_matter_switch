@@ -9,10 +9,16 @@
  * De 1-Wire-driver hier is een minimale implementatie die één DS18B20 op
  * de bus verwacht. Voor multi-drop bussen kan je ESP-IDF's driver/onewire
  * gebruiken via de component manager.
+ *
+ * DEBUG: temp_task knippert de status LED om DS18B20 aanwezigheid te tonen:
+ *   1x knipper = sensor gelezen, temperatuur gerapporteerd
+ *   3x knipper = sensor niet gevonden (ow_reset() failed)
+ * Verwijder de status_led_blip() aanroepen na succesvolle hardware test.
  */
 
 #include "sensors.h"
 #include "app_config.h"
+#include "status_led.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -128,8 +134,16 @@ static void temp_task(void *arg)
         if (ds18b20_read_centi_c(&centi)) {
             if (s_temp_cb) s_temp_cb(centi);
             ESP_LOGI(TAG, "temp = %d.%02d °C", centi / 100, abs(centi % 100));
+            /* DEBUG: 1x knipper = sensor OK */
+            status_led_blip();
         } else {
             ESP_LOGW(TAG, "DS18B20 read failed");
+            /* DEBUG: 3x knipper = sensor niet gevonden */
+            status_led_blip();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            status_led_blip();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            status_led_blip();
         }
         vTaskDelay(pdMS_TO_TICKS(TEMP_REPORT_INT_S * 1000));
     }
@@ -184,7 +198,7 @@ void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
 
 #if BENCH_MODE
     /* BENCH_MODE: skip sensor-tasks zodat GPIO16 (U0TXD) en GPIO17 (U0RXD)
-     * beschikbaar blijven voor UART0 serial debugging via PuTTY / minicom.
+     * beschikbaar blijven voor UART0 serial debugging via J6 header.
      * Op de ESP32-C6 zijn GPIO16/17 de standaard UART0-pins; temp_task en
      * occ_task herconfigureren ze als 1-Wire resp. GPIO-input, wat de
      * seriële output doodt. */
