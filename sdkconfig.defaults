@@ -83,3 +83,11 @@ CONFIG_PIN_STATUS_LED=15
 # Add-on inputs: TTP223 touch op GPIO12, LD2410 occupancy op GPIO17 — beide altijd actief
 CONFIG_PIN_TOUCH_INPUT=12
 CONFIG_PIN_LD2410_INPUT=17
+
+# ---------- Console / JTAG ----------
+# USB-JTAG uitschakelen zodat GPIO12 (Add-on digital in) en GPIO13
+# vrijkomen als gewone GPIO. Flashen en seriële console blijven
+# beschikbaar via J6 header (UART0).
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=n
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_NUM=0
