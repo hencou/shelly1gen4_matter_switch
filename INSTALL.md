@@ -82,7 +82,7 @@ OTA flashen vanuit de originele Shelly firmware werkt **niet** — Shelly verifi
 Nummering loopt **van het pin het verst van het J6-label (pin 1) naar het pin direct naast het label (pin 7 = GND)**.
 
 | Pin | Functie | GPIO | Toelichting |
-|---|---|---|
+|---|---|---|---|
 | 1 | **ESP_DBG_UART** | GPIO15 (UART1)? | niet gebruikt voor flashen |
 | 2 | **TXD** | GPIO16 (UART0 TX) | Shelly TXD → CP2102 RXD |
 | 3 | **RXD** | GPIO17 (UART0 RX) | Shelly RXD ← CP2102 TXD |
