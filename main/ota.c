@@ -18,6 +18,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_system.h"
@@ -476,8 +477,28 @@ static void run_softap(void)
 
     ESP_LOGW(TAG, "SoftAP gereed. Verbind met '%s', open http://192.168.4.1/", ssid);
 
-    /* Idle hier — handlers rebooten zelf na actie */
-    while (1) vTaskDelay(pdMS_TO_TICKS(60000));
+    /* Wacht maximaal OTA_SOFTAP_TIMEOUT_MS. Als er geen upload of form-post
+     * plaatsvindt, rebooten we gewoon terug naar Matter mode. De NVS-vlag is
+     * al gewist bij het binnenkomen van ota_handle_pending(), dus na reboot
+     * start Matter automatisch. */
+#define OTA_SOFTAP_TIMEOUT_MS   (10 * 60 * 1000)   /* 10 minuten */
+#define OTA_SOFTAP_TICK_MS      5000                /* log elke 5 seconden */
+
+    int32_t remaining_ms = OTA_SOFTAP_TIMEOUT_MS;
+    while (remaining_ms > 0) {
+        int32_t sleep = (remaining_ms < OTA_SOFTAP_TICK_MS)
+                        ? remaining_ms : OTA_SOFTAP_TICK_MS;
+        vTaskDelay(pdMS_TO_TICKS(sleep));
+        remaining_ms -= sleep;
+        if (remaining_ms > 0) {
+            ESP_LOGW(TAG, "OTA SoftAP: nog %"PRId32" seconden wachten op upload...",
+                     remaining_ms / 1000);
+        }
+    }
+
+    ESP_LOGW(TAG, "OTA timeout verstreken — reboot naar Matter mode");
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_restart();
 }
 
 /* ---------- Factory reset ---------- */
