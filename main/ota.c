@@ -32,6 +32,9 @@
 #include "esp_mac.h"
 #include "esp_chip_info.h"
 #include "nvs.h"
+#include "esp_rom_sys.h"
+#include "driver/gpio.h"
+#include "driver/uart.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -194,6 +197,166 @@ static esp_err_t do_ota_from_url(const char *url)
     return err;
 }
 
+
+/* ---------- DS18B20 sensor test (1-Wire bitbang) ---------- */
+
+#define OTA_OW_PIN  PIN_ONEWIRE
+
+static inline void ota_ow_low(void) { gpio_set_direction(OTA_OW_PIN, GPIO_MODE_OUTPUT); gpio_set_level(OTA_OW_PIN, 0); }
+static inline void ota_ow_hi(void)  { gpio_set_direction(OTA_OW_PIN, GPIO_MODE_INPUT); }
+static inline int  ota_ow_rd(void)  { return gpio_get_level(OTA_OW_PIN); }
+
+static bool ota_ow_reset(void)
+{
+    ota_ow_low(); esp_rom_delay_us(480);
+    ota_ow_hi();  esp_rom_delay_us(70);
+    bool present = !ota_ow_rd();
+    esp_rom_delay_us(410);
+    return present;
+}
+
+static void ota_ow_write_bit(int b)
+{
+    ota_ow_low();
+    if (b) { esp_rom_delay_us(6);  ota_ow_hi(); esp_rom_delay_us(64); }
+    else   { esp_rom_delay_us(60); ota_ow_hi(); esp_rom_delay_us(10); }
+}
+
+static int ota_ow_read_bit(void)
+{
+    ota_ow_low(); esp_rom_delay_us(6);
+    ota_ow_hi();  esp_rom_delay_us(9);
+    int v = ota_ow_rd();
+    esp_rom_delay_us(55);
+    return v;
+}
+
+static void ota_ow_write_byte(uint8_t b)
+{
+    for (int i = 0; i < 8; i++) { ota_ow_write_bit(b & 1); b >>= 1; }
+}
+
+static uint8_t ota_ow_read_byte(void)
+{
+    uint8_t v = 0;
+    for (int i = 0; i < 8; i++) v |= (ota_ow_read_bit() << i);
+    return v;
+}
+
+static esp_err_t sensor_get(httpd_req_t *req)
+{
+    static char buf[3072];
+    int pos = 0;
+
+    uart_driver_delete(UART_NUM_0);
+
+    gpio_config_t cfg = {
+        .pin_bit_mask = (1ULL << OTA_OW_PIN),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+    };
+    gpio_config(&cfg);
+
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<!DOCTYPE html><html><head><meta charset=utf-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<meta http-equiv=refresh content=3>"
+        "<title>DS18B20 Test</title>"
+        "<style>body{font-family:monospace;max-width:520px;margin:2em auto;padding:1em}"
+        "h2{font-family:sans-serif}.ok{color:green}.err{color:red}"
+        ".warn{color:orange}.row{margin:.5em 0}a{color:#0066cc}</style></head><body>"
+        "<h2>&#127777; DS18B20 Sensor Test</h2>"
+        "<p style='color:#555;font-size:.9em'>Pagina ververst automatisch elke 3s.</p>");
+
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<div class=row><b>Stap 1: Reset pulse (GPIO%d)</b> &mdash; ", OTA_OW_PIN);
+    bool present = ota_ow_reset();
+    if (!present) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+            "<span class=err>&#10007; Geen presence pulse &mdash; sensor niet gevonden op bus</span></div>"
+            "<div class=row><span class=warn>Controleer bedrading: VCC=3V3 DAT=GPIO%d GND=GND</span></div>"
+            "<p><a href=/>&#8592; Terug</a></p></body></html>", OTA_OW_PIN);
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_send(req, buf, pos);
+        return ESP_OK;
+    }
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<span class=ok>&#10003; Presence pulse ontvangen &mdash; sensor gevonden</span></div>");
+
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<div class=row><b>Stap 2: Convert T (0xCC 0x44)</b> &mdash; ");
+    ota_ow_write_byte(0xCC);
+    ota_ow_write_byte(0x44);
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<span class=ok>&#10003; Commando verzonden</span></div>");
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send_chunk(req, buf, pos);
+    pos = 0;
+    vTaskDelay(pdMS_TO_TICKS(820));
+
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<div class=row><b>Stap 3: Reset voor ReadScratchpad</b> &mdash; ");
+    present = ota_ow_reset();
+    if (!present) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+            "<span class=err>&#10007; Geen presence pulse na conversie</span></div>"
+            "<p><a href=/>&#8592; Terug</a></p></body></html>");
+        httpd_resp_send_chunk(req, buf, pos);
+        httpd_resp_send_chunk(req, NULL, 0);
+        return ESP_OK;
+    }
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<span class=ok>&#10003; Presence pulse OK</span></div>");
+
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<div class=row><b>Stap 4: ReadScratchpad (0xCC 0xBE)</b><br>");
+    ota_ow_write_byte(0xCC);
+    ota_ow_write_byte(0xBE);
+
+    uint8_t sc[9];
+    for (int i = 0; i < 9; i++) sc[i] = ota_ow_read_byte();
+
+    const char *labels[9] = {"Temp LSB","Temp MSB","TH register","TL register",
+                              "Config register","Reserved","Reserved","Reserved","CRC"};
+    for (int i = 0; i < 9; i++) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+            "Byte[%d] = 0x%02X &mdash; %s<br>", i, sc[i], labels[i]);
+    }
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "</div>");
+
+    int16_t raw   = (int16_t)((sc[1] << 8) | sc[0]);
+    int16_t centi = (int16_t)(((int32_t)raw * 100) / 16);
+    int deg  = centi / 100;
+    int frac = centi < 0 ? -(centi % 100) : (centi % 100);
+    if (frac < 0) frac = -frac;
+    uint8_t res   = 9 + ((sc[4] >> 5) & 0x03);
+    bool sane = (raw != 0x0550) && (centi > -5500) && (centi < 12500);
+
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<div class=row><b>Stap 5: Temperatuur</b><br>"
+        "raw=0x%04X (%d) &rarr; %d.%02d&deg;C &mdash; ",
+        (uint16_t)raw, raw, deg, frac);
+
+    if (raw == 0x0550) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+            "<span class=warn>&#9888; Power-on waarde 85&deg;C &mdash; conversie mislukt?</span>");
+    } else if (!sane) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+            "<span class=err>&#10007; Onlogische waarde &mdash; controleer bedrading</span>");
+    } else {
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+            "<span class=ok>&#10003; Geldige meting: <b>%d.%02d&deg;C</b></span>", deg, frac);
+    }
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "</div><div class=row><b>Resolutie:</b> %d bit</div>"
+        "<p><a href=/>&#8592; Terug naar OTA pagina</a></p></body></html>", res);
+
+    httpd_resp_send_chunk(req, buf, pos);
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
 /* ---------- SoftAP HTML pagina ---------- */
 
 /*
@@ -221,6 +384,7 @@ static const char FORM_HTML[] =
 "</style></head><body>"
 
 "<h2>&#128268; Shelly1Gen4 &mdash; OTA Update</h2>"
+"<p><a href=/sensor>&#127777; DS18B20 sensor test</a></p>"
 
 /* ── Sectie 1: directe upload ── */
 "<h3>Firmware uploaden</h3>"
@@ -470,10 +634,12 @@ static void run_softap(void)
     httpd_uri_t get_root    = { "/",       HTTP_GET,  form_get,     NULL };
     httpd_uri_t post_upload = { "/upload", HTTP_POST, upload_post,  NULL };
     httpd_uri_t post_ota    = { "/ota",    HTTP_POST, ota_post,     NULL };
+    httpd_uri_t get_sensor  = { "/sensor", HTTP_GET,  sensor_get,   NULL };
 
     httpd_register_uri_handler(srv, &get_root);
     httpd_register_uri_handler(srv, &post_upload);
     httpd_register_uri_handler(srv, &post_ota);
+    httpd_register_uri_handler(srv, &get_sensor);
 
     ESP_LOGW(TAG, "SoftAP gereed. Verbind met '%s', open http://192.168.4.1/", ssid);
 
