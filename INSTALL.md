@@ -77,7 +77,7 @@ OTA flashen vanuit de originele Shelly firmware werkt **niet** — Shelly verifi
 > [`automatous-io/shelly-1-gen4-matter-thread` FLASHING.md](https://github.com/automatous-io/shelly-1-gen4-matter-thread/blob/main/docs/FLASHING.md)
 > — geverifieerd op hardware-revisie `v0.1.2` (op de PCB gedrukt).
 
-### J6 Pinout (canonical)
+### J6 Pinout
 
 Nummering loopt **van het pin het verst van het J6-label (pin 1) naar het pin direct naast het label (pin 7 = GND)**.
 
