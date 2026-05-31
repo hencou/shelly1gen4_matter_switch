@@ -77,18 +77,10 @@ CONFIG_PIN_SWITCH_INPUT=10
 # Relay output (mains-switching, active-high)
 CONFIG_PIN_RELAY=5
 # 1-Wire DS18B20 op Shelly Plus Add-on data pin
-CONFIG_PIN_ONEWIRE=16
+CONFIG_PIN_ONEWIRE=0
 # Status LED op onboard PCB-LED (active-low)
 CONFIG_PIN_STATUS_LED=15
 # STATUS_LED_ACTIVE_HIGH: default n (active-low) — geen extra regel nodig
 # Add-on inputs: TTP223 touch op GPIO0, LD2410 occupancy op GPIO17 — beide altijd actief
-CONFIG_PIN_TOUCH_INPUT=0
+CONFIG_PIN_TOUCH_INPUT=16
 CONFIG_PIN_LD2410_INPUT=17
-
-# ---------- Console / JTAG ----------
-# USB-JTAG uitschakelen zodat GPIO12 (Add-on digital in) en GPIO13
-# vrijkomen als gewone GPIO. Flashen en seriële console blijven
-# beschikbaar via J6 header (UART0).
-#CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=n
-#CONFIG_ESP_CONSOLE_UART_DEFAULT=y
-#CONFIG_ESP_CONSOLE_UART_NUM=0
