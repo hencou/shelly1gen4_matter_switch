@@ -312,9 +312,9 @@ chip-tool binding write binding \
 ## 10. OTA — firmware-updates zonder UART
 
 1. Bouw nieuwe firmware: `idf.py build`. Plaats `build/shelly1gen4_matter_switch.bin` in HA `/config/www/`.
-2. Klik **10× snel** op de System 55 drukker.
+2. Klik **6× snel** op de System 55 drukker.
 3. Eerste keer: telefoon → SoftAP `shelly-ota-XXXXXX` → `http://192.168.4.1/` → SSID + password + URL invullen.
-4. Volgende keren: 10× klikken volstaat (config blijft bewaard in NVS).
+4. Volgende keren: 6× klikken volstaat (config blijft bewaard in NVS).
 
 ## 11. Rollback naar stock Shelly firmware
 
