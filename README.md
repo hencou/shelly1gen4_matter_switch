@@ -52,8 +52,8 @@ Het relais (EP4) is **niet meer hardcoded gekoppeld** aan de knopdruk. Via een M
 | GPIO | Functie | Status |
 |---|---|---|
 | **GPIO16** | 1-Wire bus voor DS18B20 | Altijd actief |
-| **GPIO12** | TTP223 capacitive touch button (stuurt via EP1) | Altijd actief |
 | **GPIO17** | HLK-LD2410 mmWave occupancy sensor (EP3 Occupancy) | Altijd actief |
+| **GPIO18** | TTP223 capacitive touch button (stuurt via EP1) | Altijd actief |
 
 Alle pinnen zijn aanpasbaar via `idf.py menuconfig` → **"Shelly 1 Gen4 Matter Switch configuration"**.
 
@@ -89,7 +89,7 @@ Alle 3 inputs doen **precies hetzelfde** — ze sturen via EP1 (Toggle) én EP5 
 | GPIO | Input | Omschrijving |
 |---|---|---|
 | **GPIO10** | System 55 drukker | 230V impulsdrukker op de SW-terminal (via optocoupler) |
-| **GPIO12** | TTP223 touch | Capacitieve touch-knop op Shelly Plus Add-on digital input |
+| **GPIO18** | TTP223 touch | Capacitieve touch-knop op Shelly Plus Add-on digital input |
 | **GPIO4** | PCB-knop | Onboard knopje op de Shelly 1 Gen4 printplaat |
 
 | Actie | Effect |
