@@ -159,6 +159,11 @@ static void IRAM_ATTR occ_isr(void *arg)
 
 static void occ_task(void *arg)
 {
+    /* GPIO17 is standaard UART0 RX op de ESP32-C6 — de UART driver zet een
+     * interne pull-up. gpio_reset_pin() disconnecteert de UART peripheral
+     * en reset alle pulls, zodat onze gpio_config met pull_down pakt. */
+    gpio_reset_pin(PIN_LD2410_INPUT);
+
     gpio_config_t cfg = {
         .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
         .mode = GPIO_MODE_INPUT,
