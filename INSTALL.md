@@ -230,6 +230,7 @@ In de log zou je ongeveer dit moeten zien:
 I (... ) matter_dev: EP1 = OnOff Light Switch (drukker)
 I (... ) matter_dev: EP2 = Temperature Sensor
 I (... ) matter_dev: EP3 = Occupancy Sensor (LD2410)
+I (... ) matter_dev: EP4 = OnOff Light (relais)
 I (... ) chip[DL]: Device Configuration:
 I (... ) chip[DL]:   Setup Pin Code: 20202021
 I (... ) chip[DL]:   Setup Discriminator: 3840 (0xF00)
@@ -256,7 +257,7 @@ Check in HA → Settings → Devices & Services → Thread → je zou minstens �
 
 1. HA → Settings → Devices & Services → "Add Integration" → Matter Server → "Add device".
 2. Scan de QR-code uit de UART-log of voer de Manual Pairing Code in.
-3. Wacht 30-90 s. Hij zou via BLE pairen, Thread-credentials krijgen, Thread joinen, en daarna verschijnen als "Shelly 1 Gen4 Matter Switch" met 3 entities.
+3. Wacht 30-90 s. Hij zou via BLE pairen, Thread-credentials krijgen, Thread joinen, en daarna verschijnen als "Shelly 1 Gen4 Matter Switch" met 4 entities (switch, temp, occupancy, relais).
 
 Als pairing faalt:
 - Check dat de Shelly minder dan 5 minuten geleden geboot is (BLE-pairing-window).
@@ -294,6 +295,19 @@ chip-tool binding write binding \
 ```
 
 Druk op de drukker → de KAJPLATS bulb zou direct moeten reageren, **zonder HA in het pad**.
+
+### Optioneel: relais mee-schakelen via binding
+
+Het lokale relais (EP4) is een apart server endpoint en reageert standaard alleen op commando's vanuit HA. Om het relais mee te laten schakelen bij een knopdruk, voeg EP4 toe aan de binding:
+
+```bash
+# Bind drukker (EP1) aan zowel de bulb ALS het lokale relais (EP4)
+chip-tool binding write binding \
+  '[{"fabricIndex":1,"node":'$BULB',"endpoint":1,"cluster":6},
+    {"fabricIndex":1,"node":'$BULB',"endpoint":1,"cluster":8},
+    {"fabricIndex":1,"node":'$SWITCH',"endpoint":4,"cluster":6}]' \
+  $SWITCH 1
+```
 
 ## 10. OTA — firmware-updates zonder UART
 

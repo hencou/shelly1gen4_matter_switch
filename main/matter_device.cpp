@@ -1,10 +1,11 @@
 /*
  * Matter device implementatie voor Shelly 1 Gen4 (ESP32-C6).
  *
- * 3 endpoints:
+ * 4 endpoints:
  *   EP1 = OnOff Light Switch  + OnOff client + LevelControl client + Binding cluster
  *   EP2 = Temperature Sensor  (server)
  *   EP3 = Occupancy Sensor    (server)
+ *   EP4 = OnOff Light          (server) — fysiek relais, aanstuurbaar vanuit HA
  *
  * Commando-emit naar bound nodes/groups:
  *   - app_main.c roept matter_send_onoff_toggle(ep) / matter_send_level_move/stop(ep)
@@ -23,6 +24,7 @@
 
 extern "C" {
 #include "app_config.h"
+#include "relay.h"
 #include "esp_log.h"
 }
 
@@ -76,6 +78,7 @@ using namespace chip::app::Clusters;
 static uint16_t s_ep_drukker = 0;
 static uint16_t s_ep_temp    = 0;
 static uint16_t s_ep_occ     = 0;
+static uint16_t s_ep_relay   = 0;
 
 
 /* ---------------- Binding-mediated command emit ---------------- */
@@ -308,6 +311,7 @@ extern "C" void matter_factory_reset(void)
 }
 
 extern "C" uint16_t matter_ep_drukker(void) { return s_ep_drukker; }
+extern "C" uint16_t matter_ep_relay(void)   { return s_ep_relay; }
 
 
 /* ---------------- Endpoint setup ---------------- */
@@ -323,8 +327,14 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
                                      uint32_t cluster_id, uint32_t attribute_id,
                                      esp_matter_attr_val_t *val, void * /*priv*/)
 {
-    /* We hebben geen client-side attribute writes nodig — alle outgoing
-     * commands gaan via Binding (zie switch_send). */
+    if (type == PRE_UPDATE && endpoint_id == s_ep_relay) {
+        if (cluster_id == OnOff::Id &&
+            attribute_id == OnOff::Attributes::OnOff::Id) {
+            relay_set(val->val.b);
+            ESP_LOGI(TAG, "EP%u OnOff -> relay %s", endpoint_id,
+                     val->val.b ? "ON" : "OFF");
+        }
+    }
     return ESP_OK;
 }
 
@@ -390,6 +400,13 @@ extern "C" esp_err_t matter_start(void)
     endpoint_t *ep_occ = occupancy_sensor::create(node, &o_cfg, ENDPOINT_FLAG_NONE, NULL);
     s_ep_occ = endpoint::get_id(ep_occ);
     ESP_LOGI(TAG, "EP%u = Occupancy Sensor (LD2410)", s_ep_occ);
+
+    /* EP4 — OnOff Light (relais op GPIO5, server — aanstuurbaar vanuit HA) */
+    on_off_light::config_t relay_cfg;
+    relay_cfg.on_off.on_off = relay_get();  /* herstel NVS-state */
+    endpoint_t *ep_relay = on_off_light::create(node, &relay_cfg, ENDPOINT_FLAG_NONE, NULL);
+    s_ep_relay = endpoint::get_id(ep_relay);
+    ESP_LOGI(TAG, "EP%u = OnOff Light (relais)", s_ep_relay);
 
     /* OTA-cluster requestor (optioneel: voor Matter OTA via TBR — werkt naast onze WiFi-OTA) */
     esp_matter_ota_requestor_init();
