@@ -53,12 +53,12 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120
 
-# ---------- Matter device basics (overschrijfbaar via chip-factory maar helaas dit werkt niet) ----------
-#CONFIG_DEVICE_VENDOR_ID=0xFFF1
-#CONFIG_DEVICE_PRODUCT_ID=0x8001
-#Daarom onbekende vendor en product ID zodat HA terugvalt op CHIPProjectConfig.h naam
-CONFIG_DEVICE_VENDOR_ID=0xFFF2
-CONFIG_DEVICE_PRODUCT_ID=0x8002
+# ---------- Matter device basics ----------
+# Vendor/Product ID: 0xFFF1/0x8001 = standaard test-IDs (CSA).
+# De display-naam in HA komt NIET uit deze IDs maar uit CHIPProjectConfig.h
+# (CHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME / _PRODUCT_NAME).
+CONFIG_DEVICE_VENDOR_ID=0xFFF1
+CONFIG_DEVICE_PRODUCT_ID=0x8001
 CONFIG_DEVICE_TYPE_ON_OFF_LIGHT_SWITCH=y
 CONFIG_CHIP_PROJECT_CONFIG="main/CHIPProjectConfig.h"
 

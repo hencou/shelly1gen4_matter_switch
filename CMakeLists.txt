@@ -26,3 +26,9 @@ project(shelly1gen4_matter_switch)
 idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H;-Wno-overloaded-virtual" APPEND)
 idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
 idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)
+
+# main/ op de globale include-path zodat CHIPProjectConfig.h door alle
+# componenten gevonden wordt — inclusief de CHIP SDK (GN build).
+# Zonder dit vindt #include <CHIPProjectConfig.h> in CHIPConfig.h ons
+# bestand niet, en valt CHIPDeviceConfig.h terug op "TEST_VENDOR"/"TEST_PRODUCT".
+idf_build_set_property(COMPILE_OPTIONS "-I${CMAKE_SOURCE_DIR}/main" APPEND)
