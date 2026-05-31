@@ -31,10 +31,12 @@ static bool s_dim_up = true;
 
 extern "C" void on_button_event(input_id_t id, button_event_t evt)
 {
-    /* Alle 3 inputs sturen via dezelfde Matter endpoint (= drukker EP).
-     * Daardoor is er maar één binding nodig in HA voor alle drie de inputs. */
+    /* EP1 = toggle (momentknop), EP5 = state-follow (vaste schakelaar).
+     * Alle 3 inputs sturen naar beide endpoints; de gebruiker kiest via
+     * binding welk endpoint zijn lamp/relais bedient. */
     uint16_t ep = matter_ep_drukker();
-    ESP_LOGI(TAG, "button id=%d evt=%d ep=%u", id, evt, ep);
+    uint16_t ep_sf = matter_ep_state();
+    ESP_LOGI(TAG, "button id=%d evt=%d ep=%u ep_sf=%u", id, evt, ep, ep_sf);
 
     switch (evt) {
     case BTN_EVT_SHORT_PRESS:
@@ -59,6 +61,14 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
          * in ota_handle_pending() die 6x klik als factory reset behandelt.) */
         ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> requesting OTA mode", id);
         ota_request_at_next_boot();
+        break;
+
+    case BTN_EVT_CONTACT_CLOSED:
+        matter_send_onoff_on(ep_sf);
+        break;
+
+    case BTN_EVT_CONTACT_OPEN:
+        matter_send_onoff_off(ep_sf);
         break;
     }
 }

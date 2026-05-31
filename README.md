@@ -2,12 +2,16 @@
 
 **Custom Matter-over-Thread firmware** voor de **Shelly 1 Gen4** (ESP32-C6).
 
-1. **Matter OnOff/Dimmer Light Switch** (Wandschakelaar op SW) — bind-client, kort drukken = toggle, lang = dimmen
-2. **Matter Temperature Sensor** — DS18B20 op 1-Wire GPIO16 (Analog in Addon)
-3. **Matter Occupancy Sensor** — HLK-LD2410 op GPIO17 (Data ingang Addon)
-4. **Matter OnOff Light** (Relais op GPIO5) — server endpoint, direct aanstuurbaar vanuit HA
+1. **Matter OnOff/Dimmer Light Switch** (Toggle, EP1) — bind-client, kort drukken = toggle, lang = dimmen
+2. **Matter Temperature Sensor** (EP2) — DS18B20 op 1-Wire GPIO16 (Analog in Addon)
+3. **Matter Occupancy Sensor** (EP3) — HLK-LD2410 op GPIO17 (Data ingang Addon)
+4. **Matter OnOff Light** (Relais op GPIO5, EP4) — server endpoint, direct aanstuurbaar vanuit HA
+5. **Matter OnOff Light Switch** (State-follow, EP5) — bind-client, On bij contact-sluiting, Off bij -opening
 
-Alle 4 endpoints zijn altijd actief — geen compile-time keuze nodig. Universele firmware voor alle configuraties.
+Alle 5 endpoints zijn altijd actief — geen compile-time keuze nodig. Universele firmware voor alle configuraties.
+EP1 (Toggle) en EP5 (State-follow) bedienen dezelfde fysieke inputs — de gebruiker kiest via binding welk endpoint zijn lamp/relais aanstuurt:
+- **Momentknop** (drukker) → bind EP1
+- **Vaste/wissel-schakelaar** → bind EP5
 
 Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter Server, Google TV Streamer, mag offline — direct Thread-mesh-multicast naar de gebonden bulbs.
 
@@ -62,22 +66,25 @@ Status-LED-patronen (`status_led.c`):
 
 | Endpoint | Device type | Server clusters | Client clusters | Doel |
 |---|---|---|---|---|
-| **EP 1** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff, LevelControl | Drukker → bind → lamp |
+| **EP 1** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff, LevelControl | Momentknop → Toggle → lamp |
 | **EP 2** | 0x0302 Temperature Sensor | TemperatureMeasurement | — | DS18B20 report |
 | **EP 3** | 0x0107 Occupancy Sensor | OccupancySensing | — | LD2410 binary |
 | **EP 4** | 0x0100 OnOff Light | OnOff | — | Relais GPIO5 — aanstuurbaar vanuit HA |
+| **EP 5** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff | Vaste schakelaar → On/Off → lamp |
 
-EP1 heeft de **Binding cluster** (server). De Binding-tabel wordt door HA Matter Server of `chip-tool` ingevuld met:
+EP1 en EP5 hebben elk een **Binding cluster** (server). De Binding-tabel wordt door HA Matter Server of `chip-tool` ingevuld met:
 - Unicast-binding (1 specifiek bulb, identified by node-ID + endpoint)
 - Multicast-binding (1 group-ID — alle bulbs in die group reageren tegelijk)
 
 Bij elke knop-event stuurt `matter_device.cpp` commando's direct via `FindOrEstablishSession` + `InvokeCommandRequest` naar elke entry in de Binding-tabel.
 
-**EP4 (relais)** is een server endpoint — HA ziet dit als een schakelaar die je direct kunt aan/uitzetten. Om het relais mee te laten schakelen met de drukker, maak een binding van EP1 naar EP4 (zie binding-setup hieronder).
+**EP1 vs EP5:** Beide endpoints worden door dezelfde fysieke inputs aangestuurd. EP1 stuurt Toggle (voor momentknoppen), EP5 stuurt On/Off (voor vaste schakelaars die een stand vasthouden). Bind het endpoint dat past bij je schakelaartype.
+
+**EP4 (relais)** is een server endpoint — HA ziet dit als een schakelaar die je direct kunt aan/uitzetten. Om het relais mee te laten schakelen met de drukker, maak een binding van EP1 of EP5 naar EP4 (zie binding-setup hieronder).
 
 ## Gebruikers-interactie
 
-Alle 3 inputs doen **precies hetzelfde** — ze sturen allemaal via EP1 (drukker endpoint):
+Alle 3 inputs doen **precies hetzelfde** — ze sturen via EP1 (Toggle) én EP5 (State-follow):
 
 | GPIO | Input | Omschrijving |
 |---|---|---|
@@ -87,12 +94,14 @@ Alle 3 inputs doen **precies hetzelfde** — ze sturen allemaal via EP1 (drukker
 
 | Actie | Effect |
 |---|---|
-| Kort drukken (< 500 ms) | Matter `OnOff.Toggle` naar alle binding-entries (EP1) |
-| Lang drukken (> 500 ms) | `LevelControl.Move` (up/down, alternerend) |
-| Loslaten | `LevelControl.Stop` |
+| Kort drukken (< 500 ms) | Matter `OnOff.Toggle` naar EP1 binding-entries |
+| Contact sluiten | Matter `OnOff.On` naar EP5 binding-entries (state-follow) |
+| Contact openen | Matter `OnOff.Off` naar EP5 binding-entries (state-follow) |
+| Lang drukken (> 500 ms) | `LevelControl.Move` (up/down, alternerend) via EP1 |
+| Loslaten | `LevelControl.Stop` via EP1 |
 | 6× snel (< 2,5 s) | **Mode toggle** — in Matter-mode: reboot naar OTA-mode; in OTA-mode: factory reset (wipe nvs + chip_kvs) |
 
-> ℹ️ Alle 3 inputs lopen via dezelfde callback in `app_main.cpp` en gebruiken hetzelfde Matter endpoint (EP1). Eén binding in HA is voldoende voor alle inputs.
+> ℹ️ Alle 3 inputs lopen via dezelfde callback in `app_main.cpp`. EP1 (Toggle) en EP5 (State-follow) hebben elk een eigen Binding-tabel. Bind EP1 voor momentknoppen, EP5 voor vaste schakelaars — of beide als je zowel toggle als state-follow wilt.
 
 ## Commissioning in Home Assistant Matter Server
 
@@ -100,7 +109,7 @@ Alle 3 inputs doen **precies hetzelfde** — ze sturen allemaal via EP1 (drukker
 2. Open Home Assistant → Settings → Devices & Services → Matter → "Add device".
 3. Voer setup-code in: **20202021** (default test passcode, configureerbaar in `sdkconfig.defaults`).
 4. HA Matter Server pairt via BLE, provisioneert Thread-credentials (vraag aan Google TV Streamer als TBR), het apparaat join het Thread-netwerk.
-5. Na ~30-60 s verschijnt het apparaat in HA met 4 entities: switch (drukker), temperature sensor, occupancy sensor, relais (light).
+5. Na ~30-60 s verschijnt het apparaat in HA met 5 entities: switch toggle (EP1), switch state-follow (EP5), temperature sensor, occupancy sensor, relais (light).
 
 ⚠️ **Het Thread-netwerk moet al bestaan** — Google TV Streamer is je TBR. Als HA Matter Server zelf nog niet aan datzelfde Thread-netwerk gekoppeld is, gebruik dan HA Connect ZBT-2 of een vergelijkbare dongle als secondary TBR (delen automatisch het Thread-credentialset via de Thread-credentials API).
 
@@ -143,6 +152,26 @@ chip-tool binding write binding \
 ```
 
 Zonder deze binding reageert het relais alleen op commando's vanuit HA (of andere controllers).
+
+### Vaste schakelaar → lamp/relais (EP5, state-follow)
+
+Voor een vaste of wissel-schakelaar die een stand vasthoudt (maintained contact), bind EP5 in plaats van EP1. EP5 stuurt On bij sluiting en Off bij opening:
+
+```bash
+STATE_EP=5    # state-follow = EP5
+
+# Bind vaste schakelaar (EP5) aan de bulb — lamp volgt schakelaarstand
+chip-tool binding write binding \
+  '[{"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":6}]' \
+  $SWITCH_NODE $STATE_EP
+
+# Of bind EP5 aan het lokale relais — relais volgt schakelaarstand
+chip-tool binding write binding \
+  '[{"fabricIndex":1,"node":'$SWITCH_NODE',"endpoint":4,"cluster":6}]' \
+  $SWITCH_NODE $STATE_EP
+```
+
+> ℹ️ EP1 en EP5 kunnen naast elkaar bestaan. Je kunt EP1 binden aan een lamp (toggle) en EP5 aan het relais (state-follow), of andersom.
 
 ### Many-to-many: groups gebruiken
 
