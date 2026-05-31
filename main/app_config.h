@@ -57,10 +57,13 @@ extern "C" {
 #define EP_TEMPERATURE      2
 #define EP_OCCUPANCY        3
 #define EP_RELAY            4
+#define EP_SWITCH_STATE     5
 
 /* Logical input source identifiers.
  * Alle 3 inputs hebben uniform gedrag (zie on_button_event in app_main.cpp):
- *   - SHORT_PRESS       -> Matter Toggle naar bound apparaten (lamp, evt. EP4 relais via binding)
+ *   - SHORT_PRESS       -> Matter Toggle naar EP1 bound apparaten (momentknop)
+ *   - CONTACT_CLOSED    -> Matter On naar EP5 bound apparaten (state-follow)
+ *   - CONTACT_OPEN      -> Matter Off naar EP5 bound apparaten (state-follow)
  *   - LONG_PRESS_START  -> Matter LevelControl Move (dim up/down)
  *   - LONG_PRESS_STOP   -> Matter LevelControl Stop
  *   - 6x klik           -> mode toggle (Matter <-> OTA, universeel)

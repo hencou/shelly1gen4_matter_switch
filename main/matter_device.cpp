@@ -1,14 +1,22 @@
 /*
  * Matter device implementatie voor Shelly 1 Gen4 (ESP32-C6).
  *
- * 4 endpoints:
- *   EP1 = OnOff Light Switch  + OnOff client + LevelControl client + Binding cluster
+ * 5 endpoints:
+ *   EP1 = OnOff Light Switch  + OnOff client + LevelControl client + Binding — Toggle
  *   EP2 = Temperature Sensor  (server)
  *   EP3 = Occupancy Sensor    (server)
  *   EP4 = OnOff Light          (server) — fysiek relais, aanstuurbaar vanuit HA
+ *   EP5 = OnOff Light Switch  + OnOff client + Binding — State-follow (On/Off)
+ *
+ * EP1 vs EP5:
+ *   EP1 stuurt Toggle bij elke korte druk — geschikt voor momentknoppen.
+ *   EP5 stuurt On bij contact-sluiting en Off bij contact-opening —
+ *   geschikt voor vaste/wissel-schakelaars. De gebruiker kiest via de
+ *   binding welk endpoint zijn lamp/relais bedient.
  *
  * Commando-emit naar bound nodes/groups:
- *   - app_main.c roept matter_send_onoff_toggle(ep) / matter_send_level_move/stop(ep)
+ *   - app_main.c roept matter_send_onoff_toggle/on/off(ep) /
+ *     matter_send_level_move/stop(ep)
  *   - die data wordt naar de CHIP-thread gescheduled
  *   - SwitchWorkerFunction itereert de BindingTable en stuurt commando's
  *     direct via FindOrEstablishSession + InvokeCommandRequest.
@@ -76,6 +84,7 @@ using namespace chip;
 using namespace chip::app::Clusters;
 
 static uint16_t s_ep_drukker = 0;
+static uint16_t s_ep_state   = 0;
 static uint16_t s_ep_temp    = 0;
 static uint16_t s_ep_occ     = 0;
 static uint16_t s_ep_relay   = 0;
@@ -118,6 +127,12 @@ static void send_onoff_multicast(const BindingCommandData &d, const EmberBinding
 {
     if (d.commandId == OnOff::Commands::Toggle::Id) {
         OnOff::Commands::Toggle::Type cmd;
+        chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
+    } else if (d.commandId == OnOff::Commands::On::Id) {
+        OnOff::Commands::On::Type cmd;
+        chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
+    } else if (d.commandId == OnOff::Commands::Off::Id) {
+        OnOff::Commands::Off::Type cmd;
         chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
     }
 }
@@ -166,6 +181,14 @@ struct DirectSendCtx {
         if (d.clusterId == OnOff::Id) {
             if (d.commandId == OnOff::Commands::Toggle::Id) {
                 OnOff::Commands::Toggle::Type c;
+                chip::Controller::InvokeCommandRequest(
+                    &em, sh, b.remote, c, make_on_success(), make_on_error());
+            } else if (d.commandId == OnOff::Commands::On::Id) {
+                OnOff::Commands::On::Type c;
+                chip::Controller::InvokeCommandRequest(
+                    &em, sh, b.remote, c, make_on_success(), make_on_error());
+            } else if (d.commandId == OnOff::Commands::Off::Id) {
+                OnOff::Commands::Off::Type c;
                 chip::Controller::InvokeCommandRequest(
                     &em, sh, b.remote, c, make_on_success(), make_on_error());
             }
@@ -272,6 +295,18 @@ extern "C" void matter_send_onoff_toggle(uint16_t ep)
     switch_send(ep, OnOff::Id, OnOff::Commands::Toggle::Id);
 }
 
+extern "C" void matter_send_onoff_on(uint16_t ep)
+{
+    if (!ep) return;
+    switch_send(ep, OnOff::Id, OnOff::Commands::On::Id);
+}
+
+extern "C" void matter_send_onoff_off(uint16_t ep)
+{
+    if (!ep) return;
+    switch_send(ep, OnOff::Id, OnOff::Commands::Off::Id);
+}
+
 extern "C" void matter_send_level_move(uint16_t ep, bool up, uint8_t rate)
 {
     if (!ep) return;
@@ -311,6 +346,7 @@ extern "C" void matter_factory_reset(void)
 }
 
 extern "C" uint16_t matter_ep_drukker(void) { return s_ep_drukker; }
+extern "C" uint16_t matter_ep_state(void)   { return s_ep_state; }
 extern "C" uint16_t matter_ep_relay(void)   { return s_ep_relay; }
 
 
@@ -407,6 +443,19 @@ extern "C" esp_err_t matter_start(void)
     endpoint_t *ep_relay = on_off_light::create(node, &relay_cfg, ENDPOINT_FLAG_NONE, NULL);
     s_ep_relay = endpoint::get_id(ep_relay);
     ESP_LOGI(TAG, "EP%u = OnOff Light (relais)", s_ep_relay);
+
+    /* EP5 — OnOff Light Switch (state-follow) + Binding
+     * Zelfde device-type als EP1 maar bedoeld voor vaste schakelaars:
+     * stuurt On bij contact-sluiting, Off bij contact-opening.
+     * Gebruiker bindt EP5 (i.p.v. EP1) voor state-following gedrag. */
+    on_off_switch::config_t sf_cfg;
+    endpoint_t *ep_state = on_off_switch::create(node, &sf_cfg, ENDPOINT_FLAG_NONE, NULL);
+    {
+        binding::config_t bind_cfg;
+        binding::create(ep_state, &bind_cfg, CLUSTER_FLAG_SERVER);
+    }
+    s_ep_state = endpoint::get_id(ep_state);
+    ESP_LOGI(TAG, "EP%u = OnOff Light Switch (state-follow)", s_ep_state);
 
     /* OTA-cluster requestor (optioneel: voor Matter OTA via TBR — werkt naast onze WiFi-OTA) */
     esp_matter_ota_requestor_init();

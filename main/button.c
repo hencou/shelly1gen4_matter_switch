@@ -109,11 +109,13 @@ static void handle_edge(btn_isr_msg_t *m)
         s->pressed        = true;
         s->press_start_us = m->t_us;
         s->long_fired     = false;
+        if (s_cb) s_cb(m->id, BTN_EVT_CONTACT_CLOSED);
 
     } else if (!pressed_now && s->pressed) {
         /* neergaande flank: knop losgelaten */
         int64_t dur_ms = (m->t_us - s->press_start_us) / 1000;
         s->pressed = false;
+        if (s_cb) s_cb(m->id, BTN_EVT_CONTACT_OPEN);
 
         if (s->long_fired) {
             if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_STOP);

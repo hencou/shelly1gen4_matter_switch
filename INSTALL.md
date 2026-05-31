@@ -231,6 +231,7 @@ I (... ) matter_dev: EP1 = OnOff Light Switch (drukker)
 I (... ) matter_dev: EP2 = Temperature Sensor
 I (... ) matter_dev: EP3 = Occupancy Sensor (LD2410)
 I (... ) matter_dev: EP4 = OnOff Light (relais)
+I (... ) matter_dev: EP5 = OnOff Light Switch (state-follow)
 I (... ) chip[DL]: Device Configuration:
 I (... ) chip[DL]:   Setup Pin Code: 20202021
 I (... ) chip[DL]:   Setup Discriminator: 3840 (0xF00)
@@ -308,6 +309,24 @@ chip-tool binding write binding \
     {"fabricIndex":1,"node":'$SWITCH',"endpoint":4,"cluster":6}]' \
   $SWITCH 1
 ```
+
+### Optioneel: vaste schakelaar (EP5, state-follow)
+
+EP5 is een tweede switch-endpoint dat On/Off stuurt op basis van de schakelaarstand (i.p.v. Toggle). Gebruik EP5 voor vaste of wissel-schakelaars:
+
+```bash
+# Bind vaste schakelaar (EP5) aan de bulb — lamp volgt schakelaarstand
+chip-tool binding write binding \
+  '[{"fabricIndex":1,"node":'$BULB',"endpoint":1,"cluster":6}]' \
+  $SWITCH 5
+
+# Of bind EP5 aan het lokale relais (EP4)
+chip-tool binding write binding \
+  '[{"fabricIndex":1,"node":'$SWITCH',"endpoint":4,"cluster":6}]' \
+  $SWITCH 5
+```
+
+> EP1 (Toggle) en EP5 (State-follow) werken naast elkaar. Bind het endpoint dat past bij je schakelaartype.
 
 ## 10. OTA — firmware-updates zonder UART
 
