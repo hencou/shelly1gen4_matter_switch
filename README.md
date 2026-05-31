@@ -5,11 +5,13 @@
 1. **Matter OnOff/Dimmer Light Switch** (Wandschakelaar op SW) — bind-client, kort drukken = toggle, lang = dimmen
 2. **Matter Temperature Sensor** — DS18B20 op 1-Wire GPIO16 (Analog in Addon)
 3. **Matter Occupancy Sensor** — HLK-LD2410 op GPIO17 (Data ingang Addon)
-4. Lokaal relais (GPIO5) mee-schakelen op de drukker-toggle (optioneel bedraad last)
+4. **Matter OnOff Light** (Relais op GPIO5) — server endpoint, direct aanstuurbaar vanuit HA
 
-Alle 3 endpoints zijn altijd actief — geen compile-time keuze nodig. Universele firmware voor alle configuraties.
+Alle 4 endpoints zijn altijd actief — geen compile-time keuze nodig. Universele firmware voor alle configuraties.
 
 Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter Server, Google TV Streamer, mag offline — direct Thread-mesh-multicast naar de gebonden bulbs.
+
+Het relais (EP4) is **niet meer hardcoded gekoppeld** aan de knopdruk. Via een Matter binding van EP1 naar EP4 kun je het relais optioneel mee laten schakelen. Zonder binding reageert het relais alleen op commando's vanuit HA.
 
 ## Gebaseerd op
 
@@ -63,12 +65,15 @@ Status-LED-patronen (`status_led.c`):
 | **EP 1** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff, LevelControl | Drukker → bind → lamp |
 | **EP 2** | 0x0302 Temperature Sensor | TemperatureMeasurement | — | DS18B20 report |
 | **EP 3** | 0x0107 Occupancy Sensor | OccupancySensing | — | LD2410 binary |
+| **EP 4** | 0x0100 OnOff Light | OnOff | — | Relais GPIO5 — aanstuurbaar vanuit HA |
 
 EP1 heeft de **Binding cluster** (server). De Binding-tabel wordt door HA Matter Server of `chip-tool` ingevuld met:
 - Unicast-binding (1 specifiek bulb, identified by node-ID + endpoint)
 - Multicast-binding (1 group-ID — alle bulbs in die group reageren tegelijk)
 
-Bij elke knop-event roept `matter_device.cpp` `chip::BindingManager::NotifyBoundClusterChanged()` aan; de BindingManager schiet vervolgens de OnOff- of LevelControl-commando's naar elke entry in de tabel.
+Bij elke knop-event stuurt `matter_device.cpp` commando's direct via `FindOrEstablishSession` + `InvokeCommandRequest` naar elke entry in de Binding-tabel.
+
+**EP4 (relais)** is een server endpoint — HA ziet dit als een schakelaar die je direct kunt aan/uitzetten. Om het relais mee te laten schakelen met de drukker, maak een binding van EP1 naar EP4 (zie binding-setup hieronder).
 
 ## Gebruikers-interactie
 
@@ -82,7 +87,7 @@ Alle 3 inputs doen **precies hetzelfde** — ze sturen allemaal via EP1 (drukker
 
 | Actie | Effect |
 |---|---|
-| Kort drukken (< 500 ms) | Matter `OnOff.Toggle` naar alle binding-entries (EP1) + lokaal relais tikken |
+| Kort drukken (< 500 ms) | Matter `OnOff.Toggle` naar alle binding-entries (EP1) |
 | Lang drukken (> 500 ms) | `LevelControl.Move` (up/down, alternerend) |
 | Loslaten | `LevelControl.Stop` |
 | 6× snel (< 2,5 s) | **Mode toggle** — in Matter-mode: reboot naar OTA-mode; in OTA-mode: factory reset (wipe nvs + chip_kvs) |
@@ -95,7 +100,7 @@ Alle 3 inputs doen **precies hetzelfde** — ze sturen allemaal via EP1 (drukker
 2. Open Home Assistant → Settings → Devices & Services → Matter → "Add device".
 3. Voer setup-code in: **20202021** (default test passcode, configureerbaar in `sdkconfig.defaults`).
 4. HA Matter Server pairt via BLE, provisioneert Thread-credentials (vraag aan Google TV Streamer als TBR), het apparaat join het Thread-netwerk.
-5. Na ~30-60 s verschijnt het apparaat in HA met 3 entities: switch (drukker), temperature sensor, occupancy sensor.
+5. Na ~30-60 s verschijnt het apparaat in HA met 4 entities: switch (drukker), temperature sensor, occupancy sensor, relais (light).
 
 ⚠️ **Het Thread-netwerk moet al bestaan** — Google TV Streamer is je TBR. Als HA Matter Server zelf nog niet aan datzelfde Thread-netwerk gekoppeld is, gebruik dan HA Connect ZBT-2 of een vergelijkbare dongle als secondary TBR (delen automatisch het Thread-credentialset via de Thread-credentials API).
 
@@ -121,6 +126,23 @@ chip-tool binding write binding \
 ```
 
 `cluster:6` = OnOff, `cluster:8` = LevelControl.
+
+### Drukker → relais koppelen (optioneel)
+
+Om het lokale relais mee te laten schakelen bij een knopdruk, voeg een binding toe van EP1 naar EP4 (het relais endpoint op dezelfde Shelly):
+
+```bash
+RELAY_EP=4    # relais = EP4
+
+# Bind drukker (EP1) aan zowel de bulb ALS het lokale relais
+chip-tool binding write binding \
+  '[{"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":6},
+    {"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":8},
+    {"fabricIndex":1,"node":'$SWITCH_NODE',"endpoint":'$RELAY_EP',"cluster":6}]' \
+  $SWITCH_NODE $SWITCH_EP
+```
+
+Zonder deze binding reageert het relais alleen op commando's vanuit HA (of andere controllers).
 
 ### Many-to-many: groups gebruiken
 
@@ -174,7 +196,7 @@ shelly1gen4_matter_switch/
 │   ├── app_config.h        # pins, timings, BENCH_MODE (productie=0, bench=1)
 │   ├── app_main.cpp        # C++ entrypoint, hergebruikt C-modules
 │   ├── CHIPProjectConfig.h # vendor/product-naam overrides (i.p.v. TEST_VENDOR/TEST_PRODUCT)
-│   ├── matter_device.cpp   # 3 endpoints + Binding cluster + bound-command emit
+│   ├── matter_device.cpp   # 4 endpoints + Binding cluster + bound-command emit
 │   ├── matter_device.h
 │   ├── button.c/.h         # hergebruikt uit Zigbee project
 │   ├── relay.c/.h          # idem

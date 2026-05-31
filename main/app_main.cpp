@@ -39,7 +39,6 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
     switch (evt) {
     case BTN_EVT_SHORT_PRESS:
         matter_send_onoff_toggle(ep);
-        relay_toggle();              /* altijd lokaal relais tikken */
         status_led_blip();
         break;
 

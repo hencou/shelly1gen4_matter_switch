@@ -1,6 +1,5 @@
 /*
- * Lokaal relais op GPIO5. De relais spiegelt de OnOff-toggle van EP1
- * (drukker) zodat een bedraad last (bv. ventilator) meegeschakeld wordt.
+ * Lokaal relais op GPIO5. Aangestuurd via Matter EP4 (OnOff Light server).
  * State wordt in NVS bewaard voor power-outage recovery.
  */
 
