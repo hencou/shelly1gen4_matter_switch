@@ -60,6 +60,22 @@ De Add-on gebruikt een **ISO7221A galvanische isolator** die het 1-Wire protocol
 
 Alle pinnen zijn aanpasbaar via `idf.py menuconfig` → **"Shelly 1 Gen4 Matter Switch configuration"**.
 
+**J6 connector pinout** (1.27 mm pitch, 7-pin header op de achterkant van de PCB):
+
+Nummering loopt van het pin het verst van het J6-label (pin 1) naar het pin direct naast het label (pin 7 = GND).
+
+| Pin | Functie | GPIO | Toelichting |
+|---|---|---|---|
+| 1 | **ESP_DBG_UART** | GPIO18 (Digital IN) | TTP223 touch / niet gebruikt voor flashen |
+| 2 | **TXD** | GPIO16 (UART0 TX // 1-Wire RX) | Shelly TXD → CP2102 RXD |
+| 3 | **RXD** | GPIO17 (UART0 RX // Analog IN) | Shelly RXD ← CP2102 TXD |
+| 4 | **3.3V** | -- | voeding (alleen 3.3V — **géén 5V**) |
+| 5 | **RESET** | EN | EN — niet nodig voor handmatig flashen |
+| 6 | **GPIO0 (BOOT)** | GPIO0 | low bij power-up → flash mode |
+| 7 | **GND** | -- | massa — pin direct naast het `J6` silkscreen |
+
+> ⚠️ **Pin 7 = GND is je oriëntatie-anker**: zet een multimeter op continuïteit, zoek de pin die piept tegen de metalen shield van het ESP-module — dat is pin 7. GPIO9 (1-Wire TX) zit **niet** op J6 maar is intern gerouteerd op de PCB.
+
 Status-LED-patronen (`status_led.c`):
 - **Snelle knipper (5 Hz)** tijdens boot/initialisatie
 - **Langzame knipper (1 Hz)** tijdens commissioning (BLE-pairing window)
