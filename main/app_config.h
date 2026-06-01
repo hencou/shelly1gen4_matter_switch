@@ -27,9 +27,9 @@ extern "C" {
 #define BENCH_MODE 0
 #endif
 
-/* Add-on inputs — TTP223 and LD2410 each have their own GPIO, always active. */
+/* Add-on inputs — always active. */
 #define PIN_TOUCH_INPUT     CONFIG_PIN_TOUCH_INPUT      /* TTP223 capacitive touch (GPIO18) */
-#define PIN_LD2410_INPUT    CONFIG_PIN_LD2410_INPUT      /* HLK-LD2410 occupancy   (GPIO17) */
+#define PIN_LD2410_INPUT    CONFIG_PIN_LD2410_INPUT      /* Analog IN — PWM duty cycle (GPIO17) */
 
 #define PIN_STATUS_LED      CONFIG_PIN_STATUS_LED      /* Shelly Add-on LED, -1 = disabled */
 

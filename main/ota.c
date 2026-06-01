@@ -371,35 +371,22 @@ static esp_err_t sensor_get(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ---------- GPIO17 (occupancy) diagnostic ---------- */
+/* ---------- GPIO17 (Analog IN / occupancy) diagnostic ---------- */
 
-#include "soc/gpio_reg.h"
-#include "soc/io_mux_reg.h"
 #include "esp_private/periph_ctrl.h"
 #include "soc/periph_defs.h"
 
 static esp_err_t gpio17_diag_get(httpd_req_t *req)
 {
-    static char buf[3584];
+    static char buf[2048];
     int pos = 0;
 
-    /* ---- Step 0: read BEFORE any reconfiguration ---- */
-    uint32_t gpio_in_before = REG_READ(GPIO_IN_REG);
-    int raw_before = (gpio_in_before >> PIN_LD2410_INPUT) & 1;
-
-    /* ---- Step 1: install + delete UART0 driver ---- */
-    esp_err_t inst_err = uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
-    esp_err_t del_err  = uart_driver_delete(UART_NUM_0);
-
-    /* ---- Step 1b: read AFTER driver teardown but BEFORE periph_module_disable ---- */
-    uint32_t gpio_in_mid = REG_READ(GPIO_IN_REG);
-    int raw_mid = (gpio_in_mid >> PIN_LD2410_INPUT) & 1;
-
-    /* ---- Step 1c: force-disable UART0 module (drains console-init ref_count) ---- */
+    /* ---- UART0 teardown (same as sensors_init) ---- */
+    uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+    uart_driver_delete(UART_NUM_0);
     periph_module_disable(PERIPH_UART0_MODULE);
-
-    /* ---- Step 2: reset pin and configure as input with pull-down ---- */
     gpio_reset_pin(PIN_LD2410_INPUT);
+
     gpio_config_t cfg = {
         .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
         .mode         = GPIO_MODE_INPUT,
@@ -407,73 +394,50 @@ static esp_err_t gpio17_diag_get(httpd_req_t *req)
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
         .intr_type    = GPIO_INTR_DISABLE,
     };
-    esp_err_t cfg_err = gpio_config(&cfg);
-    gpio_pullup_dis(PIN_LD2410_INPUT);
-    gpio_pulldown_en(PIN_LD2410_INPUT);
+    gpio_config(&cfg);
 
-    /* ---- Step 3: read AFTER reconfiguration ---- */
-    int level_api = gpio_get_level(PIN_LD2410_INPUT);
-    uint32_t gpio_in_after = REG_READ(GPIO_IN_REG);
-    int raw_after = (gpio_in_after >> PIN_LD2410_INPUT) & 1;
-
-    /* ---- Step 4: multiple rapid reads ---- */
-    int reads[10];
-    for (int i = 0; i < 10; i++) {
-        reads[i] = gpio_get_level(PIN_LD2410_INPUT);
-        esp_rom_delay_us(1000); /* 1 ms between reads */
+    /* ---- Duty cycle measurement: sample over 100 ms ---- */
+    int high = 0, total = 0;
+    for (int us = 0; us < 100000; us += 100) {
+        if (gpio_get_level(PIN_LD2410_INPUT)) high++;
+        total++;
+        esp_rom_delay_us(100);
     }
+    int duty = (high * 100) / total;
+    int occ  = (duty >= 50);
 
     /* ---- Build HTML ---- */
     pos += snprintf(buf + pos, sizeof(buf) - pos,
         "<!DOCTYPE html><html><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<meta http-equiv=refresh content=1>"
+        "<meta http-equiv=refresh content=2>"
         "<title>GPIO17 Diagnostic</title>"
         "<style>body{font-family:monospace;max-width:560px;margin:2em auto;padding:1em}"
-        "h2{font-family:sans-serif}.ok{color:green}.err{color:red}"
+        "h2{font-family:sans-serif}"
         ".hi{color:red;font-weight:bold}.lo{color:green;font-weight:bold}"
         "table{border-collapse:collapse;margin:.5em 0}"
         "td,th{border:1px solid #ccc;padding:4px 10px;text-align:left}"
         "</style></head><body>"
-        "<h2>&#128270; GPIO17 (Occupancy) Diagnostic</h2>"
-        "<p>Auto-refreshes every 1s. Connect J6 pin 3 to pin 4 (3.3V) or pin 7 (GND).</p>");
+        "<h2>&#128270; GPIO17 (Analog IN) Diagnostic</h2>"
+        "<p>Auto-refreshes every 2 s.  Duty cycle sampled over 100 ms (1000 reads).</p>");
 
-    /* Current level — big and visible */
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<h3>Current level: <span class=%s>%s (%d)</span></h3>",
-        level_api ? "hi" : "lo",
-        level_api ? "HIGH — occupied" : "LOW — clear",
-        level_api);
+        "<h3>Duty cycle: <span class=%s>%d%%</span></h3>"
+        "<h3>Occupancy: <span class=%s>%s</span></h3>",
+        occ ? "hi" : "lo", duty,
+        occ ? "hi" : "lo", occ ? "OCCUPIED" : "CLEAR");
 
-    /* Detail table */
     pos += snprintf(buf + pos, sizeof(buf) - pos,
         "<table>"
-        "<tr><th>Check</th><th>Result</th></tr>"
-        "<tr><td>PIN_LD2410_INPUT</td><td>GPIO%d</td></tr>"
-        "<tr><td>uart_driver_install</td><td>%s (0x%x)</td></tr>"
-        "<tr><td>uart_driver_delete</td><td>%s (0x%x)</td></tr>"
-        "<tr><td>gpio_config</td><td>%s (0x%x)</td></tr>"
-        "<tr><td>GPIO_IN_REG <b>before</b> anything</td><td>bit %d = <b>%d</b> (raw 0x%08lx)</td></tr>"
-        "<tr><td>GPIO_IN_REG <b>after</b> uart delete</td><td>bit %d = <b>%d</b> (raw 0x%08lx)</td></tr>"
-        "<tr><td>GPIO_IN_REG <b>after</b> periph_module_disable</td><td>bit %d = <b>%d</b> (raw 0x%08lx)</td></tr>"
-        "<tr><td>gpio_get_level()</td><td><b>%d</b></td></tr>"
+        "<tr><th>Parameter</th><th>Value</th></tr>"
+        "<tr><td>GPIO</td><td>%d</td></tr>"
+        "<tr><td>Samples</td><td>%d (HIGH: %d)</td></tr>"
+        "<tr><td>Duty cycle</td><td>%d%%</td></tr>"
+        "<tr><td>Threshold</td><td>50%%</td></tr>"
+        "<tr><td>Result</td><td>%s</td></tr>"
         "</table>",
-        PIN_LD2410_INPUT,
-        esp_err_to_name(inst_err), (unsigned)inst_err,
-        esp_err_to_name(del_err), (unsigned)del_err,
-        esp_err_to_name(cfg_err), (unsigned)cfg_err,
-        PIN_LD2410_INPUT, raw_before, (unsigned long)gpio_in_before,
-        PIN_LD2410_INPUT, raw_mid, (unsigned long)gpio_in_mid,
-        PIN_LD2410_INPUT, raw_after, (unsigned long)gpio_in_after,
-        level_api);
-
-    /* Rapid-read burst */
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<h3>10 rapid reads (1ms apart)</h3><p>");
-    for (int i = 0; i < 10; i++) {
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "%d ", reads[i]);
-    }
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "</p>");
+        PIN_LD2410_INPUT, total, high, duty,
+        occ ? "occupied" : "clear");
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
         "<p><a href=/>&#8592; Back to OTA</a></p></body></html>");

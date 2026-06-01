@@ -47,7 +47,7 @@ menu "Shelly 1 Gen4 Matter Switch configuration"
         default 500
 
     config OCC_DEBOUNCE_MS
-        int "Occupancy debounce window (ms)"
+        int "Occupancy poll interval (ms) — pause between duty-cycle measurements"
         default 200
 
     config TEMP_REPORT_INTERVAL_S
