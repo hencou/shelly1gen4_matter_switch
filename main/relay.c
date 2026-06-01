@@ -1,6 +1,6 @@
 /*
- * Lokaal relais op GPIO5. Aangestuurd via Matter EP4 (OnOff Light server).
- * State wordt in NVS bewaard voor power-outage recovery.
+ * Local relay on GPIO5. Controlled via Matter EP4 (OnOff Light server).
+ * State is persisted in NVS for power-outage recovery.
  */
 
 #include "relay.h"

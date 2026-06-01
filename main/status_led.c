@@ -1,10 +1,10 @@
 /*
- * Eenvoudige status-LED driver met esp_timer-callback.
- * Patronen worden in software gegenereerd (geen LEDC nodig) — voldoende
- * voor 1-5 Hz blink op de Shelly Add-on LED.
+ * Simple status LED driver with esp_timer callback.
+ * Patterns are generated in software (no LEDC needed) — sufficient
+ * for 1-5 Hz blink on the Shelly Add-on LED.
  *
- * Thread-safety: set/blip kunnen vanuit elke task gecalled worden;
- * de esp_timer callback draait altijd op dezelfde timer-task.
+ * Thread safety: set/blip can be called from any task;
+ * the esp_timer callback always runs on the same timer task.
  */
 
 #include "status_led.h"
@@ -25,8 +25,8 @@ static bool s_active_high = true;
 
 static status_led_pattern_t s_pattern = STATUS_LED_OFF;
 static esp_timer_handle_t   s_timer = NULL;
-static bool                 s_phase = false;       /* huidige aan/uit-fase */
-static int64_t              s_blip_end_us = 0;     /* puls-deadline (0 = inactief) */
+static bool                 s_phase = false;       /* current on/off phase */
+static int64_t              s_blip_end_us = 0;     /* pulse deadline (0 = inactive) */
 
 static inline void led_set_raw(bool on)
 {
@@ -42,7 +42,7 @@ static void timer_cb(void *arg)
     (void)arg;
     int64_t now = esp_timer_get_time();
 
-    /* Een actieve blip houdt LED kort aan ongeacht patroon. */
+    /* An active blip keeps the LED on briefly regardless of pattern. */
     if (s_blip_end_us != 0) {
         if (now < s_blip_end_us) {
             led_set_raw(true);
@@ -50,13 +50,13 @@ static void timer_cb(void *arg)
             return;
         }
         s_blip_end_us = 0;
-        /* val door naar normaal patroon */
+        /* fall through to normal pattern */
     }
 
     switch (s_pattern) {
     case STATUS_LED_OFF:
         led_set_raw(false);
-        return;  /* timer niet rescheduelen */
+        return;  /* do not reschedule timer */
     case STATUS_LED_ON:
         led_set_raw(true);
         return;
@@ -97,7 +97,7 @@ esp_err_t status_led_init(void)
     s_active_high = STATUS_LED_ACTIVE_HIGH;
 
     if (s_pin < 0) {
-        ESP_LOGI(TAG, "Status LED uitgeschakeld (PIN_STATUS_LED=%d)", s_pin);
+        ESP_LOGI(TAG, "Status LED disabled (PIN_STATUS_LED=%d)", s_pin);
         return ESP_OK;
     }
 
@@ -110,7 +110,7 @@ esp_err_t status_led_init(void)
     };
     esp_err_t err = gpio_config(&io);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "gpio_config(%d) faalde: %s", s_pin, esp_err_to_name(err));
+        ESP_LOGE(TAG, "gpio_config(%d) failed: %s", s_pin, esp_err_to_name(err));
         return err;
     }
 
@@ -120,13 +120,13 @@ esp_err_t status_led_init(void)
     };
     err = esp_timer_create(&targs, &s_timer);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_timer_create faalde: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "esp_timer_create failed: %s", esp_err_to_name(err));
         return err;
     }
 
     s_enabled = true;
     led_set_raw(false);
-    ESP_LOGI(TAG, "Status LED actief op GPIO%d (active_%s)",
+    ESP_LOGI(TAG, "Status LED active on GPIO%d (active_%s)",
              s_pin, s_active_high ? "high" : "low");
     return ESP_OK;
 }
@@ -136,7 +136,7 @@ void status_led_set(status_led_pattern_t pattern)
     if (!s_enabled) return;
     s_pattern = pattern;
     s_phase = false;
-    /* Trigger callback direct zodat nieuwe patroon meteen ingaat. */
+    /* Trigger callback immediately so the new pattern takes effect right away. */
     schedule_next(1000);  /* 1 ms */
 }
 

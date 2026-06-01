@@ -1,7 +1,7 @@
 # Target = ESP32-C6 (Shelly 1 Gen4)
 CONFIG_IDF_TARGET="esp32c6"
 
-# Shelly 1 Gen4 heeft 8 MB flash, default in ESP-IDF is 2 MB
+# Shelly 1 Gen4 has 8 MB flash, default in ESP-IDF is 2 MB
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 
@@ -13,7 +13,7 @@ CONFIG_BT_NIMBLE_EXT_ADV=n
 CONFIG_BT_NIMBLE_HCI_EVT_BUF_SIZE=70
 CONFIG_USE_MINIMAL_MDNS=n
 CONFIG_ENABLE_EXTENDED_DISCOVERY=y
-# Master toggle: Thread-only Matter device. Excludes alle WiFi-Matter-paden
+# Master toggle: Thread-only Matter device. Excludes all WiFi-Matter paths
 # (NetworkCommissioningDriver_WiFi, ConnectivityManagerImpl_WiFi, etc.)
 CONFIG_ENABLE_MATTER_OVER_THREAD=y
 CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING=y
@@ -38,7 +38,7 @@ CONFIG_MBEDTLS_HKDF_C=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_CHIP_LOG_DEFAULT_LEVEL_INFO=y
 
-# ---------- Partities ----------
+# ---------- Partitions ----------
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
@@ -55,33 +55,33 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=5120
 
 # ---------- Matter device basics ----------
-# Vendor/Product ID: 0xFFF1/0x8001 = standaard test-IDs (CSA).
-# De display-naam in HA komt NIET uit deze IDs maar uit CHIPProjectConfig.h
+# Vendor/Product ID: 0xFFF1/0x8001 = standard test IDs (CSA).
+# The display name in HA does NOT come from these IDs but from CHIPProjectConfig.h
 # (CHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME / _PRODUCT_NAME).
 CONFIG_DEVICE_VENDOR_ID=0xFFF1
 CONFIG_DEVICE_PRODUCT_ID=0x8001
 CONFIG_DEVICE_TYPE_ON_OFF_LIGHT_SWITCH=y
 CONFIG_CHIP_PROJECT_CONFIG="main/CHIPProjectConfig.h"
 
-# Voor development setup-code = 20202021 (test vendor passcode)
+# For development setup code = 20202021 (test vendor passcode)
 CONFIG_DEFAULT_SETUP_PASSCODE=20202021
 CONFIG_DEFAULT_SETUP_DISCRIMINATOR=3840
 
-# Storage backend voor CHIP key-value store
+# Storage backend for CHIP key-value store
 CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL="chip_factory"
 CONFIG_CHIP_KVS_NAMESPACE_PARTITION_LABEL="chip_kvs"
 
-# ---------- Shelly 1 Gen4 pinout (canonical-validated, zie main/Kconfig.projbuild) ----------
-# Drukker (System 55 / wall switch) op de SW-terminal — externe pull op PCB
+# ---------- Shelly 1 Gen4 pinout (canonical-validated, see main/Kconfig.projbuild) ----------
+# Pushbutton (System 55 / wall switch) on the SW terminal — external pull on PCB
 CONFIG_PIN_SWITCH_INPUT=10
 # Relay output (mains-switching, active-high)
 CONFIG_PIN_RELAY=5
-# 1-Wire DS18B20 dual-pin via ISO7221A isolator op Shelly Plus Add-on
+# 1-Wire DS18B20 dual-pin via ISO7221A isolator on Shelly Plus Add-on
 CONFIG_PIN_ONEWIRE_TX=9
 CONFIG_PIN_ONEWIRE_RX=16
-# Status LED op onboard PCB-LED (active-low)
+# Status LED on onboard PCB LED (active-low)
 CONFIG_PIN_STATUS_LED=15
-# STATUS_LED_ACTIVE_HIGH: default n (active-low) — geen extra regel nodig
-# Add-on inputs: TTP223 touch op GPIO0, LD2410 occupancy op GPIO17 — beide altijd actief
+# STATUS_LED_ACTIVE_HIGH: default n (active-low) — no extra line needed
+# Add-on inputs: TTP223 touch on GPIO0, LD2410 occupancy on GPIO17 — both always active
 CONFIG_PIN_TOUCH_INPUT=16
 CONFIG_PIN_LD2410_INPUT=17

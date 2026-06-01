@@ -1,31 +1,31 @@
 /*
- * Matter device implementatie voor Shelly 1 Gen4 (ESP32-C6).
+ * Matter device implementation for Shelly 1 Gen4 (ESP32-C6).
  *
  * 5 endpoints:
  *   EP1 = OnOff Light Switch  + OnOff client + LevelControl client + Binding — Toggle
  *   EP2 = Temperature Sensor  (server)
  *   EP3 = Occupancy Sensor    (server)
- *   EP4 = OnOff Light          (server) — fysiek relais, aanstuurbaar vanuit HA
+ *   EP4 = OnOff Light          (server) — physical relay, controllable from HA
  *   EP5 = OnOff Light Switch  + OnOff client + Binding — State-follow (On/Off)
  *
  * EP1 vs EP5:
- *   EP1 stuurt Toggle bij elke korte druk — geschikt voor momentknoppen.
- *   EP5 stuurt On bij contact-sluiting en Off bij contact-opening —
- *   geschikt voor vaste/wissel-schakelaars. De gebruiker kiest via de
- *   binding welk endpoint zijn lamp/relais bedient.
+ *   EP1 sends Toggle on every short press — suitable for momentary buttons.
+ *   EP5 sends On on contact close and Off on contact open —
+ *   suitable for maintained/toggle switches. The user chooses via
+ *   binding which endpoint controls their light/relay.
  *
- * Commando-emit naar bound nodes/groups:
- *   - app_main.c roept matter_send_onoff_toggle/on/off(ep) /
+ * Command emit to bound nodes/groups:
+ *   - app_main.c calls matter_send_onoff_toggle/on/off(ep) /
  *     matter_send_level_move/stop(ep)
- *   - die data wordt naar de CHIP-thread gescheduled
- *   - SwitchWorkerFunction itereert de BindingTable en stuurt commando's
- *     direct via FindOrEstablishSession + InvokeCommandRequest.
+ *   - data is scheduled to the CHIP thread
+ *   - SwitchWorkerFunction iterates the BindingTable and sends commands
+ *     directly via FindOrEstablishSession + InvokeCommandRequest.
  *
- * NB: BindingManager::NotifyBoundClusterChanged() wordt NIET gebruikt.
- * In esp-matter v1.4 roept de interne PendingNotificationMap dispatch
- * de handler soms niet aan ondanks een actieve CASE-sessie. We omzeilen
- * dit door FindOrEstablishSession + InvokeCommandRequest direct aan te
- * roepen vanuit SwitchWorkerFunction.
+ * NB: BindingManager::NotifyBoundClusterChanged() is NOT used.
+ * In esp-matter v1.4 the internal PendingNotificationMap dispatch
+ * sometimes does not call the handler despite an active CASE session.
+ * We bypass this by calling FindOrEstablishSession + InvokeCommandRequest
+ * directly from SwitchWorkerFunction.
  */
 
 #include "matter_device.h"
@@ -56,10 +56,10 @@ extern "C" {
 #include <platform/ESP32/OpenthreadLauncher.h>
 #include "esp_openthread_types.h"
 
-/* Default-config macros worden in esp-matter/esp-idf NIET door esp_openthread.h
- * geleverd — canonical Shelly Thread firmware definieert ze lokaal. Zelfde
- * waarden hier: native 802.15.4 radio (ESP32-C6), geen host bridge,
- * NVS-partitie voor SRP key storage. */
+/* Default config macros are NOT provided by esp_openthread.h in esp-matter/
+ * esp-idf — canonical Shelly Thread firmware defines them locally. Same
+ * values here: native 802.15.4 radio (ESP32-C6), no host bridge,
+ * NVS partition for SRP key storage. */
 #define ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG()                                           \
     {                                                                                   \
         .radio_mode = RADIO_MODE_NATIVE,                                                \
@@ -83,7 +83,7 @@ using namespace esp_matter::endpoint;
 using namespace chip;
 using namespace chip::app::Clusters;
 
-static uint16_t s_ep_drukker = 0;
+static uint16_t s_ep_pushbutton = 0;
 static uint16_t s_ep_state   = 0;
 static uint16_t s_ep_temp    = 0;
 static uint16_t s_ep_occ     = 0;
@@ -103,9 +103,9 @@ struct BindingCommandData
     uint8_t rate     = 50;
 };
 
-/* Typed lambda callbacks voor InvokeCommandRequest (v1.4 API).
- * - onSuccess krijgt de typed ResponseType (generic via auto&)
- * - onError krijgt alleen CHIP_ERROR (geen context-pointer meer)
+/* Typed lambda callbacks for InvokeCommandRequest (v1.4 API).
+ * - onSuccess receives the typed ResponseType (generic via auto&)
+ * - onError receives only CHIP_ERROR (no more context pointer)
  */
 static auto make_on_success() {
     return [](const chip::app::ConcreteCommandPath & path,
@@ -121,7 +121,7 @@ static auto make_on_error() {
     };
 }
 
-/* ------------- Multicast helpers (geen CASE-sessie nodig) ------------- */
+/* ------------- Multicast helpers (no CASE session needed) ------------- */
 
 static void send_onoff_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
 {
@@ -153,11 +153,11 @@ static void send_level_multicast(const BindingCommandData &d, const EmberBinding
 
 /* ------------- Direct-send via FindOrEstablishSession ------------- */
 /*
- * Omzeilt BindingManager::NotifyBoundClusterChanged() die in esp-matter
- * v1.4 de registered handler soms niet aanroept ondanks een actieve
- * CASE-sessie. In plaats daarvan gebruiken we FindOrEstablishSession
- * direct, zodat we bij de OnDeviceConnected callback meteen het commando
- * versturen via InvokeCommandRequest.
+ * Bypasses BindingManager::NotifyBoundClusterChanged() which in esp-matter
+ * v1.4 sometimes does not call the registered handler despite an active
+ * CASE session. Instead we use FindOrEstablishSession directly, so that
+ * in the OnDeviceConnected callback we immediately send the command
+ * via InvokeCommandRequest.
  */
 struct DirectSendCtx {
     BindingCommandData cmd;
@@ -263,7 +263,7 @@ static void SwitchWorkerFunction(intptr_t context)
              d->localEndpointId, (unsigned long) d->clusterId,
              (unsigned long) d->commandId, (unsigned long) total, (unsigned long) sent);
     if (sent == 0) {
-        ESP_LOGW(TAG, "SwitchWorker: geen matching binding entries voor ep=%u",
+        ESP_LOGW(TAG, "SwitchWorker: no matching binding entries for ep=%u",
                  d->localEndpointId);
     }
     chip::Platform::Delete(d);
@@ -286,9 +286,9 @@ static void switch_send(uint16_t local_ep, chip::ClusterId cluster, chip::Comman
 
 /* ---------------- Public API (C-callable) ---------------- */
 
-/* Guard: ep == 0 betekent dat de bijbehorende endpoint nog niet door
- * matter_start() is aangemaakt. Defensief: vroege return zodat
- * spurious-ISR-callbacks vlak na boot niet in chip:: code crashen. */
+/* Guard: ep == 0 means the corresponding endpoint has not yet been created
+ * by matter_start(). Defensive: early return so that spurious ISR callbacks
+ * right after boot do not crash into chip:: code. */
 extern "C" void matter_send_onoff_toggle(uint16_t ep)
 {
     if (!ep) return;
@@ -342,10 +342,10 @@ extern "C" void matter_update_occupancy(bool occupied)
 extern "C" void matter_factory_reset(void)
 {
     ESP_LOGW(TAG, "factory reset requested");
-    esp_matter::factory_reset();   /* wist Matter NVS + reboot */
+    esp_matter::factory_reset();   /* wipes Matter NVS + reboot */
 }
 
-extern "C" uint16_t matter_ep_drukker(void) { return s_ep_drukker; }
+extern "C" uint16_t matter_ep_pushbutton(void) { return s_ep_pushbutton; }
 extern "C" uint16_t matter_ep_state(void)   { return s_ep_state; }
 extern "C" uint16_t matter_ep_relay(void)   { return s_ep_relay; }
 
@@ -374,12 +374,12 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
     return ESP_OK;
 }
 
-/* Wordt op de CHIP-task gedraaid via PlatformMgr().ScheduleWork().
- * BindingManager::Init() en de Register*Handler-aanroepen praten met
- * Server-state (FabricTable / CASESessionMgr / PersistentStorage) en
- * MOETEN dus onder de CHIP-stack-lock draaien. Vanuit main_task gebeurt
- * dat niet -> 'Chip stack locking error ... unsafe/racy' -> chipDie.
- * Scheduling op CHIP-task lost dit deterministisch op. */
+/* Runs on the CHIP task via PlatformMgr().ScheduleWork().
+ * BindingManager::Init() and the Register*Handler calls talk to
+ * Server state (FabricTable / CASESessionMgr / PersistentStorage) and
+ * MUST therefore run under the CHIP stack lock. From main_task this
+ * is not the case -> 'Chip stack locking error ... unsafe/racy' -> chipDie.
+ * Scheduling on the CHIP task resolves this deterministically. */
 static void init_binding_handler_internal(intptr_t /*arg*/)
 {
     auto & mgr = chip::BindingManager::GetInstance();
@@ -392,10 +392,10 @@ static void init_binding_handler_internal(intptr_t /*arg*/)
         ESP_LOGE(TAG, "BindingManager::Init failed: %" CHIP_ERROR_FORMAT, err.Format());
         return;
     }
-    /* Handler-registratie is niet nodig: we gebruiken DirectSendCtx
-     * in SwitchWorkerFunction i.p.v. NotifyBoundClusterChanged.
-     * BindingManager::Init is nog steeds nuttig voor het laden van de
-     * binding table uit NVS en het pre-establischen van CASE sessies. */
+    /* Handler registration is not needed: we use DirectSendCtx
+     * in SwitchWorkerFunction instead of NotifyBoundClusterChanged.
+     * BindingManager::Init is still useful for loading the binding table
+     * from NVS and pre-establishing CASE sessions. */
     ESP_LOGI(TAG, "BindingManager initialised on CHIP-task");
 }
 
@@ -414,16 +414,16 @@ extern "C" esp_err_t matter_start(void)
 
     /* EP1 — OnOff Light Switch + LevelControl client + Binding */
     on_off_switch::config_t sw_cfg;
-    endpoint_t *ep_drukker = on_off_switch::create(node, &sw_cfg, ENDPOINT_FLAG_NONE, NULL);
+    endpoint_t *ep_pushbutton = on_off_switch::create(node, &sw_cfg, ENDPOINT_FLAG_NONE, NULL);
     {
         level_control::config_t lvl_cfg;
-        level_control::create(ep_drukker, &lvl_cfg,
+        level_control::create(ep_pushbutton, &lvl_cfg,
                               CLUSTER_FLAG_CLIENT, ESP_MATTER_NONE_FEATURE_ID);
         binding::config_t bind_cfg;
-        binding::create(ep_drukker, &bind_cfg, CLUSTER_FLAG_SERVER);
+        binding::create(ep_pushbutton, &bind_cfg, CLUSTER_FLAG_SERVER);
     }
-    s_ep_drukker = endpoint::get_id(ep_drukker);
-    ESP_LOGI(TAG, "EP%u = OnOff Light Switch (drukker)", s_ep_drukker);
+    s_ep_pushbutton = endpoint::get_id(ep_pushbutton);
+    ESP_LOGI(TAG, "EP%u = OnOff Light Switch (pushbutton)", s_ep_pushbutton);
 
     /* EP2 — Temperature Sensor */
     temperature_sensor::config_t t_cfg;
@@ -431,23 +431,23 @@ extern "C" esp_err_t matter_start(void)
     s_ep_temp = endpoint::get_id(ep_temp);
     ESP_LOGI(TAG, "EP%u = Temperature Sensor", s_ep_temp);
 
-    /* EP3 — Occupancy Sensor (LD2410 op GPIO17) */
+    /* EP3 — Occupancy Sensor (LD2410 on GPIO17) */
     occupancy_sensor::config_t o_cfg;
     endpoint_t *ep_occ = occupancy_sensor::create(node, &o_cfg, ENDPOINT_FLAG_NONE, NULL);
     s_ep_occ = endpoint::get_id(ep_occ);
     ESP_LOGI(TAG, "EP%u = Occupancy Sensor (LD2410)", s_ep_occ);
 
-    /* EP4 — OnOff Light (relais op GPIO5, server — aanstuurbaar vanuit HA) */
+    /* EP4 — OnOff Light (relay on GPIO5, server — controllable from HA) */
     on_off_light::config_t relay_cfg;
-    relay_cfg.on_off.on_off = relay_get();  /* herstel NVS-state */
+    relay_cfg.on_off.on_off = relay_get();  /* restore NVS state */
     endpoint_t *ep_relay = on_off_light::create(node, &relay_cfg, ENDPOINT_FLAG_NONE, NULL);
     s_ep_relay = endpoint::get_id(ep_relay);
-    ESP_LOGI(TAG, "EP%u = OnOff Light (relais)", s_ep_relay);
+    ESP_LOGI(TAG, "EP%u = OnOff Light (relay)", s_ep_relay);
 
     /* EP5 — OnOff Light Switch (state-follow) + Binding
-     * Zelfde device-type als EP1 maar bedoeld voor vaste schakelaars:
-     * stuurt On bij contact-sluiting, Off bij contact-opening.
-     * Gebruiker bindt EP5 (i.p.v. EP1) voor state-following gedrag. */
+     * Same device type as EP1 but intended for maintained switches:
+     * sends On on contact close, Off on contact open.
+     * User binds EP5 (instead of EP1) for state-following behavior. */
     on_off_switch::config_t sf_cfg;
     endpoint_t *ep_state = on_off_switch::create(node, &sf_cfg, ENDPOINT_FLAG_NONE, NULL);
     {
@@ -457,14 +457,14 @@ extern "C" esp_err_t matter_start(void)
     s_ep_state = endpoint::get_id(ep_state);
     ESP_LOGI(TAG, "EP%u = OnOff Light Switch (state-follow)", s_ep_state);
 
-    /* OTA-cluster requestor (optioneel: voor Matter OTA via TBR — werkt naast onze WiFi-OTA) */
+    /* OTA cluster requestor (optional: for Matter OTA via TBR — works alongside our WiFi OTA) */
     esp_matter_ota_requestor_init();
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
-    /* Registreer de OpenThread platform-config (radio/host/port) MOET
-     * voor esp_matter::start() gebeuren — anders assert s_platform_config
-     * in OpenthreadLauncher.cpp. Default-macros komen uit
-     * esp_openthread.h en zijn correct voor ESP32-C6 native 802.15.4. */
+    /* Register the OpenThread platform config (radio/host/port) MUST
+     * happen before esp_matter::start() — otherwise assert s_platform_config
+     * in OpenthreadLauncher.cpp. Default macros come from
+     * esp_openthread.h and are correct for ESP32-C6 native 802.15.4. */
     esp_openthread_platform_config_t ot_cfg = {
         .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
         .host_config  = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
@@ -473,11 +473,11 @@ extern "C" esp_err_t matter_start(void)
     set_openthread_platform_config(&ot_cfg);
 #endif
 
-    /* Start de stack */
+    /* Start the stack */
     esp_err_t err = esp_matter::start(NULL);
     if (err != ESP_OK) { ESP_LOGE(TAG, "esp_matter::start: %d", err); return err; }
 
-    /* Binding handler na server-start zodat FabricTable + CASESessionManager beschikbaar zijn */
+    /* Binding handler after server start so FabricTable + CASESessionManager are available */
     init_binding_handler();
 
     return ESP_OK;

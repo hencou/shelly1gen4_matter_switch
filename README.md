@@ -1,151 +1,151 @@
 # shelly1gen4_matter_switch
 
-**Custom Matter-over-Thread firmware** voor de **Shelly 1 Gen4** (ESP32-C6).
+**Custom Matter-over-Thread firmware** for the **Shelly 1 Gen4** (ESP32-C6).
 
-1. **Matter OnOff/Dimmer Light Switch** (Toggle, EP1) — bind-client, kort drukken = toggle, lang = dimmen
+1. **Matter OnOff/Dimmer Light Switch** (Toggle, EP1) — bind-client, short press = toggle, long = dim
 2. **Matter Temperature Sensor** (EP2) — DS18B20 via dual-pin 1-Wire: TX=GPIO9, RX=GPIO16 (Shelly Plus Add-on)
-3. **Matter Occupancy Sensor** (EP3) — HLK-LD2410 op GPIO17 (Data ingang Addon)
-4. **Matter OnOff Light** (Relais op GPIO5, EP4) — server endpoint, direct aanstuurbaar vanuit HA
-5. **Matter OnOff Light Switch** (State-follow, EP5) — bind-client, On bij contact-sluiting, Off bij -opening
+3. **Matter Occupancy Sensor** (EP3) — HLK-LD2410 on GPIO17 (Add-on data input)
+4. **Matter OnOff Light** (Relay on GPIO5, EP4) — server endpoint, directly controllable from HA
+5. **Matter OnOff Light Switch** (State-follow, EP5) — bind-client, On on contact close, Off on contact open
 
-Alle 5 endpoints zijn altijd actief — geen compile-time keuze nodig. Universele firmware voor alle configuraties.
-EP1 (Toggle) en EP5 (State-follow) bedienen dezelfde fysieke inputs — de gebruiker kiest via binding welk endpoint zijn lamp/relais aanstuurt:
-- **Momentknop** (drukker) → bind EP1
-- **Vaste/wissel-schakelaar** → bind EP5
+All 5 endpoints are always active — no compile-time choice needed. Universal firmware for all configurations.
+EP1 (Toggle) and EP5 (State-follow) drive the same physical inputs — the user chooses via binding which endpoint controls their light/relay:
+- **Momentary pushbutton** → bind EP1
+- **Maintained/toggle switch** → bind EP5
 
-Drukker→lamp en touch→lamp werken **standalone** na binding-setup: HA Matter Server, Google TV Streamer, mag offline — direct Thread-mesh-multicast naar de gebonden bulbs.
+Pushbutton→light and touch→light work **standalone** after binding setup: HA Matter Server, Google TV Streamer, may be offline — direct Thread-mesh-multicast to the bound bulbs.
 
-Het relais (EP4) is **niet meer hardcoded gekoppeld** aan de knopdruk. Via een Matter binding van EP1 naar EP4 kun je het relais optioneel mee laten schakelen. Zonder binding reageert het relais alleen op commando's vanuit HA.
+The relay (EP4) is **no longer hardcoded** to the button press. Via a Matter binding from EP1 to EP4 you can optionally make the relay switch along. Without binding the relay only responds to commands from HA.
 
-## Gebaseerd op
+## Based on
 
-- [esp-matter](https://github.com/espressif/esp-matter) `release/v1.4` (Espressif's officiële Matter SDK — bevestigd-werkende branch voor dit project)
-- [connectedhomeip](https://github.com/project-chip/connectedhomeip) (als submodule binnen esp-matter)
-- ESP-IDF v5.2.2 (vereist voor stabiele esp-matter v1.4)
-- Reference: esp-matter `examples/light_switch` voor het Binding-pattern + CMakeLists.txt patroon (`CHIP_HAVE_CONFIG_H` + `-std=gnu++17`)
+- [esp-matter](https://github.com/espressif/esp-matter) `release/v1.4` (Espressif's official Matter SDK — confirmed-working branch for this project)
+- [connectedhomeip](https://github.com/project-chip/connectedhomeip) (as submodule within esp-matter)
+- ESP-IDF v5.2.2 (required for stable esp-matter v1.4)
+- Reference: esp-matter `examples/light_switch` for the Binding pattern + CMakeLists.txt pattern (`CHIP_HAVE_CONFIG_H` + `-std=gnu++17`)
 
-## Doel-hardware en netwerk
+## Target hardware and network
 
 | Component | Status |
 |---|---|
-| Shelly 1 Gen4 (ESP32-C6, 8 MB flash) | Doel-hardware |
+| Shelly 1 Gen4 (ESP32-C6, 8 MB flash) | Target hardware |
 | Shelly Plus Add-on | DS18B20 (TX=GPIO9/RX=GPIO16) + TTP223 touch (GPIO18) + LD2410 radar (GPIO17) |
 | Thread Border Router | **Google TV Streamer 4K** |
 | Matter primary admin | **Home Assistant Matter Server** add-on |
-| Matter-Thread bulb | **IKEA KAJPLATS** (Thread-mode via setup-code) |
-| Commissioning tool | HA Matter Server UI of `chip-tool` commandline |
+| Matter-Thread bulb | **IKEA KAJPLATS** (Thread mode via setup code) |
+| Commissioning tool | HA Matter Server UI or `chip-tool` command line |
 | Binding setup tool | `HA Python Matter Server` |
 
-## Pin-mapping
+## Pin mapping
 
-**Onboard Shelly 1 Gen4** pinnen:
+**Onboard Shelly 1 Gen4** pins:
 
-| GPIO | Functie | Bron |
+| GPIO | Function | Source |
 |---|---|---|
-| **GPIO4** | PCB-knop (active-low) | Shelly 1 Gen4 onboard |
-| **GPIO5** | Relais-uitgang (active-high) | Shelly 1 Gen4 onboard |
-| **GPIO10** | Drukker-input / SW-terminal | Shelly 1 Gen4 onboard — **externe pull op PCB, geen interne pull** |
-| **GPIO15** | Status LED onboard (active-low) | Shelly 1 Gen4 onboard PCB-LED  |
+| **GPIO4** | PCB button (active-low) | Shelly 1 Gen4 onboard |
+| **GPIO5** | Relay output (active-high) | Shelly 1 Gen4 onboard |
+| **GPIO10** | Pushbutton input / SW terminal | Shelly 1 Gen4 onboard — **external pull on PCB, no internal pull** |
+| **GPIO15** | Status LED onboard (active-low) | Shelly 1 Gen4 onboard PCB LED |
 
-**Shelly Plus Add-on** pinnen (via J6 connector):
+**Shelly Plus Add-on** pins (via J6 connector):
 
-De Add-on gebruikt een **ISO7221A galvanische isolator** die het 1-Wire protocol opsplitst in aparte TX en RX lijnen.
+The Add-on uses an **ISO7221A galvanic isolator** that splits the 1-Wire protocol into separate TX and RX lines.
 
-| GPIO | Functie | Status |
+| GPIO | Function | Status |
 |---|---|---|
-| **GPIO9** | 1-Wire TX (data out) — DS18B20 commando's via isolator | Altijd actief |
-| **GPIO16** | 1-Wire RX (data in) — DS18B20 antwoorden via isolator | Altijd actief |
-| **GPIO17** | HLK-LD2410 mmWave occupancy sensor (EP3 Occupancy) | Altijd actief |
-| **GPIO18** | TTP223 capacitive touch button (stuurt via EP1) | Altijd actief |
+| **GPIO9** | 1-Wire TX (data out) — DS18B20 commands via isolator | Always active |
+| **GPIO16** | 1-Wire RX (data in) — DS18B20 responses via isolator | Always active |
+| **GPIO17** | HLK-LD2410 mmWave occupancy sensor (EP3 Occupancy) | Always active |
+| **GPIO18** | TTP223 capacitive touch button (drives via EP1) | Always active |
 
-Alle pinnen zijn aanpasbaar via `idf.py menuconfig` → **"Shelly 1 Gen4 Matter Switch configuration"**.
+All pins are configurable via `idf.py menuconfig` → **"Shelly 1 Gen4 Matter Switch configuration"**.
 
-**J6 connector pinout** (1.27 mm pitch, 7-pin header op de achterkant van de PCB):
+**J6 connector pinout** (1.27 mm pitch, 7-pin header on the back of the PCB):
 
-Nummering loopt van het pin het verst van het J6-label (pin 1) naar het pin direct naast het label (pin 7 = GND).
+Numbering runs from the pin farthest from the J6 label (pin 1) to the pin right next to the label (pin 7 = GND).
 
-| Pin | Functie | GPIO | Toelichting |
+| Pin | Function | GPIO | Notes |
 |---|---|---|---|
-| 1 | **ESP_DBG_UART** | GPIO18 (Digital IN) | TTP223 touch / niet gebruikt voor flashen |
+| 1 | **ESP_DBG_UART** | GPIO18 (Digital IN) | TTP223 touch / not used for flashing |
 | 2 | **TXD** | GPIO16 (UART0 TX // 1-Wire RX) | Shelly TXD → CP2102 RXD |
 | 3 | **RXD** | GPIO17 (UART0 RX // Analog IN) | Shelly RXD ← CP2102 TXD |
-| 4 | **3.3V** | -- | voeding (alleen 3.3V — **géén 5V**) |
-| 5 | **RESET** | EN | EN — niet nodig voor handmatig flashen |
-| 6 | **GPIO0 (BOOT)** | GPIO0 | low bij power-up → flash mode |
-| 7 | **GND** | -- | massa — pin direct naast het `J6` silkscreen |
+| 4 | **3.3V** | -- | power supply (3.3V only — **no 5V**) |
+| 5 | **RESET** | EN | EN — not needed for manual flashing |
+| 6 | **GPIO0 (BOOT)** | GPIO0 | low at power-up → flash mode |
+| 7 | **GND** | -- | ground — pin right next to the `J6` silkscreen |
 
-> ⚠️ **Pin 7 = GND is je oriëntatie-anker**: zet een multimeter op continuïteit, zoek de pin die piept tegen de metalen shield van het ESP-module — dat is pin 7. GPIO9 (1-Wire TX) zit **niet** op J6 maar is intern gerouteerd op de PCB.
+> ⚠️ **Pin 7 = GND is your orientation anchor**: use a multimeter on continuity, find the pin that beeps against the metal shield of the ESP module — that is pin 7. GPIO9 (1-Wire TX) is **not** on J6 but is internally routed on the PCB.
 
-Status-LED-patronen (`status_led.c`):
-- **Snelle knipper (5 Hz)** tijdens boot/initialisatie
-- **Langzame knipper (1 Hz)** tijdens commissioning (BLE-pairing window)
-- **Korte flits** bij elke short-press
+Status LED patterns (`status_led.c`):
+- **Fast blink (5 Hz)** during boot/initialization
+- **Slow blink (1 Hz)** during commissioning (BLE pairing window)
+- **Short flash** on each short-press
 
-## Matter device-structuur
+## Matter device structure
 
-| Endpoint | Device type | Server clusters | Client clusters | Doel |
+| Endpoint | Device type | Server clusters | Client clusters | Purpose |
 |---|---|---|---|---|
-| **EP 1** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff, LevelControl | Momentknop → Toggle → lamp |
+| **EP 1** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff, LevelControl | Pushbutton → Toggle → light |
 | **EP 2** | 0x0302 Temperature Sensor | TemperatureMeasurement | — | DS18B20 report |
 | **EP 3** | 0x0107 Occupancy Sensor | OccupancySensing | — | LD2410 binary |
-| **EP 4** | 0x0100 OnOff Light | OnOff | — | Relais GPIO5 — aanstuurbaar vanuit HA |
-| **EP 5** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff | Vaste schakelaar → On/Off → lamp |
+| **EP 4** | 0x0100 OnOff Light | OnOff | — | Relay GPIO5 — controllable from HA |
+| **EP 5** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff | Maintained switch → On/Off → light |
 
-EP1 en EP5 hebben elk een **Binding cluster** (server). De Binding-tabel wordt door HA Matter Server of `chip-tool` ingevuld met:
-- Unicast-binding (1 specifiek bulb, identified by node-ID + endpoint)
-- Multicast-binding (1 group-ID — alle bulbs in die group reageren tegelijk)
+EP1 and EP5 each have a **Binding cluster** (server). The Binding table is populated by HA Matter Server or `chip-tool` with:
+- Unicast binding (1 specific bulb, identified by node-ID + endpoint)
+- Multicast binding (1 group-ID — all bulbs in that group respond simultaneously)
 
-Bij elke knop-event stuurt `matter_device.cpp` commando's direct via `FindOrEstablishSession` + `InvokeCommandRequest` naar elke entry in de Binding-tabel.
+On each button event, `matter_device.cpp` sends commands directly via `FindOrEstablishSession` + `InvokeCommandRequest` to each entry in the Binding table.
 
-**EP1 vs EP5:** Beide endpoints worden door dezelfde fysieke inputs aangestuurd. EP1 stuurt Toggle (voor momentknoppen), EP5 stuurt On/Off (voor vaste schakelaars die een stand vasthouden). Bind het endpoint dat past bij je schakelaartype.
+**EP1 vs EP5:** Both endpoints are driven by the same physical inputs. EP1 sends Toggle (for momentary pushbuttons), EP5 sends On/Off (for maintained switches that hold a position). Bind the endpoint that matches your switch type.
 
-**EP4 (relais)** is een server endpoint — HA ziet dit als een schakelaar die je direct kunt aan/uitzetten. Om het relais mee te laten schakelen met de drukker, maak een binding van EP1 of EP5 naar EP4 (zie binding-setup hieronder).
+**EP4 (relay)** is a server endpoint — HA sees this as a switch you can directly turn on/off. To make the relay switch along with the pushbutton, create a binding from EP1 or EP5 to EP4 (see binding setup below).
 
-## Gebruikers-interactie
+## User interaction
 
-Alle 3 inputs doen **precies hetzelfde** — ze sturen via EP1 (Toggle) én EP5 (State-follow):
+All 3 inputs behave **identically** — they send via EP1 (Toggle) and EP5 (State-follow):
 
-| GPIO | Input | Omschrijving |
+| GPIO | Input | Description |
 |---|---|---|
-| **GPIO10** | System 55 drukker | 230V impulsdrukker op de SW-terminal (via optocoupler) |
-| **GPIO18** | TTP223 touch | Capacitieve touch-knop op Shelly Plus Add-on digital input |
-| **GPIO4** | PCB-knop | Onboard knopje op de Shelly 1 Gen4 printplaat |
+| **GPIO10** | System 55 pushbutton | 230V momentary pushbutton on the SW terminal (via optocoupler) |
+| **GPIO18** | TTP223 touch | Capacitive touch button on Shelly Plus Add-on digital input |
+| **GPIO4** | PCB button | Onboard button on the Shelly 1 Gen4 circuit board |
 
-| Actie | Effect |
+| Action | Effect |
 |---|---|
-| Kort drukken (< 500 ms) | Matter `OnOff.Toggle` naar EP1 binding-entries |
-| Contact sluiten | Matter `OnOff.On` naar EP5 binding-entries (state-follow) |
-| Contact openen | Matter `OnOff.Off` naar EP5 binding-entries (state-follow) |
-| Lang drukken (> 500 ms) | `LevelControl.Move` (up/down, alternerend) via EP1 |
-| Loslaten | `LevelControl.Stop` via EP1 |
-| 6× snel (< 2,5 s) | **Mode toggle** — in Matter-mode: reboot naar OTA-mode; in OTA-mode: factory reset (wipe nvs + chip_kvs) |
+| Short press (< 500 ms) | Matter `OnOff.Toggle` to EP1 binding entries |
+| Contact close | Matter `OnOff.On` to EP5 binding entries (state-follow) |
+| Contact open | Matter `OnOff.Off` to EP5 binding entries (state-follow) |
+| Long press (> 500 ms) | `LevelControl.Move` (up/down, alternating) via EP1 |
+| Release | `LevelControl.Stop` via EP1 |
+| 6× rapid (< 2.5 s) | **Mode toggle** — in Matter mode: reboot to OTA mode; in OTA mode: factory reset (wipe nvs + chip_kvs) |
 
-> ℹ️ Alle 3 inputs lopen via dezelfde callback in `app_main.cpp`. EP1 (Toggle) en EP5 (State-follow) hebben elk een eigen Binding-tabel. Bind EP1 voor momentknoppen, EP5 voor vaste schakelaars — of beide als je zowel toggle als state-follow wilt.
+> ℹ️ All 3 inputs use the same callback in `app_main.cpp`. EP1 (Toggle) and EP5 (State-follow) each have their own Binding table. Bind EP1 for momentary pushbuttons, EP5 for maintained switches — or both if you want both toggle and state-follow.
 
 ## Commissioning in Home Assistant Matter Server
 
-1. Flash de firmware (zie INSTALL.md). Bij eerste boot adverteert het apparaat 5 minuten lang via BLE en SRP/DNS-SD.
+1. Flash the firmware (see INSTALL.md). On first boot, the device advertises for 5 minutes via BLE and SRP/DNS-SD.
 2. Open Home Assistant → Settings → Devices & Services → Matter → "Add device".
-3. Voer setup-code in: **20202021** (default test passcode, configureerbaar in `sdkconfig.defaults`).
-4. HA Matter Server pairt via BLE, provisioneert Thread-credentials (vraag aan Google TV Streamer als TBR), het apparaat join het Thread-netwerk.
-5. Na ~30-60 s verschijnt het apparaat in HA met 5 entities: switch toggle (EP1), switch state-follow (EP5), temperature sensor, occupancy sensor, relais (light).
+3. Enter setup code: **20202021** (default test passcode, configurable in `sdkconfig.defaults`).
+4. HA Matter Server pairs via BLE, provisions Thread credentials (requests from Google TV Streamer as TBR), the device joins the Thread network.
+5. After ~30-60 s the device appears in HA with 5 entities: switch toggle (EP1), switch state-follow (EP5), temperature sensor, occupancy sensor, relay (light).
 
-⚠️ **Het Thread-netwerk moet al bestaan** — Google TV Streamer is je TBR. Als HA Matter Server zelf nog niet aan datzelfde Thread-netwerk gekoppeld is, gebruik dan HA Connect ZBT-2 of een vergelijkbare dongle als secondary TBR (delen automatisch het Thread-credentialset via de Thread-credentials API).
+⚠️ **The Thread network must already exist** — Google TV Streamer is your TBR. If HA Matter Server is not yet connected to that same Thread network, use an HA Connect ZBT-2 or similar dongle as secondary TBR (they automatically share the Thread credential set via the Thread Credentials API).
 
-## Binding-setup met chip-tool
+## Binding setup with chip-tool
 
-Op je laptop (chip-tool wordt meegeleverd door esp-matter, of bouw eigen):
+On your laptop (chip-tool is included with esp-matter, or build your own):
 
 ```bash
-# Step 0: stel je node-IDs vast
-# Shelly switch node-ID (zie HA): bv. 0x0123456789ABCDEF
-# Bulb (KAJPLATS) node-ID:        bv. 0x00112233AABBCCDD
+# Step 0: determine your node IDs
+# Shelly switch node-ID (see HA): e.g. 0x0123456789ABCDEF
+# Bulb (KAJPLATS) node-ID:        e.g. 0x00112233AABBCCDD
 SWITCH_NODE=0x0123456789ABCDEF
 BULB_NODE=0x00112233AABBCCDD
-SWITCH_EP=1   # drukker = EP1
+SWITCH_EP=1   # pushbutton = EP1
 BULB_EP=1     # KAJPLATS light = EP1
 
-# Step 1: bind drukker (EP1) aan de bulb
+# Step 1: bind pushbutton (EP1) to the bulb
 chip-tool binding write binding \
   '[{"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":6},
     {"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":8}]' \
@@ -155,14 +155,14 @@ chip-tool binding write binding \
 
 `cluster:6` = OnOff, `cluster:8` = LevelControl.
 
-### Drukker → relais koppelen (optioneel)
+### Pushbutton → relay coupling (optional)
 
-Om het lokale relais mee te laten schakelen bij een knopdruk, voeg een binding toe van EP1 naar EP4 (het relais endpoint op dezelfde Shelly):
+To make the local relay switch along on a button press, add a binding from EP1 to EP4 (the relay endpoint on the same Shelly):
 
 ```bash
-RELAY_EP=4    # relais = EP4
+RELAY_EP=4    # relay = EP4
 
-# Bind drukker (EP1) aan zowel de bulb ALS het lokale relais
+# Bind pushbutton (EP1) to both the bulb AND the local relay
 chip-tool binding write binding \
   '[{"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":6},
     {"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":8},
@@ -170,118 +170,118 @@ chip-tool binding write binding \
   $SWITCH_NODE $SWITCH_EP
 ```
 
-Zonder deze binding reageert het relais alleen op commando's vanuit HA (of andere controllers).
+Without this binding the relay only responds to commands from HA (or other controllers).
 
-### Vaste schakelaar → lamp/relais (EP5, state-follow)
+### Maintained switch → light/relay (EP5, state-follow)
 
-Voor een vaste of wissel-schakelaar die een stand vasthoudt (maintained contact), bind EP5 in plaats van EP1. EP5 stuurt On bij sluiting en Off bij opening:
+For a maintained or toggle switch that holds a position, bind EP5 instead of EP1. EP5 sends On on close and Off on open:
 
 ```bash
 STATE_EP=5    # state-follow = EP5
 
-# Bind vaste schakelaar (EP5) aan de bulb — lamp volgt schakelaarstand
+# Bind maintained switch (EP5) to the bulb — light follows switch position
 chip-tool binding write binding \
   '[{"fabricIndex":1,"node":'$BULB_NODE',"endpoint":'$BULB_EP',"cluster":6}]' \
   $SWITCH_NODE $STATE_EP
 
-# Of bind EP5 aan het lokale relais — relais volgt schakelaarstand
+# Or bind EP5 to the local relay — relay follows switch position
 chip-tool binding write binding \
   '[{"fabricIndex":1,"node":'$SWITCH_NODE',"endpoint":4,"cluster":6}]' \
   $SWITCH_NODE $STATE_EP
 ```
 
-> ℹ️ EP1 en EP5 kunnen naast elkaar bestaan. Je kunt EP1 binden aan een lamp (toggle) en EP5 aan het relais (state-follow), of andersom.
+> ℹ️ EP1 and EP5 can coexist. You can bind EP1 to a light (toggle) and EP5 to the relay (state-follow), or vice versa.
 
-### Many-to-many: groups gebruiken
+### Many-to-many: using groups
 
 ```bash
-# Step A: maak een group op de switch + bulb (groupId 0x0001)
+# Step A: create a group on the switch + bulb (groupId 0x0001)
 GROUP=0x0001
 
 # Add group on bulb (server)
-chip-tool groups add-group $GROUP "Woonkamer" $BULB_NODE 0
-chip-tool groups write current-group $GROUP $BULB_NODE 0   # optioneel
+chip-tool groups add-group $GROUP "Living room" $BULB_NODE 0
+chip-tool groups write current-group $GROUP $BULB_NODE 0   # optional
 
 # Add group on switch (client)
-chip-tool groups add-group $GROUP "Woonkamer" $SWITCH_NODE 1
+chip-tool groups add-group $GROUP "Living room" $SWITCH_NODE 1
 
-# Step B: bind switch EP1 aan de group (i.p.v. unicast naar bulb)
+# Step B: bind switch EP1 to the group (instead of unicast to bulb)
 chip-tool binding write binding \
   '[{"fabricIndex":1,"group":'$GROUP',"cluster":6},
     {"fabricIndex":1,"group":'$GROUP',"cluster":8}]' \
   $SWITCH_NODE 1
 
-# Step C: voeg meer bulbs toe aan dezelfde group → ze reageren allemaal samen
-chip-tool groups add-group $GROUP "Woonkamer" $BULB2_NODE 0
-chip-tool groups add-group $GROUP "Woonkamer" $BULB3_NODE 0
+# Step C: add more bulbs to the same group → they all respond together
+chip-tool groups add-group $GROUP "Living room" $BULB2_NODE 0
+chip-tool groups add-group $GROUP "Living room" $BULB3_NODE 0
 ```
 
-Eenmaal ingesteld: drukker → multicast `OnOff.Toggle` op group 0x0001 → alle bulbs in de group reageren. **Google TV Streamer / HA mogen offline** — pure Thread-mesh-multicast.
+Once configured: pushbutton → multicast `OnOff.Toggle` on group 0x0001 → all bulbs in the group respond. **Google TV Streamer / HA may be offline** — pure Thread mesh multicast.
 
-## OTA — WiFi-update zonder kabel
+## OTA — WiFi update without cable
 
-WiFi staat normaal **uit**. Trigger via **6× snelle clicks** (MODE_TOGGLE) op de drukker → reboot in OTA-mode → directe STA-fetch (met opgeslagen creds) of SoftAP `shelly-ota-XXXXXX` voor eerste provisioning. Nogmaals 6× klikken in OTA-mode → factory reset.
+WiFi is normally **off**. Trigger via **6× rapid clicks** (MODE_TOGGLE) on the pushbutton → reboot to OTA mode → direct STA fetch (with stored credentials) or SoftAP `shelly-ota-XXXXXX` for first provisioning. Another 6× clicks in OTA mode → factory reset.
 
-Naast deze WiFi-OTA is er **ook Matter OTA** mogelijk: `esp_matter_ota_requestor_init()` wordt aangeroepen in `matter_start()`, dus zodra HA Matter Server of Google TV Streamer een OTA-image aanbiedt via het Matter OTA Provider cluster (1.3+ standaard), kan dat ook via Thread. Voor de meeste gebruikers blijft WiFi-OTA praktischer (sneller, lokaal HTTP-bestand).
+In addition to this WiFi OTA, **Matter OTA** is also possible: `esp_matter_ota_requestor_init()` is called in `matter_start()`, so when HA Matter Server or Google TV Streamer offers an OTA image via the Matter OTA Provider cluster (1.3+ standard), that can also work via Thread. For most users WiFi OTA remains more practical (faster, local HTTP file).
 
 ## Build + flash
 
-- **[`INSTALL_VSCODE_WINDOWS.md`](INSTALL_VSCODE_WINDOWS.md)** — stap-voor-stap via **Visual Studio Code op Windows 11 + WSL2 (Ubuntu)**. chip-tool draait apart op je HA Linux-host. **Aanbevolen pad.** Bevat ook sectie 15 met bekende v1.4 build-issues + fixes.
-- **[`INSTALL.md`](INSTALL.md)** — pure command-line workflow voor Linux/macOS / WSL2-zonder-VSCode.
+- **[`INSTALL_VSCODE_WINDOWS.md`](INSTALL_VSCODE_WINDOWS.md)** — step-by-step via **Visual Studio Code on Windows 11 + WSL2 (Ubuntu)**. chip-tool runs separately on your HA Linux host. **Recommended path.** Also contains section 15 with known v1.4 build issues + fixes.
+- **[`INSTALL.md`](INSTALL.md)** — pure command-line workflow for Linux/macOS / WSL2 without VS Code.
 
-Eerste build duurt ~20-45 min (connectedhomeip eenmalig compileren). Daarna met ccache ~1-3 min per incrementele build.
+First build takes ~20-45 min (connectedhomeip one-time compilation). After that with ccache ~1-3 min per incremental build.
 
-## Bestandsstructuur
+## File structure
 
 ```
 shelly1gen4_matter_switch/
 ├── CMakeLists.txt
-├── partitions.csv          # dual-OTA + chip_factory + chip_kvs partities
+├── partitions.csv          # dual-OTA + chip_factory + chip_kvs partitions
 ├── sdkconfig.defaults      # Matter + Thread + BLE + OTA defaults
 ├── main/
 │   ├── CMakeLists.txt
 │   ├── Kconfig.projbuild
-│   ├── app_config.h        # pins, timings, BENCH_MODE (productie=0, bench=1)
-│   ├── app_main.cpp        # C++ entrypoint, hergebruikt C-modules
-│   ├── CHIPProjectConfig.h # vendor/product-naam overrides (i.p.v. TEST_VENDOR/TEST_PRODUCT)
-│   ├── matter_device.cpp   # 4 endpoints + Binding cluster + bound-command emit
+│   ├── app_config.h        # pins, timings, BENCH_MODE (production=0, bench=1)
+│   ├── app_main.cpp        # C++ entrypoint, reuses C modules
+│   ├── CHIPProjectConfig.h # vendor/product name overrides (instead of TEST_VENDOR/TEST_PRODUCT)
+│   ├── matter_device.cpp   # 5 endpoints + Binding cluster + bound-command emit
 │   ├── matter_device.h
-│   ├── button.c/.h         # hergebruikt uit Zigbee project
+│   ├── button.c/.h         # reused from Zigbee project
 │   ├── relay.c/.h          # idem
 │   ├── sensors.c/.h        # idem
 │   ├── ota.c/.h            # idem (WiFi STA + SoftAP)
-│   ├── status_led.c/.h     # Shelly Add-on LED patronen (OFF/ON/SLOW/FAST/heartbeat)
+│   ├── status_led.c/.h     # Shelly Add-on LED patterns (OFF/ON/SLOW/FAST/heartbeat)
 │   └── idf_component.yml
 ├── README.md
 ├── INSTALL.md
 └── INSTALL_VSCODE_WINDOWS.md
 ```
 
-## BENCH_MODE — ontwikkeling vs. productie
+## BENCH_MODE — development vs. production
 
-`BENCH_MODE` in `app_config.h` bepaalt de GPIO10-polariteit en sensor-initialisatie.
+`BENCH_MODE` in `app_config.h` controls the GPIO10 polarity and sensor initialization.
 
-Op de ESP32-C6 zijn **GPIO16 (U0TXD) en GPIO17 (U0RXD) de standaard UART0-pins** — dit is je seriële verbinding via PuTTY / minicom. In productie worden deze pins hergebruikt voor DS18B20 (1-Wire) resp. LD2410 (occupancy). Zodra `sensors_init()` ze herconfigureert, stopt de UART-output. In BENCH_MODE worden de sensor-tasks overgeslagen zodat serial debugging beschikbaar blijft.
+On the ESP32-C6, **GPIO16 (U0TXD) and GPIO17 (U0RXD) are the default UART0 pins** — this is your serial connection via PuTTY / minicom. In production these pins are repurposed for DS18B20 (1-Wire) and LD2410 (occupancy) respectively. Once `sensors_init()` reconfigures them, UART output stops. In BENCH_MODE the sensor tasks are skipped so serial debugging remains available.
 
-| BENCH_MODE | GPIO10 (drukker) | Sensor-tasks (GPIO16/17) | Wanneer |
+| BENCH_MODE | GPIO10 (pushbutton) | Sensor tasks (GPIO16/17) | When |
 |---|---|---|---|
-| **0** | Active-high — 230V optocoupler drijft pin | Gestart (temp + occ) | **Productie** (Shelly op 230V + Add-on) |
-| **1** (default) | Active-low + interne pull-up | Overgeslagen (UART0 blijft actief) | **Bench** (USB-UART via J6, zonder 230V/Add-on) |
+| **0** | Active-high — 230V optocoupler drives pin | Started (temp + occ) | **Production** (Shelly on 230V + Add-on) |
+| **1** (default) | Active-low + internal pull-up | Skipped (UART0 stays active) | **Bench** (USB-UART via J6, without 230V/Add-on) |
 
-> ⚠️ Met `BENCH_MODE=1` in productie: GPIO10 detecteert geen drukker-pulsen (verkeerde polariteit) en sensor-data wordt niet gerapporteerd. Zet `BENCH_MODE=0` voor productie-firmware.
+> ⚠️ With `BENCH_MODE=1` in production: GPIO10 does not detect pushbutton pulses (wrong polarity) and sensor data is not reported. Set `BENCH_MODE=0` for production firmware.
 
-> ℹ️ De Shelly Plus Add-on en J6 (UART debug header) delen GPIO16/17 en kunnen niet tegelijk worden gebruikt.
+> ℹ️ The Shelly Plus Add-on and J6 (UART debug header) share GPIO16/17 and cannot be used simultaneously.
 
-Overriden bij compilatie: `idf.py build -DBENCH_MODE=0` (of pas `app_config.h` aan).
+Override at compile time: `idf.py build -DBENCH_MODE=0` (or edit `app_config.h`).
 
-## Bekende limitaties / TODO
+## Known limitations / TODO
 
-- **Color Control** niet geïmplementeerd in v1 (gebruiker-keuze). Later toe te voegen: `cluster::color_control::create(ep, &cfg, CLUSTER_FLAG_CLIENT)` op EP1 + extra commando-emit-helpers.
-- **`chip-tool` binding-UI**: Home Assistant Matter integratie heeft binding-UI nog niet, zelf chip-tool commando's draaien is even nodig. Begin 2026 update verwacht.
-- **Matter OTA Provider**: requestor zit erin, maar er is geen lokale provider in HA standaard — voor automatische OTA's via Thread heb je een Matter OTA Provider nodig (komt in HA Matter Server roadmap).
-- **DCL (Distributed Compliance Ledger)**: deze firmware gebruikt test vendor ID 0xFFF1. Voor publicatie op Google/Apple Home moet een echte vendor ID aangevraagd worden via CSA membership.
-- **DAC (Device Attestation Certificate)**: voor productie zou je echte DAC's moeten provisionen in `chip_factory` partition. Voor lokaal HA-gebruik werkt de test-DAC prima.
+- **Color Control** not implemented in v1 (user choice). Can be added later: `cluster::color_control::create(ep, &cfg, CLUSTER_FLAG_CLIENT)` on EP1 + additional command emit helpers.
+- **`chip-tool` binding UI**: Home Assistant Matter integration does not yet have a binding UI, running chip-tool commands manually is needed for now. Update expected in early 2026.
+- **Matter OTA Provider**: requestor is included, but there is no local provider in HA by default — for automatic OTA updates via Thread you need a Matter OTA Provider (on HA Matter Server roadmap).
+- **DCL (Distributed Compliance Ledger)**: this firmware uses test vendor ID 0xFFF1. For publication on Google/Apple Home a real vendor ID must be requested via CSA membership.
+- **DAC (Device Attestation Certificate)**: for production you should provision real DACs in the `chip_factory` partition. For local HA usage the test DAC works fine.
 
-## Licentie
+## License
 
-Espressif esp-matter en connectedhomeip vallen onder Apache 2.0. Deze custom code is MIT-gelicenseerd.
+Espressif esp-matter and connectedhomeip fall under Apache 2.0. This custom code is MIT licensed.

@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-/* Callback signatures — aangeroepen door sensor-tasks bij nieuwe waarde */
+/* Callback signatures — called by sensor tasks when a new value is available */
 typedef void (*temp_cb_t)(int16_t temp_centi_c);       /* 0.01 °C units, ZCL native */
 typedef void (*occupancy_cb_t)(bool occupied);
 

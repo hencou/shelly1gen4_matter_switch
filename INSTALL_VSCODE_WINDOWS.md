@@ -1,85 +1,85 @@
-# Installatie via Visual Studio Code op Windows 11 (WSL2) — `shelly1gen4_matter_switch`
+# Installation via Visual Studio Code on Windows 11 (WSL2) — `shelly1gen4_matter_switch`
 
-Stap-voor-stap gids om dit Matter-over-Thread firmware-project te bouwen en te flashen vanuit **Visual Studio Code op Windows 11**, met de build in **WSL2 (Ubuntu 22.04)**.
+Step-by-step guide to build and flash this Matter-over-Thread firmware project from **Visual Studio Code on Windows 11**, with the build running in **WSL2 (Ubuntu 22.04)**.
 
-> **Waarom WSL2 en niet native Windows?** ESP-Matter (Espressif's SDK) en connectedhomeip (Matter-stack) ondersteunen **alleen Linux en macOS**. Op Windows is `wsl --install` de officieel aanbevolen route — zo bevestigt Espressif's eigen documentatie. Native Windows-builds via `install.bat` bestaan niet.
+> **Why WSL2 and not native Windows?** ESP-Matter (Espressif's SDK) and connectedhomeip (Matter stack) support **only Linux and macOS**. On Windows, `wsl --install` is the officially recommended route — as confirmed by Espressif's own documentation. Native Windows builds via `install.bat` do not exist.
 
-## Architectuur
+## Architecture
 
 ```
 Windows 11
-├── VS Code (Windows-kant, met Remote WSL extensie)
+├── VS Code (Windows side, with Remote WSL extension)
 └── WSL2 (Ubuntu 22.04)
-    ├── ESP-IDF (toolchain voor ESP32-C6)
-    ├── ESP-Matter SDK (Matter-implementatie)
-    └── USB via usbipd-win → /dev/ttyUSB0 of /dev/ttyACM0
+    ├── ESP-IDF (toolchain for ESP32-C6)
+    ├── ESP-Matter SDK (Matter implementation)
+    └── USB via usbipd-win → /dev/ttyUSB0 or /dev/ttyACM0
 ```
 
-Voor de `chip-tool` binding-commando's (na pairing) gebruik je je Home Assistant Matter Server container — die heeft `chip-tool` al ingebakken. WSL hoeft `chip-tool` dus niet zelf te bouwen.
+For the `chip-tool` binding commands (after pairing) you use your Home Assistant Matter Server container — it already has `chip-tool` built in. WSL does not need to build `chip-tool` itself.
 
 ---
 
-## 0. Vereisten
+## 0. Prerequisites
 
-- **OS**: Windows 11 (21H2 of nieuwer)
-- **Hardware**: minimaal 16 GB RAM, 40 GB vrij op de Windows C:\\-schijf
-- **BIOS**: Virtualisatie (Intel VT-x of AMD-V) ingeschakeld
-- **Software**: VS Code op Windows (niet in WSL)
-- **Stabiele internetverbinding** voor downloads (~5 GB aan repos + tools)
+- **OS**: Windows 11 (21H2 or newer)
+- **Hardware**: minimum 16 GB RAM, 40 GB free on the Windows C:\ drive
+- **BIOS**: Virtualization (Intel VT-x or AMD-V) enabled
+- **Software**: VS Code on Windows (not in WSL)
+- **Stable internet connection** for downloads (~5 GB of repos + tools)
 
 ---
 
-## 1. WSL2 + Ubuntu 22.04 installeren
+## 1. Install WSL2 + Ubuntu 22.04
 
-PowerShell openen als **Administrator** → uitvoeren:
+Open PowerShell as **Administrator** → run:
 
 ```powershell
 wsl --install -d Ubuntu-22.04
 ```
 
-Dit activeert WSL-features, downloadt de WSL2-kernel, en installeert Ubuntu 22.04.
+This activates WSL features, downloads the WSL2 kernel, and installs Ubuntu 22.04.
 
-⚠️ **Herstart Windows** na de installatie. De Windows-features zijn pas actief na een reboot.
+⚠️ **Restart Windows** after installation. The Windows features are only active after a reboot.
 
-Na de reboot start Ubuntu automatisch. Kies een **UNIX-gebruikersnaam** (klein, geen spaties) en een **wachtwoord** (sudo-wachtwoord, niet je Windows-login).
+After the reboot Ubuntu starts automatically. Choose a **UNIX username** (lowercase, no spaces) and a **password** (sudo password, not your Windows login).
 
-### Kernel-versie controleren
+### Check kernel version
 
 In Ubuntu:
 ```bash
 uname -a
 ```
 
-Versie moet **5.10.60.1 of hoger** zijn. Niet? In PowerShell:
+Version must be **5.10.60.1 or higher**. If not, in PowerShell:
 ```powershell
 wsl --upgrade
 ```
 
-### Troubleshooting WSL-installatie
+### Troubleshooting WSL installation
 
-- **Fout `0x80370102`** → Virtualisatie is uit in BIOS. Reboot, ga naar BIOS (Del/F2 tijdens boot), schakel **Intel VT-x** of **AMD-V** in, save & reboot.
-- **WSL Stopped** na een Windows-reboot → normaal. Open Ubuntu via start-menu, of run `wsl` in PowerShell om te starten.
+- **Error `0x80370102`** → Virtualization is disabled in BIOS. Reboot, enter BIOS (Del/F2 during boot), enable **Intel VT-x** or **AMD-V**, save & reboot.
+- **WSL Stopped** after a Windows reboot → normal. Open Ubuntu via start menu, or run `wsl` in PowerShell to start.
 
 ---
 
-## 2. usbipd-win installeren (USB-doorgifte naar WSL2)
+## 2. Install usbipd-win (USB forwarding to WSL2)
 
-WSL2 ziet standaard geen USB-poorten. `usbipd-win` is de officiële brug.
+WSL2 does not see USB ports by default. `usbipd-win` is the official bridge.
 
-PowerShell als Administrator:
+PowerShell as Administrator:
 ```powershell
 winget install usbipd
 ```
 
-Herstart de PowerShell-terminal na install zodat `usbipd` op PATH staat.
+Restart the PowerShell terminal after install so `usbipd` is on PATH.
 
-Het daadwerkelijk koppelen van de UART-adapter aan WSL doe je pas later in stap 8.
+The actual coupling of the UART adapter to WSL is done later in step 8.
 
 ---
 
-## 3. Linux dependencies installeren
+## 3. Install Linux dependencies
 
-In Ubuntu (start-menu → Ubuntu 22.04 LTS, of `wsl` in PowerShell):
+In Ubuntu (start menu → Ubuntu 22.04 LTS, or `wsl` in PowerShell):
 
 ```bash
 sudo apt update && sudo apt upgrade -y
@@ -90,15 +90,15 @@ sudo apt install -y git wget curl flex bison gperf \
     dfu-util libusb-1.0-0 libglib2.0-dev
 ```
 
-Voeg jezelf toe aan de `dialout`-groep voor toegang tot `/dev/ttyUSB*`:
+Add yourself to the `dialout` group for access to `/dev/ttyUSB*`:
 ```bash
 sudo usermod -aG dialout $USER
 ```
-Sluit en heropen de Ubuntu-terminal (of `exit` + `wsl`) zodat de groepswijziging actief wordt.
+Close and reopen the Ubuntu terminal (or `exit` + `wsl`) so the group change takes effect.
 
 ---
 
-## 4. ESP-IDF installeren
+## 4. Install ESP-IDF
 
 ```bash
 mkdir -p ~/esp
@@ -112,18 +112,18 @@ source ./export.sh
 idf.py --version
 ```
 
-Verwachte output:
+Expected output:
 ```
 ESP-IDF v5.x.x
 ```
 
-Duur: 10-15 minuten.
+Duration: 10-15 minutes.
 
 ---
 
-## 5. ESP-Matter installeren
+## 5. Install ESP-Matter
 
-ESP-Matter heeft veel submodules via `connectedhomeip`. We gebruiken een **stable release-branch** (voorkomt de bekende `mobly` dependency-conflict op `main`).
+ESP-Matter has many submodules via `connectedhomeip`. We use a **stable release branch** (avoids the known `mobly` dependency conflict on `main`).
 
 ```bash
 cd ~/esp
@@ -134,9 +134,9 @@ cd esp-matter
 git submodule update --init --depth 1
 ```
 
-> Check [esp-matter releases](https://github.com/espressif/esp-matter/releases) voor de meest recente stabiele branch.
+> Check [esp-matter releases](https://github.com/espressif/esp-matter/releases) for the most recent stable branch.
 
-### Platform-specifieke submodules ophalen
+### Fetch platform-specific submodules
 
 ```bash
 cd ~/esp/esp-matter/connectedhomeip/connectedhomeip
@@ -144,17 +144,17 @@ cd ~/esp/esp-matter/connectedhomeip/connectedhomeip
 cd ~/esp/esp-matter
 ```
 
-### Installeren
+### Install
 
 ```bash
 ./install.sh
 ```
 
-⚠️ Duurt **15-45 minuten** afhankelijk van internetsnelheid en hardware.
+⚠️ Takes **15-45 minutes** depending on internet speed and hardware.
 
-### Als install.sh faalt met `mobly` / `ResolutionImpossible`
+### If install.sh fails with `mobly` / `ResolutionImpossible`
 
-Bekende issue. Fix:
+Known issue. Fix:
 ```bash
 cd ~/esp/esp-matter/connectedhomeip/connectedhomeip
 rm -rf .environment
@@ -162,13 +162,13 @@ cd ~/esp/esp-matter
 ./install.sh
 ```
 
-Dit ruimt de halfgevulde Python-venv op en probeert opnieuw — werkt meestal direct.
+This cleans up the half-populated Python venv and retries — usually works directly.
 
 ---
 
-## 6. Ccache + auto-environment activeren
+## 6. Enable ccache + auto-environment
 
-Eerste Matter-build duurt > 1 uur. Met ccache zijn vervolg-builds **5-10× sneller**.
+First Matter build takes > 1 hour. With ccache, subsequent builds are **5-10× faster**.
 
 ```bash
 echo 'export IDF_CCACHE_ENABLE=1' >> ~/.bashrc
@@ -177,144 +177,144 @@ echo 'source ~/esp/esp-matter/export.sh' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-Nu zijn `idf.py` en alle ESP-Matter env-vars automatisch beschikbaar in elke nieuwe Ubuntu-terminal.
+Now `idf.py` and all ESP-Matter env vars are automatically available in every new Ubuntu terminal.
 
 ---
 
-## 7. VS Code instellen
+## 7. Set up VS Code
 
-### 7a. Extensies installeren (Windows-kant)
+### 7a. Install extensions (Windows side)
 
 In VS Code (`Ctrl+Shift+X`):
-- **WSL** (`ms-vscode-remote.remote-wsl`) — van Microsoft
-- **Espressif IDF** (`espressif.esp-idf-extension`) — van Espressif
+- **WSL** (`ms-vscode-remote.remote-wsl`) — by Microsoft
+- **Espressif IDF** (`espressif.esp-idf-extension`) — by Espressif
 
-### 7b. Project naar WSL kopiëren
+### 7b. Copy project to WSL
 
-Plaats de project-zip in Windows (bv. `Downloads`), dan in Ubuntu:
+Place the project zip in Windows (e.g. `Downloads`), then in Ubuntu:
 
 ```bash
 mkdir -p ~/projects
 cd ~/projects
-cp "/mnt/c/Users/<jouw-windows-user>/Downloads/shelly1gen4_matter_switch.zip" .
+cp "/mnt/c/Users/<your-windows-user>/Downloads/shelly1gen4_matter_switch.zip" .
 unzip shelly1gen4_matter_switch.zip
 cd shelly1gen4_matter_switch
 ```
 
-⚠️ Project moet in WSL-filesystem (`~/projects/...`) staan, **niet** in `/mnt/c/...`. Builds vanuit `/mnt/c/` zijn 5-10× trager door cross-FS overhead.
+⚠️ Project must be in WSL filesystem (`~/projects/...`), **not** in `/mnt/c/...`. Builds from `/mnt/c/` are 5-10× slower due to cross-FS overhead.
 
-### 7c. Project openen in VS Code (WSL-modus)
+### 7c. Open project in VS Code (WSL mode)
 
-Vanuit dezelfde Ubuntu-terminal in de project-folder:
+From the same Ubuntu terminal in the project folder:
 ```bash
 code .
 ```
 
-VS Code opent automatisch in **Remote-WSL modus**. Linksonder verschijnt de badge **`WSL: Ubuntu-22.04`** — dit bevestigt dat alles in Ubuntu draait.
+VS Code opens automatically in **Remote-WSL mode**. The badge **`WSL: Ubuntu-22.04`** appears in the bottom left — this confirms everything runs in Ubuntu.
 
-> Dit `code .`-commando is **de eenvoudigste route**. Geen `WSL: Connect to WSL`-wizards, geen handmatige folder-koppelingen.
+> This `code .` command is **the simplest route**. No `WSL: Connect to WSL` wizards, no manual folder mappings.
 
-### 7d. Espressif IDF extensie in WSL-context activeren
+### 7d. Activate Espressif IDF extension in WSL context
 
-`Ctrl+Shift+X` → zoek **"Espressif IDF"** → klik **"Install in WSL: Ubuntu-22.04"** als die knop verschijnt.
+`Ctrl+Shift+X` → search **"Espressif IDF"** → click **"Install in WSL: Ubuntu-22.04"** if that button appears.
 
-Het commando-palette (`F1`) toont daarna ESP-IDF-commando's zoals **"Open ESP-IDF Terminal"**, **"Build Project"**, etc.
+The command palette (`F1`) then shows ESP-IDF commands like **"Open ESP-IDF Terminal"**, **"Build Project"**, etc.
 
-> De **"Configure ESP-IDF extension"** wizard hoeft niet per se — omdat we ESP-IDF + tools al in `~/.bashrc` sourcen, vindt elke ESP-IDF terminal in VS Code automatisch het juiste pad.
+> The **"Configure ESP-IDF extension"** wizard is not strictly necessary — because we already source ESP-IDF + tools in `~/.bashrc`, every ESP-IDF terminal in VS Code automatically finds the correct path.
 
-Mocht de wizard wél nodig zijn (bv. config-validation faalt): kies **"Use existing setup"** met:
+If the wizard is needed (e.g. config validation fails): choose **"Use existing setup"** with:
 - ESP-IDF dir: `/home/<user>/esp/esp-idf`
 - Tools dir: `/home/<user>/.espressif`
 - Python venv: `/home/<user>/.espressif/python_env/idf5.2_py3.10_env/bin/python`
 
 ---
 
-## 8. ESP32-C6 / Shelly aansluiten via UART
+## 8. Connect ESP32-C6 / Shelly via UART
 
-Open de Shelly 1 Gen4 behuizing en sluit een USB-UART adapter (CP2102) aan op de **J6-connector** (7-pin rij). Volledige procedure + canonical pinout staat in [`INSTALL.md` hoofdstuk 4](INSTALL.md#4-uart-flashen-via-de-j6-connector-op-de-achterkant) — hier alleen de samenvatting:
+Open the Shelly 1 Gen4 housing and connect a USB-UART adapter (CP2102) to the **J6 connector** (7-pin row). Full procedure + canonical pinout is in [`INSTALL.md` chapter 4](INSTALL.md#4-uart-flashing-via-the-j6-connector-on-the-back) — here only the summary:
 
-| CP2102 | Shelly J6-pin | Doel |
+| CP2102 | Shelly J6 pin | Purpose |
 |---|---|---|
-| 3.3V (**niet 5V**) | Pin 4 | Voeding |
-| GND | Pin 7 (naast `J6` silkscreen) | Massa |
+| 3.3V (**not 5V**) | Pin 4 | Power |
+| GND | Pin 7 (next to `J6` silkscreen) | Ground |
 | RXD | Pin 2 (Shelly TXD) | UART data |
 | TXD | Pin 3 (Shelly RXD) | UART data |
-| GND (brug, voor flash mode) | Pin 6 (GPIO0 / BOOT) | Tijdens power-up |
+| GND (bridge, for flash mode) | Pin 6 (GPIO0 / BOOT) | During power-up |
 
-⚠️ **Belangrijk**: Pin 4 is **alleen 3.3V** — nooit 5V. Pin-nummering start bij het pin het verst van het `J6`-label (pin 1 = ESP_DBG_UART) en eindigt bij `J6` (pin 7 = GND).
+⚠️ **Important**: Pin 4 is **3.3V only** — never 5V. Pin numbering starts at the pin farthest from the `J6` label (pin 1 = ESP_DBG_UART) and ends at `J6` (pin 7 = GND).
 
-Steek de USB-adapter in een Windows USB-poort.
+Plug the USB adapter into a Windows USB port.
 
-### 8a. Beschikbare USB-apparaten bekijken
+### 8a. View available USB devices
 
-PowerShell als **Administrator**:
+PowerShell as **Administrator**:
 ```powershell
 usbipd list
 ```
 
-Voorbeeld output:
+Example output:
 ```
 BUSID  VID:PID    DEVICE                                  STATE
 3-2    10c4:ea60  Silicon Labs CP210x USB to UART Bridge  Not shared
 ```
 
-### 8b. Devboard doorgeven aan WSL2
+### 8b. Forward dev board to WSL2
 
 ```powershell
-# Eenmalig (admin-rechten vereist):
+# One-time (admin rights required):
 usbipd bind --busid 3-2
 
-# Koppelen aan WSL (WSL moet draaien):
+# Attach to WSL (WSL must be running):
 usbipd attach --wsl --busid 3-2
 ```
 
-⚠️ Na elke `wsl --shutdown` of Windows-reboot moet `usbipd attach --wsl` opnieuw worden uitgevoerd.
+⚠️ After every `wsl --shutdown` or Windows reboot, `usbipd attach --wsl` must be run again.
 
-### 8c. Verifieer in Ubuntu
+### 8c. Verify in Ubuntu
 
 ```bash
 lsusb
 ls /dev/ttyUSB* /dev/ttyACM*
 ```
 
-Verwacht: `/dev/ttyUSB0` zichtbaar.
+Expected: `/dev/ttyUSB0` visible.
 
-| Chip / Board | USB-bridge | Poort in WSL |
+| Chip / Board | USB bridge | Port in WSL |
 |---|---|---|
-| ESP32-C3 / C6 / H2 (native USB) | Ingebouwd JTAG | `/dev/ttyACM0` |
+| ESP32-C3 / C6 / H2 (native USB) | Built-in JTAG | `/dev/ttyACM0` |
 | ESP32 / ESP32-S3 (WROOM) | CP2102 / CH340 | `/dev/ttyUSB0` |
 | ESP32-DevKitC | CP2104 | `/dev/ttyUSB0` |
 
-Shelly 1 Gen4 met externe USB-UART adapter (CP2102): `/dev/ttyUSB0`.
+Shelly 1 Gen4 with external USB-UART adapter (CP2102): `/dev/ttyUSB0`.
 
 ---
 
-## 9. Project bouwen en flashen
+## 9. Build and flash the project
 
-In VS Code (Remote-WSL actief), open een **ESP-IDF Terminal** via `F1` → "ESP-IDF: Open ESP-IDF Terminal".
+In VS Code (Remote-WSL active), open an **ESP-IDF Terminal** via `F1` → "ESP-IDF: Open ESP-IDF Terminal".
 
 ```bash
-# Target instellen (eenmalig per project)
+# Set target (one-time per project)
 idf.py set-target esp32c6
 
-# Bouwen
+# Build
 idf.py build
 
-# Flashen (eerste keer: brug Pin 6 (GPIO0) ↔ Pin 7 (GND) tijdens power-up voor flash mode)
+# Flash (first time: bridge Pin 6 (GPIO0) ↔ Pin 7 (GND) during power-up for flash mode)
 idf.py -p /dev/ttyUSB0 flash
 
-# Monitoren
+# Monitor
 idf.py -p /dev/ttyUSB0 monitor
 
-# Of alles in één commando:
+# Or all in one command:
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-`Ctrl+]` om de monitor te verlaten.
+`Ctrl+]` to exit the monitor.
 
-**Eerste build duurt 25-45 min**. Vervolg-builds met ccache: 1-3 min.
+**First build takes 25-45 min**. Subsequent builds with ccache: 1-3 min.
 
-Of via VS Code-knoppen (na correct ingestelde extensie):
+Or via VS Code buttons (after correctly configured extension):
 - `F1` → "ESP-IDF: Build Project" (`Ctrl+E B`)
 - `F1` → "ESP-IDF: Flash Device" (`Ctrl+E F`)
 - `F1` → "ESP-IDF: Monitor Device" (`Ctrl+E M`)
@@ -322,9 +322,9 @@ Of via VS Code-knoppen (na correct ingestelde extensie):
 
 ---
 
-## 10. Setup Pin Code / QR Code uitlezen
+## 10. Read Setup Pin Code / QR Code
 
-In de serial monitor zie je bij eerste boot:
+In the serial monitor you'll see on first boot:
 ```
 CHIP:SVR: SetupQRCode: [MT:U9VJ142C00KA0648G00]
 CHIP:SVR: Copy/paste the below URL in a browser to see the QR Code:
@@ -332,60 +332,60 @@ CHIP:SVR: https://project-chip.github.io/connectedhomeip/qrcode.html?data=MT%3AU
 CHIP:SVR: Manual pairing code: [34970112332]
 ```
 
-Open de URL → toon QR-code aan je HA Matter Server UI (Settings → Devices & Services → Add → Matter → scan code).
+Open the URL → show QR code to your HA Matter Server UI (Settings → Devices & Services → Add → Matter → scan code).
 
-Standaard test-passcode: `20202021` (gedefinieerd in `sdkconfig.defaults`).
+Default test passcode: `20202021` (defined in `sdkconfig.defaults`).
 
 ---
 
-## 11. Binding-setup via chip-tool (op je HA-host)
+## 11. Binding setup via chip-tool (on your HA host)
 
-Jouw `chip-tool` draait in de Home Assistant Matter Server container — niet in WSL. Voor binding-write:
+Your `chip-tool` runs in the Home Assistant Matter Server container — not in WSL. For binding write:
 
 Via HA Advanced SSH addon:
 ```bash
 docker exec -it addon_core_matter_server bash
-# Binnen container:
+# Inside container:
 chip-tool binding write binding \
   '[{"fabricIndex":1,"node":<bulb-node-id>,"endpoint":1,"cluster":6},
     {"fabricIndex":1,"node":<bulb-node-id>,"endpoint":1,"cluster":8}]' \
   <switch-node-id> 1
 ```
 
-Vervang `<bulb-node-id>` en `<switch-node-id>` met de node-IDs die HA toont voor je KAJPLATS en Shelly.
+Replace `<bulb-node-id>` and `<switch-node-id>` with the node IDs that HA shows for your KAJPLATS and Shelly.
 
 Cluster 6 = OnOff, cluster 8 = LevelControl.
 
 ---
 
-## 12. OTA — firmware-updates
+## 12. OTA — firmware updates
 
-De firmware ondersteunt twee OTA-paden:
+The firmware supports two OTA paths:
 
-### WiFi-OTA (primair, kant-en-klaar)
-1. `idf.py build` levert nieuwe `build/shelly1gen4_matter_switch.bin`
-2. Kopieer dit bestand naar HA's `/config/www/`
-3. Klik **10× snel** op je System 55 drukker op de Shelly
-4. Eerste keer: telefoon → SoftAP `shelly-ota-XXXXXX` → `http://192.168.4.1/` → SSID/pass/URL invullen
-5. Volgende keren: 10× klikken volstaat — creds zijn opgeslagen
+### WiFi OTA (primary, ready to use)
+1. `idf.py build` produces new `build/shelly1gen4_matter_switch.bin`
+2. Copy this file to HA's `/config/www/`
+3. Click **10× rapidly** on your System 55 pushbutton on the Shelly
+4. First time: phone → SoftAP `shelly-ota-XXXXXX` → `http://192.168.4.1/` → enter SSID/pass/URL
+5. Subsequent times: 10× clicks suffice — credentials are saved
 
-### Matter OTA Provider (optioneel)
-De Matter OTA Requestor is in de firmware geactiveerd (`esp_matter_ota_requestor_init()` in `matter_start()`). Om dit te gebruiken moet je een externe `chip-ota-provider-app` draaien (zie connectedhomeip examples). HA biedt vandaag geen ingebouwde provider; WiFi-OTA blijft daarom de praktische default.
+### Matter OTA Provider (optional)
+The Matter OTA Requestor is activated in the firmware (`esp_matter_ota_requestor_init()` in `matter_start()`). To use this you need to run an external `chip-ota-provider-app` (see connectedhomeip examples). HA does not offer a built-in provider today; WiFi OTA remains the practical default.
 
 ---
 
-## 13. Dagelijkse workflow
+## 13. Daily workflow
 
-Na eenmalige installatie:
+After one-time installation:
 
 ```bash
-# 1. Ubuntu starten (start-menu → Ubuntu 22.04 LTS)
-# 2. Project openen
+# 1. Start Ubuntu (start menu → Ubuntu 22.04 LTS)
+# 2. Open project
 cd ~/projects/shelly1gen4_matter_switch
 code .
 
-# 3. ESP32 doorgeven (PowerShell admin)
-usbipd attach --wsl --busid <jouw-busid>
+# 3. Forward ESP32 (PowerShell admin)
+usbipd attach --wsl --busid <your-busid>
 
 # 4. In VS Code ESP-IDF Terminal:
 idf.py -p /dev/ttyUSB0 flash monitor
@@ -393,31 +393,31 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 ---
 
-## 14. Veelvoorkomende problemen
+## 14. Common problems
 
-| Probleem | Oorzaak | Fix |
+| Problem | Cause | Fix |
 |---|---|---|
-| `wsl: command not found` / WSL niet geïnstalleerd | WSL feature uit | `wsl --install -d Ubuntu-22.04` als admin, reboot |
-| WSL fout `0x80370102` | Virtualisatie uit in BIOS | BIOS → enable VT-x / AMD-V |
-| `WSL State: Stopped` | Normaal na reboot | `wsl` of start-menu Ubuntu |
-| `install.sh` faalt op `mobly` / `ResolutionImpossible` | Pip-dependency conflict in pigweed | `rm -rf connectedhomeip/connectedhomeip/.environment && ./install.sh` |
-| `idf.py: command not found` | Env niet gesourced | `source ~/esp/esp-idf/export.sh` (of voeg toe aan `~/.bashrc`) |
-| `permission denied` op `/dev/ttyUSB0` | User niet in dialout-groep | `sudo usermod -aG dialout $USER` + heropen terminal |
-| USB-poort niet zichtbaar in WSL | `usbipd attach` na reboot vergeten | PowerShell admin: `usbipd attach --wsl --busid <ID>` |
-| ESP-IDF extensie zegt "config not valid" | Auto-detect faalt | Skip wizard, voeg `source ~/esp/esp-idf/export.sh` toe aan `~/.bashrc` en reload VS Code |
-| Build crasht met `out-of-memory` | WSL2 default-RAM te laag | Maak `%USERPROFILE%\.wslconfig`: `[wsl2]` + `memory=8GB` + `processors=4`. Dan `wsl --shutdown` en herstart |
-| Trage build (>1 uur 2e keer) | Ccache niet aan | `export IDF_CCACHE_ENABLE=1` permanent in `~/.bashrc` |
-| Build vanuit `/mnt/c/` extreem traag | Cross-FS overhead | Project verplaatsen naar `~/projects/` |
+| `wsl: command not found` / WSL not installed | WSL feature off | `wsl --install -d Ubuntu-22.04` as admin, reboot |
+| WSL error `0x80370102` | Virtualization off in BIOS | BIOS → enable VT-x / AMD-V |
+| `WSL State: Stopped` | Normal after reboot | `wsl` or start menu Ubuntu |
+| `install.sh` fails on `mobly` / `ResolutionImpossible` | Pip dependency conflict in pigweed | `rm -rf connectedhomeip/connectedhomeip/.environment && ./install.sh` |
+| `idf.py: command not found` | Env not sourced | `source ~/esp/esp-idf/export.sh` (or add to `~/.bashrc`) |
+| `permission denied` on `/dev/ttyUSB0` | User not in dialout group | `sudo usermod -aG dialout $USER` + reopen terminal |
+| USB port not visible in WSL | Forgot `usbipd attach` after reboot | PowerShell admin: `usbipd attach --wsl --busid <ID>` |
+| ESP-IDF extension says "config not valid" | Auto-detect fails | Skip wizard, add `source ~/esp/esp-idf/export.sh` to `~/.bashrc` and reload VS Code |
+| Build crashes with `out-of-memory` | WSL2 default RAM too low | Create `%USERPROFILE%\.wslconfig`: `[wsl2]` + `memory=8GB` + `processors=4`. Then `wsl --shutdown` and restart |
+| Slow build (>1 hour 2nd time) | Ccache not enabled | `export IDF_CCACHE_ENABLE=1` permanently in `~/.bashrc` |
+| Build from `/mnt/c/` extremely slow | Cross-FS overhead | Move project to `~/projects/` |
 
 ---
 
-## 15. Bekende build-issues met esp-matter `release/v1.4`
+## 15. Known build issues with esp-matter `release/v1.4`
 
-Deze project-templates zijn al gefixt; staan hier ter referentie voor wie eigen Matter-projecten optuigt op v1.4.
+These project templates are already fixed; listed here for reference for anyone setting up their own Matter projects on v1.4.
 
 ### 15.1 `static_assert: Wi-Fi network endpoint id and Thread network endpoint id should not be the same`
 
-**Oorzaak:** zowel `CONFIG_ENABLE_WIFI_STATION=y` als `CONFIG_OPENTHREAD_ENABLED=y` actief → Matter probeert twee Network Commissioning Cluster-instanties op endpoint 0.
+**Cause:** both `CONFIG_ENABLE_WIFI_STATION=y` and `CONFIG_OPENTHREAD_ENABLED=y` active → Matter tries to create two Network Commissioning Cluster instances on endpoint 0.
 
 **Fix** (in `sdkconfig.defaults`):
 ```
@@ -427,11 +427,11 @@ CONFIG_ENABLE_WIFI_STATION=n
 CONFIG_ENABLE_WIFI_AP=n
 ```
 
-Master toggle `CONFIG_ENABLE_MATTER_OVER_THREAD=y` gate't alle WiFi-Matter-paden uit.
+Master toggle `CONFIG_ENABLE_MATTER_OVER_THREAD=y` gates all WiFi-Matter paths out.
 
 ### 15.2 `fatal error: esp_matter.h: No such file or directory`
 
-**Oorzaak:** main-component mist `esp_matter` in `PRIV_REQUIRES`.
+**Cause:** main component missing `esp_matter` in `PRIV_REQUIRES`.
 
 **Fix** (`main/CMakeLists.txt`):
 ```cmake
@@ -441,28 +441,28 @@ PRIV_REQUIRES
     esp_matter
 ```
 
-### 15.3 `'ChipDevicePlatformEvent' does not name a type` + `static_cast` van `ConnectivityManager*` → `ConnectivityManagerImpl*` faalt
+### 15.3 `'ChipDevicePlatformEvent' does not name a type` + `static_cast` from `ConnectivityManager*` → `ConnectivityManagerImpl*` fails
 
-**Oorzaak:** platform target defines missen. esp-matter's GN-build zet deze normaal door naar CMake, maar bij v1.4 release-branch met Thread-only configs lekt dat soms.
+**Cause:** platform target defines are missing. esp-matter's GN build normally passes these through to CMake, but on v1.4 release branch with Thread-only configs this sometimes leaks.
 
-**Fix** (root `CMakeLists.txt`, na `project()`):
+**Fix** (root `CMakeLists.txt`, after `project()`):
 ```cmake
 idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H;-Wno-overloaded-virtual" APPEND)
 idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
 idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)
 ```
 
-En in `main/CMakeLists.txt`:
+And in `main/CMakeLists.txt`:
 ```cmake
 set_property(TARGET ${COMPONENT_LIB} PROPERTY CXX_STANDARD 17)
 target_compile_options(${COMPONENT_LIB} PRIVATE "-DCHIP_HAVE_CONFIG_H")
 ```
 
-`CHIP_HAVE_CONFIG_H` triggert de juiste platform-config selectie in connectedhomeip headers. Patroon overgenomen uit `$ESP_MATTER_PATH/examples/light_switch/CMakeLists.txt`.
+`CHIP_HAVE_CONFIG_H` triggers the correct platform config selection in connectedhomeip headers. Pattern taken from `$ESP_MATTER_PATH/examples/light_switch/CMakeLists.txt`.
 
 ### 15.4 Partition table `does not fit in configured flash size 2MB`
 
-**Oorzaak:** Shelly 1 Gen4 heeft 8 MB flash, ESP-IDF default is 2 MB.
+**Cause:** Shelly 1 Gen4 has 8 MB flash, ESP-IDF default is 2 MB.
 
 **Fix** (`sdkconfig.defaults`):
 ```
@@ -470,26 +470,26 @@ CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 ```
 
-### 15.5 API drift v1.4 (codeniveau)
+### 15.5 API drift v1.4 (code level)
 
-Code geschreven tegen oudere Matter-API faalt op v1.4 met:
+Code written against older Matter API fails on v1.4 with:
 
-| Oud | Nieuw in v1.4 |
+| Old | New in v1.4 |
 |---|---|
 | `EMBER_MULTICAST_BINDING` | `MATTER_MULTICAST_BINDING` |
 | `EMBER_UNICAST_BINDING` | `MATTER_UNICAST_BINDING` |
 | `ESP_MATTER_NONE_FEATURE_MAP` | `ESP_MATTER_NONE_FEATURE_ID` |
-| `chip::BindingManager::Params` | `chip::BindingManagerInitParams` (top-level, met extra `mStorage` veld) |
-| `cmd.optionsMask = 0` (int → BitMask) | Laat weg — default-init is al lege BitMask |
-| `InvokeCommandRequest(... , void(*)(void*, ...), void(*)(void*, CHIP_ERROR))` | Typed lambdas: `[](const ConcreteCommandPath&, const StatusIB&, const auto& response){}` voor success, `[](CHIP_ERROR){}` voor error |
+| `chip::BindingManager::Params` | `chip::BindingManagerInitParams` (top-level, with extra `mStorage` field) |
+| `cmd.optionsMask = 0` (int → BitMask) | Omit — default init is already an empty BitMask |
+| `InvokeCommandRequest(... , void(*)(void*, ...), void(*)(void*, CHIP_ERROR))` | Typed lambdas: `[](const ConcreteCommandPath&, const StatusIB&, const auto& response){}` for success, `[](CHIP_ERROR){}` for error |
 
-Plus `#include <app/clusters/bindings/BindingManager.h>` (BindingManager class verhuisd weg uit `binding-table.h`).
+Plus `#include <app/clusters/bindings/BindingManager.h>` (BindingManager class moved away from `binding-table.h`).
 
 ---
 
-## 16. Volgende stappen
+## 16. Next steps
 
-Zie:
-- [`README.md`](README.md) — architectuur, Matter device-types, binding-uitleg
-- [`INSTALL.md`](INSTALL.md) — CLI fallback workflow (puur Linux/macOS, geen VS Code)
-- Espressif's [ESP-Matter Programming Guide](https://docs.espressif.com/projects/esp-matter/en/latest/) voor diepere SDK-info
+See:
+- [`README.md`](README.md) — architecture, Matter device types, binding explanation
+- [`INSTALL.md`](INSTALL.md) — CLI fallback workflow (pure Linux/macOS, no VS Code)
+- Espressif's [ESP-Matter Programming Guide](https://docs.espressif.com/projects/esp-matter/en/latest/) for deeper SDK info
