@@ -375,10 +375,12 @@ static esp_err_t sensor_get(httpd_req_t *req)
 
 #include "soc/gpio_reg.h"
 #include "soc/io_mux_reg.h"
+#include "esp_private/periph_ctrl.h"
+#include "soc/periph_defs.h"
 
 static esp_err_t gpio17_diag_get(httpd_req_t *req)
 {
-    static char buf[3072];
+    static char buf[3584];
     int pos = 0;
 
     /* ---- Step 0: read BEFORE any reconfiguration ---- */
@@ -388,6 +390,13 @@ static esp_err_t gpio17_diag_get(httpd_req_t *req)
     /* ---- Step 1: install + delete UART0 driver ---- */
     esp_err_t inst_err = uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
     esp_err_t del_err  = uart_driver_delete(UART_NUM_0);
+
+    /* ---- Step 1b: read AFTER driver teardown but BEFORE periph_module_disable ---- */
+    uint32_t gpio_in_mid = REG_READ(GPIO_IN_REG);
+    int raw_mid = (gpio_in_mid >> PIN_LD2410_INPUT) & 1;
+
+    /* ---- Step 1c: force-disable UART0 module (drains console-init ref_count) ---- */
+    periph_module_disable(PERIPH_UART0_MODULE);
 
     /* ---- Step 2: reset pin and configure as input with pull-down ---- */
     gpio_reset_pin(PIN_LD2410_INPUT);
@@ -444,8 +453,9 @@ static esp_err_t gpio17_diag_get(httpd_req_t *req)
         "<tr><td>uart_driver_install</td><td>%s (0x%x)</td></tr>"
         "<tr><td>uart_driver_delete</td><td>%s (0x%x)</td></tr>"
         "<tr><td>gpio_config</td><td>%s (0x%x)</td></tr>"
-        "<tr><td>GPIO_IN_REG <b>before</b> config</td><td>bit %d = <b>%d</b> (raw 0x%08lx)</td></tr>"
-        "<tr><td>GPIO_IN_REG <b>after</b> config</td><td>bit %d = <b>%d</b> (raw 0x%08lx)</td></tr>"
+        "<tr><td>GPIO_IN_REG <b>before</b> anything</td><td>bit %d = <b>%d</b> (raw 0x%08lx)</td></tr>"
+        "<tr><td>GPIO_IN_REG <b>after</b> uart delete</td><td>bit %d = <b>%d</b> (raw 0x%08lx)</td></tr>"
+        "<tr><td>GPIO_IN_REG <b>after</b> periph_module_disable</td><td>bit %d = <b>%d</b> (raw 0x%08lx)</td></tr>"
         "<tr><td>gpio_get_level()</td><td><b>%d</b></td></tr>"
         "</table>",
         PIN_LD2410_INPUT,
@@ -453,6 +463,7 @@ static esp_err_t gpio17_diag_get(httpd_req_t *req)
         esp_err_to_name(del_err), (unsigned)del_err,
         esp_err_to_name(cfg_err), (unsigned)cfg_err,
         PIN_LD2410_INPUT, raw_before, (unsigned long)gpio_in_before,
+        PIN_LD2410_INPUT, raw_mid, (unsigned long)gpio_in_mid,
         PIN_LD2410_INPUT, raw_after, (unsigned long)gpio_in_after,
         level_api);
 
