@@ -29,7 +29,7 @@ Het relais (EP4) is **niet meer hardcoded gekoppeld** aan de knopdruk. Via een M
 | Component | Status |
 |---|---|
 | Shelly 1 Gen4 (ESP32-C6, 8 MB flash) | Doel-hardware |
-| Shelly Plus Add-on | Voor DS18B20 (GPIO16) + TTP223 touch (GPIO12) + LD2410 radar (GPIO17) |
+| Shelly Plus Add-on | Voor DS18B20 (GPIO16) + TTP223 touch (GPIO18) + LD2410 radar (GPIO17) |
 | Thread Border Router | **Google TV Streamer 4K** |
 | Matter primary admin | **Home Assistant Matter Server** add-on |
 | Matter-Thread bulb | **IKEA KAJPLATS** (Thread-mode via setup-code) |
