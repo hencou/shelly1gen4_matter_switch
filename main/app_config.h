@@ -59,7 +59,6 @@ extern "C" {
 #define EP_TEMPERATURE      3
 #define EP_OCCUPANCY        4
 #define EP_RELAY            5
-#define EP_OTA              6
 
 /* Logical input source identifiers.
  * All 3 inputs have uniform behavior (see on_button_event in app_main.cpp):

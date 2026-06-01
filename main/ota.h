@@ -12,10 +12,8 @@ extern "C" {
  *
  * Flow:
  *   1) During normal operation: WiFi OFF, only Thread/Matter.
- *   2) User trigger:
- *        a) Turn ON EP6 (OTA switch) from HA (recommended), OR
- *        b) 6x clicks on pushbutton (fallback).
- *      Both call ota_request_at_next_boot() -> NVS flag + reboot.
+ *   2) User trigger: 6x clicks on pushbutton ->
+ *      ota_request_at_next_boot() sets NVS flag + reboot.
  *   3) At boot: ota_handle_pending() inspects the flag.
  *      - If saved WiFi creds exist -> direct STA OTA.
  *      - Otherwise -> SoftAP "shelly-ota-XXXXXX" with HTTP form on
