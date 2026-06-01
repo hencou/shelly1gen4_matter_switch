@@ -168,7 +168,7 @@ static void temp_task(void *arg)
 
 #define OCC_SAMPLE_WINDOW_US  100000   /* 100 ms measurement window */
 #define OCC_SAMPLE_INTERVAL_US   100   /* 100 µs between samples   */
-#define OCC_DUTY_THRESHOLD_PCT    50   /* ≥50 % duty → occupied    */
+#define OCC_DUTY_THRESHOLD_PCT    25   /* ≥25 % duty (≈2.5 V) → occupied */
 
 static occupancy_cb_t s_occ_cb;
 

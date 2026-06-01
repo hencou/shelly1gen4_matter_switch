@@ -404,7 +404,7 @@ static esp_err_t gpio17_diag_get(httpd_req_t *req)
         esp_rom_delay_us(100);
     }
     int duty = (high * 100) / total;
-    int occ  = (duty >= 50);
+    int occ  = (duty >= 25);
 
     /* ---- Build HTML ---- */
     pos += snprintf(buf + pos, sizeof(buf) - pos,
@@ -433,7 +433,7 @@ static esp_err_t gpio17_diag_get(httpd_req_t *req)
         "<tr><td>GPIO</td><td>%d</td></tr>"
         "<tr><td>Samples</td><td>%d (HIGH: %d)</td></tr>"
         "<tr><td>Duty cycle</td><td>%d%%</td></tr>"
-        "<tr><td>Threshold</td><td>50%%</td></tr>"
+        "<tr><td>Threshold</td><td>25%% (\u2248 2.5 V)</td></tr>"
         "<tr><td>Result</td><td>%s</td></tr>"
         "</table>",
         PIN_LD2410_INPUT, total, high, duty,

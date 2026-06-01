@@ -87,7 +87,7 @@ Status LED patterns (`status_led.c`):
 |---|---|---|---|---|
 | **EP 1** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff, LevelControl | Pushbutton → Toggle → light |
 | **EP 2** | 0x0302 Temperature Sensor | TemperatureMeasurement | — | DS18B20 report |
-| **EP 3** | 0x0107 Occupancy Sensor | OccupancySensing | — | Analog IN duty ≥ 50 % |
+| **EP 3** | 0x0107 Occupancy Sensor | OccupancySensing | — | Analog IN duty ≥ 25 % (≈ 2.5 V) |
 | **EP 4** | 0x0100 OnOff Light | OnOff | — | Relay GPIO5 — controllable from HA |
 | **EP 5** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff | Maintained switch → On/Off → light |
 
