@@ -16,7 +16,7 @@ EP1 (Toggle) and EP2 (State-follow) drive the same physical inputs — the user 
 
 Pushbutton→light and touch→light work **standalone** after binding setup: HA Matter Server, Google TV Streamer, may be offline — direct Thread-mesh-multicast to the bound bulbs.
 
-The relay (EP5) is **no longer hardcoded** to the button press. Via a Matter binding from EP1 to EP5 you can optionally make the relay switch along. Without binding the relay only responds to commands from HA.
+The relay (EP5) is **no longer hardcoded** to the button press. Via a Matter binding from EP1/EP2 to EP5 you can optionally make the relay switch along. Without binding the relay only responds to commands from HA.
 
 ## Based on
 
