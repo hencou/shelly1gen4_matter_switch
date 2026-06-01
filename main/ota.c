@@ -198,36 +198,43 @@ static esp_err_t do_ota_from_url(const char *url)
 }
 
 
-/* ---------- DS18B20 sensor test (1-Wire bitbang) ---------- */
+/* ---------- DS18B20 sensor test (dual-pin 1-Wire via ISO7221A) ---------- */
 
-#define OTA_OW_PIN  PIN_ONEWIRE
+#define OTA_OW_TX  PIN_ONEWIRE_TX
+#define OTA_OW_RX  PIN_ONEWIRE_RX
 
-static inline void ota_ow_low(void) { gpio_set_direction(OTA_OW_PIN, GPIO_MODE_OUTPUT); gpio_set_level(OTA_OW_PIN, 0); }
-static inline void ota_ow_hi(void)  { gpio_set_direction(OTA_OW_PIN, GPIO_MODE_INPUT); }
-static inline int  ota_ow_rd(void)  { return gpio_get_level(OTA_OW_PIN); }
+static inline void ota_ow_tx_low(void)  { gpio_set_level(OTA_OW_TX, 0); }
+static inline void ota_ow_tx_high(void) { gpio_set_level(OTA_OW_TX, 1); }
+static inline int  ota_ow_rx_rd(void)   { return gpio_get_level(OTA_OW_RX); }
 
 static bool ota_ow_reset(void)
 {
-    ota_ow_low(); esp_rom_delay_us(480);
-    ota_ow_hi();  esp_rom_delay_us(70);
-    bool present = !ota_ow_rd();
+    uint8_t retries = 125;
+    do {
+        if (--retries == 0) return false;
+        esp_rom_delay_us(2);
+    } while (!ota_ow_rx_rd());
+
+    ota_ow_tx_low();  esp_rom_delay_us(480);
+    ota_ow_tx_high(); esp_rom_delay_us(70);
+    bool present = !ota_ow_rx_rd();
     esp_rom_delay_us(410);
     return present;
 }
 
 static void ota_ow_write_bit(int b)
 {
-    ota_ow_low();
-    if (b) { esp_rom_delay_us(6);  ota_ow_hi(); esp_rom_delay_us(64); }
-    else   { esp_rom_delay_us(60); ota_ow_hi(); esp_rom_delay_us(10); }
+    ota_ow_tx_low();
+    if (b) { esp_rom_delay_us(10); ota_ow_tx_high(); esp_rom_delay_us(55); }
+    else   { esp_rom_delay_us(65); ota_ow_tx_high(); esp_rom_delay_us(5);  }
 }
 
 static int ota_ow_read_bit(void)
 {
-    ota_ow_low(); esp_rom_delay_us(6);
-    ota_ow_hi();  esp_rom_delay_us(9);
-    int v = ota_ow_rd();
-    esp_rom_delay_us(55);
+    ota_ow_tx_low();  esp_rom_delay_us(3);
+    ota_ow_tx_high(); esp_rom_delay_us(9);
+    int v = ota_ow_rx_rd();
+    esp_rom_delay_us(53);
     return v;
 }
 
@@ -250,12 +257,19 @@ static esp_err_t sensor_get(httpd_req_t *req)
 
     uart_driver_delete(UART_NUM_0);
 
-    gpio_config_t cfg = {
-        .pin_bit_mask = (1ULL << OTA_OW_PIN),
-        .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = GPIO_PULLUP_ENABLE,
+    gpio_config_t tx_cfg = {
+        .pin_bit_mask = (1ULL << OTA_OW_TX),
+        .mode         = GPIO_MODE_OUTPUT,
     };
-    gpio_config(&cfg);
+    gpio_config(&tx_cfg);
+    ota_ow_tx_high();
+
+    gpio_reset_pin(OTA_OW_RX);
+    gpio_config_t rx_cfg = {
+        .pin_bit_mask = (1ULL << OTA_OW_RX),
+        .mode         = GPIO_MODE_INPUT,
+    };
+    gpio_config(&rx_cfg);
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
         "<!DOCTYPE html><html><head><meta charset=utf-8>"
@@ -269,13 +283,13 @@ static esp_err_t sensor_get(httpd_req_t *req)
         "<p style='color:#555;font-size:.9em'>Pagina ververst automatisch elke 3s.</p>");
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Stap 1: Reset pulse (GPIO%d)</b> &mdash; ", OTA_OW_PIN);
+        "<div class=row><b>Stap 1: Reset pulse (TX=GPIO%d, RX=GPIO%d)</b> &mdash; ", OTA_OW_TX, OTA_OW_RX);
     bool present = ota_ow_reset();
     if (!present) {
         pos += snprintf(buf + pos, sizeof(buf) - pos,
             "<span class=err>&#10007; Geen presence pulse &mdash; sensor niet gevonden op bus</span></div>"
-            "<div class=row><span class=warn>Controleer bedrading: VCC=3V3 DAT=GPIO%d GND=GND</span></div>"
-            "<p><a href=/>&#8592; Terug</a></p></body></html>", OTA_OW_PIN);
+            "<div class=row><span class=warn>Controleer bedrading: VCC=3V3, TX=GPIO%d, RX=GPIO%d, GND=GND</span></div>"
+            "<p><a href=/>&#8592; Terug</a></p></body></html>", OTA_OW_TX, OTA_OW_RX);
         httpd_resp_set_type(req, "text/html");
         httpd_resp_send(req, buf, pos);
         return ESP_OK;

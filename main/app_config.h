@@ -7,15 +7,16 @@ extern "C" {
 /* Pin mapping — adjust via `idf.py menuconfig` */
 #define PIN_RELAY           CONFIG_PIN_RELAY
 #define PIN_SWITCH_INPUT    CONFIG_PIN_SWITCH_INPUT
-#define PIN_ONEWIRE         CONFIG_PIN_ONEWIRE         /* Shelly Add-on data */
+#define PIN_ONEWIRE_TX      CONFIG_PIN_ONEWIRE_TX      /* 1-Wire TX / data out (GPIO9) via ISO7221A */
+#define PIN_ONEWIRE_RX      CONFIG_PIN_ONEWIRE_RX      /* 1-Wire RX / data in  (GPIO16) via ISO7221A */
 
 /* Bench-mode: tijdens 3V3-USB-UART-testen (zonder 230V op de drukker en
- * zonder DS18B20/LD2410 op de Add-on) hangen GPIO10, GPIO16 en GPIO17 floating.
+ * zonder DS18B20/LD2410 op de Add-on) hangen GPIO10, GPIO9, GPIO16 en GPIO17 floating.
  * GPIO10-ANYEDGE → ISR-storm; GPIO16/17 zijn ook de UART0 TX/RX pins op de
  * ESP32-C6 — als sensors.c ze herconfigureert sterft de serial output.
  * BENCH_MODE=1:
  *   - GPIO10 krijgt interne pull-up (rust-toestand high = released)
- *   - sensors_init() slaat temp_task en occ_task over (GPIO16/17 = UART0)
+ *   - sensors_init() slaat temp_task en occ_task over (GPIO9/16/17 vrijhouden)
  * BENCH_MODE=0 (productie): originele paden, externe pull op GPIO10
  * gedreven door 230V-optocoupler is dan correct.
  *

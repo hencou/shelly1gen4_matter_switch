@@ -84,7 +84,7 @@ Nummering loopt **van het pin het verst van het J6-label (pin 1) naar het pin di
 | Pin | Functie | GPIO | Toelichting |
 |---|---|---|---|
 | 1 | **ESP_DBG_UART** | GPIO18 (Digital IN) | niet gebruikt voor flashen |
-| 2 | **TXD** | GPIO16 (UART0 TX // OneWire DATA) | Shelly TXD → CP2102 RXD |
+| 2 | **TXD** | GPIO16 (UART0 TX // 1-Wire RX) | Shelly TXD → CP2102 RXD |
 | 3 | **RXD** | GPIO17 (UART0 RX // Analog IN) | Shelly RXD ← CP2102 TXD |
 | 4 | **3.3V** | -- | voeding (alleen 3.3V — **géén 5V**) |
 | 5 | **RESET** | EN | EN — niet nodig voor handmatig flashen |
