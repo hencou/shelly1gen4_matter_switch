@@ -5,7 +5,7 @@ menu "Shelly 1 Gen4 Matter Switch configuration"
         default 5
 
     config PIN_SWITCH_INPUT
-        int "GPIO for System 55 drukker input"
+        int "GPIO for System 55 pushbutton input"
         default 10
 
     config PIN_ONEWIRE_TX
@@ -28,19 +28,19 @@ menu "Shelly 1 Gen4 Matter Switch configuration"
         int "GPIO for status LED (-1 = disabled)"
         default 15
         help
-            Default is GPIO15 — de onboard PCB-LED van de Shelly 1 Gen4
-            (canonical-validated). Voor de Shelly Plus Add-on LED-pin kan
-            een ander nummer gekozen worden zodra die mapping bekend is.
-            Zet op -1 om de status-LED helemaal uit te zetten.
+            Default is GPIO15 — the onboard PCB LED of the Shelly 1 Gen4
+            (canonical-validated). For the Shelly Plus Add-on LED pin a
+            different number can be chosen once that mapping is known.
+            Set to -1 to disable the status LED entirely.
 
     config STATUS_LED_ACTIVE_HIGH
-        bool "Status LED is active-high (LED aan bij GPIO=1)"
+        bool "Status LED is active-high (LED on when GPIO=1)"
         default n
         help
-            De onboard Shelly 1 Gen4 status-LED op GPIO15 is active-low
-            (canonical-validated): GPIO=0 → LED aan. Voor andere boards
-            (b.v. Add-on LED) kan dit n of y zijn afhankelijk van de
-            externe schakeling.
+            The onboard Shelly 1 Gen4 status LED on GPIO15 is active-low
+            (canonical-validated): GPIO=0 → LED on. For other boards
+            (e.g. Add-on LED) this can be n or y depending on the
+            external circuit.
 
     config LONG_PRESS_MS
         int "Long-press detection threshold (ms)"

@@ -8,33 +8,33 @@ extern "C" {
 #endif
 
 /**
- * OTA-module voor de Shelly 1 Gen4 custom firmware.
+ * OTA module for the Shelly 1 Gen4 custom firmware.
  *
- * Stroom:
- *   1) Tijdens normaal bedrijf: WiFi UIT, alleen Zigbee.
- *   2) User-trigger (10x klikken op drukker, of remote ZCL-trigger) ->
- *      ota_request_at_next_boot() zet vlag in NVS en reboot.
- *   3) Bij boot: ota_handle_pending() inspecteert vlag.
- *      - Als opgeslagen WiFi-creds bestaan -> directe STA OTA.
- *      - Anders -> SoftAP "shelly-ota-XXXXXX" met HTTP-form op
- *        http://192.168.4.1/ om SSID/pass/URL eenmalig in te voeren.
- *   4) Na succes: esp_restart() -> nieuwe firmware boot, Zigbee herneemt.
- *   5) Bij failure: ESP-IDF rollback markeert nieuwe app niet als valid;
- *      bij 3e mislukte boot keert het terug naar vorige slot.
+ * Flow:
+ *   1) During normal operation: WiFi OFF, only Thread/Matter.
+ *   2) User trigger (6x clicks on pushbutton, or remote trigger) ->
+ *      ota_request_at_next_boot() sets flag in NVS and reboots.
+ *   3) At boot: ota_handle_pending() inspects the flag.
+ *      - If saved WiFi creds exist -> direct STA OTA.
+ *      - Otherwise -> SoftAP "shelly-ota-XXXXXX" with HTTP form on
+ *        http://192.168.4.1/ to enter SSID/pass/URL once.
+ *   4) On success: esp_restart() -> new firmware boots, Thread resumes.
+ *   5) On failure: ESP-IDF rollback does not mark new app as valid;
+ *      after 3rd failed boot it reverts to the previous slot.
  */
 
-/* Roep aan vroeg in app_main, vóór Zigbee-stack of grote componenten. */
+/* Call early in app_main, before the Matter stack or large components. */
 void ota_handle_pending(void);
 
-/* Zet OTA-vlag in NVS en reboot het apparaat. */
+/* Set OTA flag in NVS and reboot the device. */
 void ota_request_at_next_boot(void);
 
-/* Sla WiFi-creds + URL op in NVS (kan ook via web-form). */
+/* Save WiFi creds + URL in NVS (can also be done via web form). */
 esp_err_t ota_save_credentials(const char *ssid, const char *password,
                                const char *firmware_url);
 
-/* Markeer huidige firmware als valid zodat ESP-IDF geen rollback doet.
- * Roep aan na succesvolle boot + Zigbee join. */
+/* Mark current firmware as valid so ESP-IDF does not roll back.
+ * Call after successful boot + Thread/Matter join. */
 void ota_mark_app_valid(void);
 
 #ifdef __cplusplus

@@ -9,14 +9,14 @@ extern "C" {
 #endif
 
 /**
- * Event-type dat de button-driver uitstuurt.
+ * Event type emitted by the button driver.
  * - SHORT_PRESS      fires on release within LONG_PRESS_MS
  * - LONG_PRESS_START fires when held > LONG_PRESS_MS
  * - LONG_PRESS_STOP  fires on release after a LONG_PRESS_START
  * - MODE_TOGGLE      fires after MODE_TOGGLE_CLICKS (6) taps in MODE_TOGGLE_WINDOW_MS
- *                    Universeel op alle 3 inputs. Handler beslist op basis van
- *                    huidige boot-mode:
- *                      - Matter mode -> reboot in OTA mode
+ *                    Universal across all 3 inputs. Handler decides based on
+ *                    current boot mode:
+ *                      - Matter mode -> reboot into OTA mode
  *                      - OTA mode    -> factory reset (wipe nvs + chip_kvs)
  * - CONTACT_CLOSED   fires on every press/close edge (state-following)
  * - CONTACT_OPEN     fires on every release/open edge (state-following)

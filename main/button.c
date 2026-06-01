@@ -1,32 +1,32 @@
 /*
- * Button driver voor alle 3 inputs van de Shelly 1 Gen4:
- *   INPUT_DRUKKER     (GPIO10) System 55 impulsdrukker
- *   INPUT_TOUCH       (GPIO18) Add-on digital in klem
- *   INPUT_DEVICE_BTN  (GPIO4)  onboard pair-knop
+ * Button driver for all 3 inputs of the Shelly 1 Gen4:
+ *   INPUT_PUSHBUTTON     (GPIO10) System 55 pushbutton
+ *   INPUT_TOUCH       (GPIO18) Add-on digital input terminal
+ *   INPUT_DEVICE_BTN  (GPIO4)  onboard pair button
  *
- * Alle 3 inputs hebben hetzelfde gedrag (zie on_button_event in app_main.cpp):
- *   SHORT_PRESS       -> Matter Toggle + relais tikken
+ * All 3 inputs have the same behavior (see on_button_event in app_main.cpp):
+ *   SHORT_PRESS       -> Matter Toggle + relay tick
  *   LONG_PRESS_START  -> dim start
  *   LONG_PRESS_STOP   -> dim stop
- *   6x klik           -> MODE_TOGGLE (universeel: Matter <-> OTA mode)
+ *   6x click          -> MODE_TOGGLE (universal: Matter <-> OTA mode)
  *
- * Polariteit per input:
- *   - INPUT_DRUKKER:    active-high (productie 230V optocoupler);
- *                       active-low in BENCH_MODE (interne pull-up)
- *   - INPUT_TOUCH:      active-low (Add-on heeft ingebouwde pull-up naar 3V3;
- *                       aansluiten naar GND = pressed). Geen interne pull
- *                       want die strijdt met de Add-on pull-up.
- *   - INPUT_DEVICE_BTN: altijd active-low (interne pull-up, knop naar GND)
+ * Polarity per input:
+ *   - INPUT_PUSHBUTTON:    active-high (production 230V optocoupler);
+ *                       active-low in BENCH_MODE (internal pull-up)
+ *   - INPUT_TOUCH:      active-low (Add-on has built-in pull-up to 3V3;
+ *                       connecting to GND = pressed). No internal pull
+ *                       because it conflicts with the Add-on pull-up.
+ *   - INPUT_DEVICE_BTN: always active-low (internal pull-up, button to GND)
  *
- * Driver gebruikt ISR-to-queue met een eigen FreeRTOS-task zodat
- * Matter-stack-calls in task-context gebeuren.
+ * Driver uses ISR-to-queue with its own FreeRTOS task so that
+ * Matter stack calls happen in task context.
  *
- * NOOT over optocoupler debounce:
- *   gpio_get_level() in de ISR geeft bij een optocoupler soms nog de oude
- *   waarde terug omdat de stijgtijd trager is dan de ISR latency. Daarom
- *   wordt het level NIET in de ISR gelezen maar in de task, na een korte
- *   DEBOUNCE_READ_US vertraging. Zo leest handle_edge() altijd de stabiele
- *   eindtoestand.
+ * NOTE on optocoupler debounce:
+ *   gpio_get_level() in the ISR sometimes returns the old value for an
+ *   optocoupler because the rise time is slower than the ISR latency.
+ *   Therefore the level is NOT read in the ISR but in the task, after
+ *   a short DEBOUNCE_READ_US delay. This way handle_edge() always reads
+ *   the stable final state.
  */
 
 #include "button.h"
@@ -42,13 +42,13 @@
 
 static const char *TAG = "button";
 
-/* Wacht deze tijd na een ISR voordat het GPIO-level wordt gelezen.
- * Optocouplers hebben typisch 1-5 ms stijgtijd; 10 ms is veilig. */
+/* Wait this duration after an ISR before reading the GPIO level.
+ * Optocouplers typically have 1-5 ms rise time; 10 ms is safe. */
 #define DEBOUNCE_READ_US    10000   /* 10 ms */
 
 typedef struct {
     input_id_t id;
-    int64_t    t_us;    /* tijdstip van de ISR */
+    int64_t    t_us;    /* timestamp of the ISR */
 } btn_isr_msg_t;
 
 #define CLICK_HISTORY 8
@@ -90,14 +90,14 @@ static void handle_edge(btn_isr_msg_t *m)
     btn_state_t *s = &s_state[m->id];
     if (!s->enabled) return;
 
-    /* Wacht tot de pin stabiel is (optocoupler stijgtijd / debounce) */
+    /* Wait until the pin is stable (optocoupler rise time / debounce) */
     int64_t now = esp_timer_get_time();
     int64_t elapsed = now - m->t_us;
     if (elapsed < DEBOUNCE_READ_US) {
         vTaskDelay(pdMS_TO_TICKS((DEBOUNCE_READ_US - elapsed) / 1000 + 1));
     }
 
-    /* Lees level nu de pin stabiel is */
+    /* Read level now that the pin is stable */
     int level = gpio_get_level(s->gpio);
     bool pressed_now = level_is_pressed(s, level);
 
@@ -105,14 +105,14 @@ static void handle_edge(btn_isr_msg_t *m)
              m->id, level, pressed_now, s->pressed);
 
     if (pressed_now && !s->pressed) {
-        /* opgaande flank: knop ingedrukt */
+        /* rising edge: button pressed */
         s->pressed        = true;
         s->press_start_us = m->t_us;
         s->long_fired     = false;
         if (s_cb) s_cb(m->id, BTN_EVT_CONTACT_CLOSED);
 
     } else if (!pressed_now && s->pressed) {
-        /* neergaande flank: knop losgelaten */
+        /* falling edge: button released */
         int64_t dur_ms = (m->t_us - s->press_start_us) / 1000;
         s->pressed = false;
         if (s_cb) s_cb(m->id, BTN_EVT_CONTACT_OPEN);
@@ -121,7 +121,7 @@ static void handle_edge(btn_isr_msg_t *m)
             if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_STOP);
 
         } else if (dur_ms >= LONG_PRESS_MS) {
-            /* randgeval: long_fired nog niet gezet maar duur is >= drempel */
+            /* edge case: long_fired not yet set but duration is >= threshold */
             s->long_fired = true;
             if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_START);
             if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_STOP);
@@ -146,7 +146,7 @@ static void handle_edge(btn_isr_msg_t *m)
             }
         }
     }
-    /* anders: dubbele ISR op zelfde flank of ruis -> negeren */
+    /* otherwise: duplicate ISR on same edge or noise -> ignore */
 }
 
 static void check_long_press(int64_t now_us)
@@ -177,31 +177,31 @@ void button_driver_init(button_cb_t cb)
 {
     s_cb = cb;
 
-    /* INPUT_DRUKKER: GPIO10, active-high in productie (optocoupler 230V),
-     * active-low in BENCH_MODE (interne pull-up, knop naar GND). */
-    s_state[INPUT_DRUKKER].gpio       = PIN_SWITCH_INPUT;
-    s_state[INPUT_DRUKKER].enabled    = true;
-    s_state[INPUT_DRUKKER].active_low = (BENCH_MODE != 0);
+    /* INPUT_PUSHBUTTON: GPIO10, active-high in production (optocoupler 230V),
+     * active-low in BENCH_MODE (internal pull-up, button to GND). */
+    s_state[INPUT_PUSHBUTTON].gpio       = PIN_SWITCH_INPUT;
+    s_state[INPUT_PUSHBUTTON].enabled    = true;
+    s_state[INPUT_PUSHBUTTON].active_low = (BENCH_MODE != 0);
 
-    /* INPUT_TOUCH: GPIO18 Add-on digital in klem.
-     * De Add-on heeft een ingebouwde pull-up naar 3V3, dus de pin staat in
-     * rust hoog. Aansluiten naar GND = pressed -> active-low.
-     * Geen interne pull instellen want die strijdt met de Add-on pull-up. */
+    /* INPUT_TOUCH: GPIO18 Add-on digital input terminal.
+     * The Add-on has a built-in pull-up to 3V3, so the pin idles high.
+     * Connecting to GND = pressed -> active-low.
+     * Do not set internal pull because it conflicts with the Add-on pull-up. */
     s_state[INPUT_TOUCH].gpio       = PIN_TOUCH_INPUT;
     s_state[INPUT_TOUCH].enabled    = true;
-    s_state[INPUT_TOUCH].active_low = true;   /* was false, gecorrigeerd */
+    s_state[INPUT_TOUCH].active_low = true;   /* was false, corrected */
 
-    /* INPUT_DEVICE_BTN: GPIO4 onboard pair-knop, altijd active-low. */
+    /* INPUT_DEVICE_BTN: GPIO4 onboard pair button, always active-low. */
     s_state[INPUT_DEVICE_BTN].gpio       = 4;
     s_state[INPUT_DEVICE_BTN].enabled    = true;
     s_state[INPUT_DEVICE_BTN].active_low = true;
 
     /* ---------- GPIO-config ---------- */
 
-    ESP_LOGI(TAG, "BD-STEP-1: gpio_config drukker GPIO%d bench=%d (active_low=%d)",
-             PIN_SWITCH_INPUT, BENCH_MODE, s_state[INPUT_DRUKKER].active_low);
+    ESP_LOGI(TAG, "BD-STEP-1: gpio_config pushbutton GPIO%d bench=%d (active_low=%d)",
+             PIN_SWITCH_INPUT, BENCH_MODE, s_state[INPUT_PUSHBUTTON].active_low);
 
-    gpio_config_t drukker_cfg = {
+    gpio_config_t pushbutton_cfg = {
         .pin_bit_mask = (1ULL << PIN_SWITCH_INPUT),
         .mode         = GPIO_MODE_INPUT,
 #if BENCH_MODE
@@ -213,15 +213,15 @@ void button_driver_init(button_cb_t cb)
 #endif
         .intr_type    = GPIO_INTR_ANYEDGE,
     };
-    gpio_config(&drukker_cfg);
-    ESP_LOGI(TAG, "BD-STEP-2: gpio_config drukker done");
+    gpio_config(&pushbutton_cfg);
+    ESP_LOGI(TAG, "BD-STEP-2: gpio_config pushbutton done");
 
-    /* Add-on digital in: geen interne pull want Add-on heeft eigen pull-up */
+    /* Add-on digital in: no internal pull because Add-on has its own pull-up */
     gpio_config_t touch_cfg = {
         .pin_bit_mask = (1ULL << PIN_TOUCH_INPUT),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,  /* was ENABLE, gecorrigeerd */
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,  /* was ENABLE, corrected */
         .intr_type    = GPIO_INTR_ANYEDGE,
     };
     gpio_config(&touch_cfg);
@@ -246,8 +246,8 @@ void button_driver_init(button_cb_t cb)
     ESP_LOGI(TAG, "BD-STEP-4: gpio_install_isr_service -> %d (0=OK)", isr_svc_err);
 
     gpio_isr_handler_add(PIN_SWITCH_INPUT, btn_isr,
-                         (void *)(uintptr_t)INPUT_DRUKKER);
-    ESP_LOGI(TAG, "BD-STEP-5a: isr_handler_add drukker (GPIO%d) done", PIN_SWITCH_INPUT);
+                         (void *)(uintptr_t)INPUT_PUSHBUTTON);
+    ESP_LOGI(TAG, "BD-STEP-5a: isr_handler_add pushbutton (GPIO%d) done", PIN_SWITCH_INPUT);
 
     gpio_isr_handler_add(PIN_TOUCH_INPUT, btn_isr,
                          (void *)(uintptr_t)INPUT_TOUCH);
@@ -263,7 +263,7 @@ void button_driver_init(button_cb_t cb)
     ESP_LOGI(TAG, "BD-STEP-6: xTaskCreate btn_task -> %s",
              btn_r == pdPASS ? "OK" : "FAIL");
 
-    ESP_LOGI(TAG, "button driver init (drukker=GPIO%d addon-digital-in=GPIO%d device_btn=GPIO%d)",
+    ESP_LOGI(TAG, "button driver init (pushbutton=GPIO%d addon-digital-in=GPIO%d device_btn=GPIO%d)",
              PIN_SWITCH_INPUT, PIN_TOUCH_INPUT,
              s_state[INPUT_DEVICE_BTN].gpio);
 }

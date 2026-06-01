@@ -1,14 +1,14 @@
 /*
- * OTA implementatie voor Shelly 1 Gen4 custom Matter firmware.
+ * OTA implementation for Shelly 1 Gen4 custom Matter firmware.
  *
- * Twee paden, allebei via WiFi:
- *   1) STA-mode met opgeslagen creds       -> direct esp_https_ota fetch.
- *   2) SoftAP-mode + HTTP upload form      -> user uploadt .bin direct vanuit browser.
+ * Two paths, both via WiFi:
+ *   1) STA mode with saved creds            -> direct esp_https_ota fetch.
+ *   2) SoftAP mode + HTTP upload form       -> user uploads .bin directly from browser.
  *
- * Tijdens OTA-mode wordt de Matter-stack NIET gestart. Daardoor geen
- * coexistence-werk en is de firmware-grootte tijdens OTA minimaal.
+ * During OTA mode the Matter stack is NOT started. This avoids
+ * coexistence overhead and keeps the firmware size during OTA minimal.
  *
- * Partitielayout vereist ota_0 + ota_1 + otadata. Zie partitions.csv.
+ * Partition layout requires ota_0 + ota_1 + otadata. See partitions.csv.
  */
 
 #include "ota.h"
@@ -93,7 +93,7 @@ static bool ota_load_credentials(char *ssid, size_t ssidlen,
     if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
     bool ok = nvs_load_str(h, NVS_KEY_SSID, ssid, ssidlen) &&
               nvs_load_str(h, NVS_KEY_URL,  url,  urllen);
-    /* password mag leeg zijn (open netwerk) */
+    /* password may be empty (open network) */
     if (ok) nvs_load_str(h, NVS_KEY_PASS, pass, passlen);
     nvs_close(h);
     return ok;
@@ -174,7 +174,7 @@ static esp_err_t wifi_init_sta(const char *ssid, const char *pass)
     return (bits & WIFI_CONNECTED_BIT) ? ESP_OK : ESP_FAIL;
 }
 
-/* ---------- HTTPS OTA fetch (STA pad: URL ophalen) ---------- */
+/* ---------- HTTPS OTA fetch (STA path: fetch URL) ---------- */
 
 static esp_err_t do_ota_from_url(const char *url)
 {
@@ -183,7 +183,7 @@ static esp_err_t do_ota_from_url(const char *url)
         .url = url,
         .timeout_ms = 30000,
         .keep_alive_enable = true,
-        .crt_bundle_attach = NULL,  /* HTTPS optioneel */
+        .crt_bundle_attach = NULL,  /* HTTPS optional */
     };
     esp_https_ota_config_t ota_cfg = {
         .http_config = &http_cfg,
@@ -280,29 +280,29 @@ static esp_err_t sensor_get(httpd_req_t *req)
         "h2{font-family:sans-serif}.ok{color:green}.err{color:red}"
         ".warn{color:orange}.row{margin:.5em 0}a{color:#0066cc}</style></head><body>"
         "<h2>&#127777; DS18B20 Sensor Test</h2>"
-        "<p style='color:#555;font-size:.9em'>Pagina ververst automatisch elke 3s.</p>");
+        "<p style='color:#555;font-size:.9em'>Page refreshes automatically every 3s.</p>");
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Stap 1: Reset pulse (TX=GPIO%d, RX=GPIO%d)</b> &mdash; ", OTA_OW_TX, OTA_OW_RX);
+        "<div class=row><b>Step 1: Reset pulse (TX=GPIO%d, RX=GPIO%d)</b> &mdash; ", OTA_OW_TX, OTA_OW_RX);
     bool present = ota_ow_reset();
     if (!present) {
         pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "<span class=err>&#10007; Geen presence pulse &mdash; sensor niet gevonden op bus</span></div>"
-            "<div class=row><span class=warn>Controleer bedrading: VCC=3V3, TX=GPIO%d, RX=GPIO%d, GND=GND</span></div>"
-            "<p><a href=/>&#8592; Terug</a></p></body></html>", OTA_OW_TX, OTA_OW_RX);
+            "<span class=err>&#10007; No presence pulse &mdash; sensor not found on bus</span></div>"
+            "<div class=row><span class=warn>Check wiring: VCC=3V3, TX=GPIO%d, RX=GPIO%d, GND=GND</span></div>"
+            "<p><a href=/>&#8592; Back</a></p></body></html>", OTA_OW_TX, OTA_OW_RX);
         httpd_resp_set_type(req, "text/html");
         httpd_resp_send(req, buf, pos);
         return ESP_OK;
     }
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<span class=ok>&#10003; Presence pulse ontvangen &mdash; sensor gevonden</span></div>");
+        "<span class=ok>&#10003; Presence pulse received &mdash; sensor found</span></div>");
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Stap 2: Convert T (0xCC 0x44)</b> &mdash; ");
+        "<div class=row><b>Step 2: Convert T (0xCC 0x44)</b> &mdash; ");
     ota_ow_write_byte(0xCC);
     ota_ow_write_byte(0x44);
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<span class=ok>&#10003; Commando verzonden</span></div>");
+        "<span class=ok>&#10003; Command sent</span></div>");
 
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send_chunk(req, buf, pos);
@@ -310,12 +310,12 @@ static esp_err_t sensor_get(httpd_req_t *req)
     vTaskDelay(pdMS_TO_TICKS(820));
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Stap 3: Reset voor ReadScratchpad</b> &mdash; ");
+        "<div class=row><b>Step 3: Reset for ReadScratchpad</b> &mdash; ");
     present = ota_ow_reset();
     if (!present) {
         pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "<span class=err>&#10007; Geen presence pulse na conversie</span></div>"
-            "<p><a href=/>&#8592; Terug</a></p></body></html>");
+            "<span class=err>&#10007; No presence pulse after conversion</span></div>"
+            "<p><a href=/>&#8592; Back</a></p></body></html>");
         httpd_resp_send_chunk(req, buf, pos);
         httpd_resp_send_chunk(req, NULL, 0);
         return ESP_OK;
@@ -324,7 +324,7 @@ static esp_err_t sensor_get(httpd_req_t *req)
         "<span class=ok>&#10003; Presence pulse OK</span></div>");
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Stap 4: ReadScratchpad (0xCC 0xBE)</b><br>");
+        "<div class=row><b>Step 4: ReadScratchpad (0xCC 0xBE)</b><br>");
     ota_ow_write_byte(0xCC);
     ota_ow_write_byte(0xBE);
 
@@ -348,35 +348,35 @@ static esp_err_t sensor_get(httpd_req_t *req)
     bool sane = (raw != 0x0550) && (centi > -5500) && (centi < 12500);
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Stap 5: Temperatuur</b><br>"
+        "<div class=row><b>Step 5: Temperature</b><br>"
         "raw=0x%04X (%d) &rarr; %d.%02d&deg;C &mdash; ",
         (uint16_t)raw, raw, deg, frac);
 
     if (raw == 0x0550) {
         pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "<span class=warn>&#9888; Power-on waarde 85&deg;C &mdash; conversie mislukt?</span>");
+            "<span class=warn>&#9888; Power-on value 85&deg;C &mdash; conversion failed?</span>");
     } else if (!sane) {
         pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "<span class=err>&#10007; Onlogische waarde &mdash; controleer bedrading</span>");
+            "<span class=err>&#10007; Illogical value &mdash; check wiring</span>");
     } else {
         pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "<span class=ok>&#10003; Geldige meting: <b>%d.%02d&deg;C</b></span>", deg, frac);
+            "<span class=ok>&#10003; Valid reading: <b>%d.%02d&deg;C</b></span>", deg, frac);
     }
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "</div><div class=row><b>Resolutie:</b> %d bit</div>"
-        "<p><a href=/>&#8592; Terug naar OTA pagina</a></p></body></html>", res);
+        "</div><div class=row><b>Resolution:</b> %d bit</div>"
+        "<p><a href=/>&#8592; Back to OTA page</a></p></body></html>", res);
 
     httpd_resp_send_chunk(req, buf, pos);
     httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
 
-/* ---------- SoftAP HTML pagina ---------- */
+/* ---------- SoftAP HTML page ---------- */
 
 /*
- * Uploadpagina:
- * - Bovenaan: directe .bin upload via fetch() -> /upload (geen WiFi creds nodig)
- * - Onderaan: optioneel WiFi+URL invullen voor STA-fetch bij volgende boot
+ * Upload page:
+ * - Top: direct .bin upload via fetch() -> /upload (no WiFi creds needed)
+ * - Bottom: optional WiFi+URL entry for STA fetch on next boot
  */
 static const char FORM_HTML[] =
 "<!DOCTYPE html><html><head><meta charset=utf-8>"
@@ -400,31 +400,31 @@ static const char FORM_HTML[] =
 "<h2>&#128268; Shelly1Gen4 &mdash; OTA Update</h2>"
 "<p><a href=/sensor>&#127777; DS18B20 sensor test</a></p>"
 
-/* ── Sectie 1: directe upload ── */
-"<h3>Firmware uploaden</h3>"
-"<label for=binfile>Selecteer .bin bestand</label>"
+/* ── Section 1: direct upload ── */
+"<h3>Upload firmware</h3>"
+"<label for=binfile>Select .bin file</label>"
 "<input type=file id=binfile accept='.bin'>"
-"<button class=btn id=flashbtn onclick=doUpload()>&#9889; Flash firmware</button>"
+"<button class=btn id=flashbtn onclick=doUpload()>&#9889; Flash Firmware</button>"
 "<div id=bar-wrap><div id=bar></div></div>"
 "<div id=bar-lbl></div>"
 "<div id=status></div>"
 
-/* ── Sectie 2: WiFi + URL voor STA-boot ── */
-"<h3>WiFi opslaan (optioneel)</h3>"
-"<p style='font-size:.9em;color:#555'>Sla WiFi-gegevens op zodat het apparaat bij "
-"de volgende OTA-trigger zelf een URL kan ophalen (zonder SoftAP).</p>"
+/* ── Section 2: WiFi + URL for STA boot ── */
+"<h3>Save WiFi (optional)</h3>"
+"<p style='font-size:.9em;color:#555'>Save WiFi credentials so the device can "
+"fetch a URL on the next OTA trigger by itself (without SoftAP).</p>"
 "<form method=POST action=/ota>"
 "<label>WiFi SSID</label><input name=ssid>"
-"<label>WiFi wachtwoord</label><input name=pass type=password>"
+"<label>WiFi Password</label><input name=pass type=password>"
 "<label>Firmware URL (.bin)</label>"
 "<input name=url value='http://homeassistant.local:8123/local/shelly1gen4.bin'>"
-"<button class=btn type=submit>Opslaan &amp; herstarten</button>"
+"<button class=btn type=submit>Save &amp; Restart</button>"
 "</form>"
 
 "<script>"
 "function doUpload(){"
 "  var f=document.getElementById('binfile').files[0];"
-"  if(!f){alert('Selecteer eerst een .bin bestand');return;}"
+"  if(!f){alert('Select a .bin file first');return;}"
 "  var btn=document.getElementById('flashbtn');"
 "  var wrap=document.getElementById('bar-wrap');"
 "  var bar=document.getElementById('bar');"
@@ -439,24 +439,24 @@ static const char FORM_HTML[] =
 "    if(e.lengthComputable){"
 "      var pct=Math.round(e.loaded/e.total*100);"
 "      bar.style.width=pct+'%';"
-"      lbl.textContent='Uploaden: '+pct+'% ('+Math.round(e.loaded/1024)+'/'+"
+"      lbl.textContent='Uploading: '+pct+'% ('+Math.round(e.loaded/1024)+'/'+"
 "        Math.round(e.total/1024)+' KB)';"
 "    }"
 "  };"
 "  xhr.onload=function(){"
 "    if(xhr.status===200){"
 "      bar.style.width='100%';"
-"      lbl.textContent='Upload klaar — apparaat herstart...';"
-"      st.textContent='\\u2705 Geflasht! Wacht 10 seconden en verbind opnieuw.';"
+"      lbl.textContent='Upload complete — device restarting...';"
+"      st.textContent='\\u2705 Flashed! Wait 10 seconds and reconnect.';"
 "      st.className='ok';"
 "    } else {"
-"      st.textContent='\\u274C Fout: '+xhr.responseText;"
+"      st.textContent='\\u274C Error: '+xhr.responseText;"
 "      st.className='err';"
 "      btn.disabled=false;"
 "    }"
 "  };"
 "  xhr.onerror=function(){"
-"    st.textContent='\\u274C Verbinding verbroken tijdens upload.';"
+"    st.textContent='\\u274C Connection lost during upload.';"
 "    st.className='err';"
 "    btn.disabled=false;"
 "  };"
@@ -473,13 +473,13 @@ static esp_err_t form_get(httpd_req_t *req)
     return httpd_resp_send(req, FORM_HTML, HTTPD_RESP_USE_STRLEN);
 }
 
-/* /upload — ontvangt raw .bin, schrijft direct naar OTA-partitie */
+/* /upload — receives raw .bin, writes directly to OTA partition */
 static esp_err_t upload_post(httpd_req_t *req)
 {
     const esp_partition_t *update_part = esp_ota_get_next_update_partition(NULL);
     if (!update_part) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "Geen OTA partitie gevonden");
+                            "No OTA partition found");
         return ESP_FAIL;
     }
 
@@ -488,24 +488,24 @@ static esp_err_t upload_post(httpd_req_t *req)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "OTA begin mislukt");
+                            "OTA begin failed");
         return ESP_FAIL;
     }
 
     char buf[OTA_BUF_SIZE];
     int remaining = req->content_len;
     int total     = remaining;
-    ESP_LOGI(TAG, "upload start: %d bytes naar partitie %s",
+    ESP_LOGI(TAG, "upload start: %d bytes to partition %s",
              total, update_part->label);
 
     while (remaining > 0) {
         int to_read = (remaining < OTA_BUF_SIZE) ? remaining : OTA_BUF_SIZE;
         int received = httpd_req_recv(req, buf, to_read);
         if (received < 0) {
-            ESP_LOGE(TAG, "httpd_req_recv fout: %d", received);
+            ESP_LOGE(TAG, "httpd_req_recv error: %d", received);
             esp_ota_abort(ota_handle);
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                                "Ontvangst mislukt");
+                                "Receive failed");
             return ESP_FAIL;
         }
         err = esp_ota_write(ota_handle, buf, received);
@@ -513,18 +513,18 @@ static esp_err_t upload_post(httpd_req_t *req)
             ESP_LOGE(TAG, "esp_ota_write: %s", esp_err_to_name(err));
             esp_ota_abort(ota_handle);
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                                "Flash write mislukt");
+                                "Flash write failed");
             return ESP_FAIL;
         }
         remaining -= received;
-        ESP_LOGD(TAG, "  ontvangen %d/%d bytes", total - remaining, total);
+        ESP_LOGD(TAG, "  received %d/%d bytes", total - remaining, total);
     }
 
     err = esp_ota_end(ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_end: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "OTA verificatie mislukt");
+                            "OTA verification failed");
         return ESP_FAIL;
     }
 
@@ -532,20 +532,20 @@ static esp_err_t upload_post(httpd_req_t *req)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "Boot partitie instellen mislukt");
+                            "Setting boot partition failed");
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "upload geslaagd (%d bytes), rebooting", total);
+    ESP_LOGI(TAG, "upload succeeded (%d bytes), rebooting", total);
     httpd_resp_sendstr(req, "OK");
 
-    /* Wacht zodat de browser de response ontvangt voor reboot */
+    /* Wait so the browser receives the response before reboot */
     vTaskDelay(pdMS_TO_TICKS(800));
     esp_restart();
     return ESP_OK;
 }
 
-/* /ota POST — opslaan WiFi creds + URL, reboot voor STA-OTA (origineel pad) */
+/* /ota POST — save WiFi creds + URL, reboot for STA OTA (original path) */
 static esp_err_t url_decode(char *s)
 {
     char *r = s, *w = s;
@@ -591,7 +591,7 @@ static esp_err_t ota_post(httpd_req_t *req)
         return ESP_FAIL;
     }
     ota_save_credentials(ssid, pass, url);
-    const char *msg = "Opgeslagen. Apparaat herstart en haalt firmware op...\n";
+    const char *msg = "Saved. Device restarting and fetching firmware...\n";
     httpd_resp_send(req, msg, HTTPD_RESP_USE_STRLEN);
     vTaskDelay(pdMS_TO_TICKS(500));
     nvs_handle_t h;
@@ -604,7 +604,7 @@ static esp_err_t ota_post(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ---------- SoftAP starten ---------- */
+/* ---------- Start SoftAP ---------- */
 
 static void run_softap(void)
 {
@@ -614,7 +614,7 @@ static void run_softap(void)
     snprintf(ssid, sizeof(ssid), "shelly-ota-%02X%02X%02X",
              mac[3], mac[4], mac[5]);
 
-    ESP_LOGW(TAG, "SoftAP openen: '%s' (open netwerk)", ssid);
+    ESP_LOGW(TAG, "SoftAP opening: '%s' (open network)", ssid);
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -637,10 +637,10 @@ static void run_softap(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &apc));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    /* Verhoog max body size voor de upload handler */
+    /* Increase max body size for the upload handler */
     httpd_handle_t srv = NULL;
     httpd_config_t hc = HTTPD_DEFAULT_CONFIG();
-    hc.recv_wait_timeout  = 30;   /* seconden wachten op data */
+    hc.recv_wait_timeout  = 30;   /* seconds waiting for data */
     hc.send_wait_timeout  = 10;
     hc.max_open_sockets   = 3;
     ESP_ERROR_CHECK(httpd_start(&srv, &hc));
@@ -655,14 +655,14 @@ static void run_softap(void)
     httpd_register_uri_handler(srv, &post_ota);
     httpd_register_uri_handler(srv, &get_sensor);
 
-    ESP_LOGW(TAG, "SoftAP gereed. Verbind met '%s', open http://192.168.4.1/", ssid);
+    ESP_LOGW(TAG, "SoftAP ready. Connect to '%s', open http://192.168.4.1/", ssid);
 
-    /* Wacht maximaal OTA_SOFTAP_TIMEOUT_MS. Als er geen upload of form-post
-     * plaatsvindt, rebooten we gewoon terug naar Matter mode. De NVS-vlag is
-     * al gewist bij het binnenkomen van ota_handle_pending(), dus na reboot
-     * start Matter automatisch. */
-#define OTA_SOFTAP_TIMEOUT_MS   (10 * 60 * 1000)   /* 10 minuten */
-#define OTA_SOFTAP_TICK_MS      5000                /* log elke 5 seconden */
+    /* Wait up to OTA_SOFTAP_TIMEOUT_MS. If no upload or form post happens,
+     * we simply reboot back to Matter mode. The NVS flag has already been
+     * cleared upon entering ota_handle_pending(), so after reboot Matter
+     * starts automatically. */
+#define OTA_SOFTAP_TIMEOUT_MS   (10 * 60 * 1000)   /* 10 minutes */
+#define OTA_SOFTAP_TICK_MS      5000                /* log every 5 seconds */
 
     int32_t remaining_ms = OTA_SOFTAP_TIMEOUT_MS;
     while (remaining_ms > 0) {
@@ -671,12 +671,12 @@ static void run_softap(void)
         vTaskDelay(pdMS_TO_TICKS(sleep));
         remaining_ms -= sleep;
         if (remaining_ms > 0) {
-            ESP_LOGW(TAG, "OTA SoftAP: nog %"PRId32" seconden wachten op upload...",
+            ESP_LOGW(TAG, "OTA SoftAP: %"PRId32" seconds remaining, waiting for upload...",
                      remaining_ms / 1000);
         }
     }
 
-    ESP_LOGW(TAG, "OTA timeout verstreken — reboot naar Matter mode");
+    ESP_LOGW(TAG, "OTA timeout expired — rebooting to Matter mode");
     vTaskDelay(pdMS_TO_TICKS(200));
     esp_restart();
 }
@@ -696,7 +696,7 @@ static void full_factory_reset(void)
     esp_restart();
 }
 
-/* ---------- Button callback tijdens OTA mode ---------- */
+/* ---------- Button callback during OTA mode ---------- */
 
 static void ota_mode_button_cb(input_id_t id, button_event_t evt)
 {
@@ -704,7 +704,7 @@ static void ota_mode_button_cb(input_id_t id, button_event_t evt)
         ESP_LOGW(TAG, "MODE_TOGGLE in OTA mode -> factory reset");
         full_factory_reset();
     } else {
-        ESP_LOGI(TAG, "OTA mode: input=%d evt=%d genegeerd", id, evt);
+        ESP_LOGI(TAG, "OTA mode: input=%d evt=%d ignored", id, evt);
     }
 }
 
@@ -713,7 +713,7 @@ static void ota_mode_button_cb(input_id_t id, button_event_t evt)
 void ota_handle_pending(void)
 {
     if (!ota_pending_read_and_clear()) {
-        return;  /* normaal opstarten -> Matter */
+        return;  /* normal boot -> Matter */
     }
     ESP_LOGW(TAG, "OTA pending — entering DEDICATED OTA-mode (Matter NOT started)");
 
@@ -725,14 +725,14 @@ void ota_handle_pending(void)
                                            pass, sizeof(pass),
                                            url,  sizeof(url));
     if (have_creds) {
-        ESP_LOGI(TAG, "probeer STA OTA -> ssid=%s url=%s", ssid, url);
+        ESP_LOGI(TAG, "trying STA OTA -> ssid=%s url=%s", ssid, url);
         if (wifi_init_sta(ssid, pass) == ESP_OK) {
             if (do_ota_from_url(url) == ESP_OK) {
                 vTaskDelay(pdMS_TO_TICKS(500));
                 esp_restart();
             }
         }
-        ESP_LOGW(TAG, "STA-pad mislukt, val terug naar SoftAP");
+        ESP_LOGW(TAG, "STA path failed, falling back to SoftAP");
         esp_wifi_stop();
         esp_wifi_deinit();
     }

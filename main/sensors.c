@@ -1,13 +1,13 @@
 /*
- * Sensor-taken:
+ * Sensor tasks:
  *   1) DS18B20 via dual-pin 1-Wire (PIN_ONEWIRE_TX + PIN_ONEWIRE_RX):
- *      De Shelly Plus Add-on gebruikt een ISO7221A galvanische isolator die
- *      het bidirectionele 1-Wire protocol opsplitst in aparte TX (output) en
- *      RX (input) lijnen. TX = GPIO9 (data out), RX = GPIO16 (data in).
- *      Elke TEMP_REPORT_INT_S seconden een conversie + ReadScratchpad.
- *      Rapporteert centi-graden Celsius (ZCL Temperature Measurement format).
- *   2) HLK-LD2410 OT2 pin (PIN_LD2410_INPUT): GPIO-interrupt, debounced,
- *      rapporteert occupied=true/false.
+ *      The Shelly Plus Add-on uses an ISO7221A galvanic isolator that
+ *      splits the bidirectional 1-Wire protocol into separate TX (output) and
+ *      RX (input) lines. TX = GPIO9 (data out), RX = GPIO16 (data in).
+ *      Every TEMP_REPORT_INT_S seconds a conversion + ReadScratchpad.
+ *      Reports centi-degrees Celsius (ZCL Temperature Measurement format).
+ *   2) HLK-LD2410 OT2 pin (PIN_LD2410_INPUT): GPIO interrupt, debounced,
+ *      reports occupied=true/false.
  */
 
 #include "sensors.h"
@@ -26,10 +26,10 @@
 static const char *TAG = "sensors";
 
 /* ========================== Dual-pin 1-Wire / DS18B20 ========================== */
-/* De Shelly Plus Add-on gebruikt een ISO7221A dual digital isolator.
- * TX pin (GPIO9)  = output: ESP32 stuurt commando's naar de DS18B20
- * RX pin (GPIO16) = input:  ESP32 leest antwoorden van de DS18B20
- * Standaard 1-Wire (single-pin) werkt niet door de galvanische isolatie. */
+/* The Shelly Plus Add-on uses an ISO7221A dual digital isolator.
+ * TX pin (GPIO9)  = output: ESP32 sends commands to the DS18B20
+ * RX pin (GPIO16) = input:  ESP32 reads responses from the DS18B20
+ * Standard 1-Wire (single-pin) does not work due to the galvanic isolation. */
 
 #define OW_TX  PIN_ONEWIRE_TX
 #define OW_RX  PIN_ONEWIRE_RX
@@ -40,14 +40,14 @@ static inline int  ow_rx_read(void) { return gpio_get_level(OW_RX); }
 
 static bool ow_reset(void)
 {
-    /* Wacht tot bus idle (RX=HIGH) */
+    /* Wait until bus idle (RX=HIGH) */
     uint8_t retries = 125;
     do {
         if (--retries == 0) return false;
         esp_rom_delay_us(2);
     } while (!ow_rx_read());
 
-    /* 480 µs reset-puls via TX */
+    /* 480 µs reset pulse via TX */
     ow_tx_low();
     esp_rom_delay_us(480);
     ow_tx_high();
@@ -128,11 +128,11 @@ static bool ds18b20_read_centi_c(int16_t *out)
 static temp_cb_t s_temp_cb;
 static void temp_task(void *arg)
 {
-    /* GPIO16 is standaard UART0 TX op de ESP32-C6. Verwijder de UART0
-     * driver zodat de peripheral GPIO16 loslaat voordat we hem als
-     * 1-Wire RX pin herconfigureren. Zonder deze stap blijft UART0 de pin
-     * bezet en reageert de DS18B20 niet. Na uart_driver_delete is J6
-     * TXD niet meer bruikbaar — dat is acceptabel in productie (BENCH_MODE=0). */
+    /* GPIO16 is UART0 TX by default on the ESP32-C6. Delete the UART0
+     * driver so the peripheral releases GPIO16 before we reconfigure it
+     * as 1-Wire RX pin. Without this step UART0 keeps the pin occupied
+     * and the DS18B20 does not respond. After uart_driver_delete, J6
+     * TXD is no longer usable — this is acceptable in production (BENCH_MODE=0). */
     uart_driver_delete(UART_NUM_0);
 
     /* TX pin: output, idle high */
@@ -143,7 +143,7 @@ static void temp_task(void *arg)
     gpio_config(&tx_cfg);
     ow_tx_high();
 
-    /* RX pin: input (Add-on heeft eigen 4.7kΩ pull-up via isolator) */
+    /* RX pin: input (Add-on has its own 4.7kΩ pull-up via isolator) */
     gpio_reset_pin(OW_RX);
     gpio_config_t rx_cfg = {
         .pin_bit_mask = (1ULL << OW_RX),
@@ -178,9 +178,9 @@ static void IRAM_ATTR occ_isr(void *arg)
 
 static void occ_task(void *arg)
 {
-    /* GPIO17 is standaard UART0 RX op de ESP32-C6 — de UART driver zet een
-     * interne pull-up. gpio_reset_pin() disconnecteert de UART peripheral
-     * en reset alle pulls, zodat onze gpio_config met pull_down pakt. */
+    /* GPIO17 is UART0 RX by default on the ESP32-C6 — the UART driver sets
+     * an internal pull-up. gpio_reset_pin() disconnects the UART peripheral
+     * and resets all pulls, so our gpio_config with pull_down takes effect. */
     gpio_reset_pin(PIN_LD2410_INPUT);
 
     gpio_config_t cfg = {
@@ -216,12 +216,12 @@ void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
     s_occ_cb  = occ_cb;
 
 #if BENCH_MODE
-    /* BENCH_MODE: skip sensor-tasks zodat GPIO16 (U0TXD) en GPIO17 (U0RXD)
-     * beschikbaar blijven voor UART0 serial debugging via J6 header.
-     * Op de ESP32-C6 zijn GPIO16/17 de standaard UART0-pins; temp_task en
-     * occ_task herconfigureren ze als 1-Wire RX resp. GPIO-input, wat de
-     * seriële output doodt. GPIO9 (1-Wire TX) wordt ook vrijgehouden. */
-    ESP_LOGW(TAG, "BENCH_MODE: sensor-tasks overgeslagen (GPIO9/16/17 vrijgehouden)");
+    /* BENCH_MODE: skip sensor tasks so GPIO16 (U0TXD) and GPIO17 (U0RXD)
+     * remain available for UART0 serial debugging via J6 header.
+     * On the ESP32-C6, GPIO16/17 are the default UART0 pins; temp_task and
+     * occ_task reconfigure them as 1-Wire RX and GPIO input respectively,
+     * which kills serial output. GPIO9 (1-Wire TX) is also kept free. */
+    ESP_LOGW(TAG, "BENCH_MODE: sensor tasks skipped (GPIO9/16/17 kept free)");
 #else
     xTaskCreate(temp_task, "temp_task", 3072, NULL, 5, NULL);
     s_occ_q = xQueueCreate(8, sizeof(int64_t));
