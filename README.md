@@ -3,7 +3,7 @@
 **Custom Matter-over-Thread firmware** voor de **Shelly 1 Gen4** (ESP32-C6).
 
 1. **Matter OnOff/Dimmer Light Switch** (Toggle, EP1) — bind-client, kort drukken = toggle, lang = dimmen
-2. **Matter Temperature Sensor** (EP2) — DS18B20 op 1-Wire GPIO16 (Analog in Addon)
+2. **Matter Temperature Sensor** (EP2) — DS18B20 via dual-pin 1-Wire: TX=GPIO9, RX=GPIO16 (Shelly Plus Add-on)
 3. **Matter Occupancy Sensor** (EP3) — HLK-LD2410 op GPIO17 (Data ingang Addon)
 4. **Matter OnOff Light** (Relais op GPIO5, EP4) — server endpoint, direct aanstuurbaar vanuit HA
 5. **Matter OnOff Light Switch** (State-follow, EP5) — bind-client, On bij contact-sluiting, Off bij -opening
@@ -29,7 +29,7 @@ Het relais (EP4) is **niet meer hardcoded gekoppeld** aan de knopdruk. Via een M
 | Component | Status |
 |---|---|
 | Shelly 1 Gen4 (ESP32-C6, 8 MB flash) | Doel-hardware |
-| Shelly Plus Add-on | Voor DS18B20 (GPIO16) + TTP223 touch (GPIO18) + LD2410 radar (GPIO17) |
+| Shelly Plus Add-on | DS18B20 (TX=GPIO9/RX=GPIO16) + TTP223 touch (GPIO18) + LD2410 radar (GPIO17) |
 | Thread Border Router | **Google TV Streamer 4K** |
 | Matter primary admin | **Home Assistant Matter Server** add-on |
 | Matter-Thread bulb | **IKEA KAJPLATS** (Thread-mode via setup-code) |
@@ -47,11 +47,14 @@ Het relais (EP4) is **niet meer hardcoded gekoppeld** aan de knopdruk. Via een M
 | **GPIO10** | Drukker-input / SW-terminal | Shelly 1 Gen4 onboard — **externe pull op PCB, geen interne pull** |
 | **GPIO15** | Status LED onboard (active-low) | Shelly 1 Gen4 onboard PCB-LED  |
 
-**Shelly Plus Add-on** pinnen:
+**Shelly Plus Add-on** pinnen (via J6 connector):
+
+De Add-on gebruikt een **ISO7221A galvanische isolator** die het 1-Wire protocol opsplitst in aparte TX en RX lijnen.
 
 | GPIO | Functie | Status |
 |---|---|---|
-| **GPIO16** | 1-Wire bus voor DS18B20 | Altijd actief |
+| **GPIO9** | 1-Wire TX (data out) — DS18B20 commando's via isolator | Altijd actief |
+| **GPIO16** | 1-Wire RX (data in) — DS18B20 antwoorden via isolator | Altijd actief |
 | **GPIO17** | HLK-LD2410 mmWave occupancy sensor (EP3 Occupancy) | Altijd actief |
 | **GPIO18** | TTP223 capacitive touch button (stuurt via EP1) | Altijd actief |
 

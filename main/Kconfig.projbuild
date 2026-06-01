@@ -8,8 +8,12 @@ menu "Shelly 1 Gen4 Matter Switch configuration"
         int "GPIO for System 55 drukker input"
         default 10
 
-    config PIN_ONEWIRE
-        int "GPIO for 1-Wire bus (DS18B20) — Shelly Plus Add-on data pin"
+    config PIN_ONEWIRE_TX
+        int "GPIO for 1-Wire TX (output) — Shelly Plus Add-on data out via ISO7221A isolator"
+        default 9
+
+    config PIN_ONEWIRE_RX
+        int "GPIO for 1-Wire RX (input) — Shelly Plus Add-on data in via ISO7221A isolator"
         default 16
 
     config PIN_TOUCH_INPUT

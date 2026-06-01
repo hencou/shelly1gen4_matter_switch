@@ -1,14 +1,13 @@
 /*
  * Sensor-taken:
- *   1) DS18B20 op 1-Wire (PIN_ONEWIRE): bitbang 1-Wire master, elke
- *      TEMP_REPORT_INT_S seconden een conversie + ReadScratchpad.
+ *   1) DS18B20 via dual-pin 1-Wire (PIN_ONEWIRE_TX + PIN_ONEWIRE_RX):
+ *      De Shelly Plus Add-on gebruikt een ISO7221A galvanische isolator die
+ *      het bidirectionele 1-Wire protocol opsplitst in aparte TX (output) en
+ *      RX (input) lijnen. TX = GPIO9 (data out), RX = GPIO16 (data in).
+ *      Elke TEMP_REPORT_INT_S seconden een conversie + ReadScratchpad.
  *      Rapporteert centi-graden Celsius (ZCL Temperature Measurement format).
- *   2) HLK-LD2410 OT2 pin (PIN_OCCUPANCY): GPIO-interrupt, debounced,
+ *   2) HLK-LD2410 OT2 pin (PIN_LD2410_INPUT): GPIO-interrupt, debounced,
  *      rapporteert occupied=true/false.
- *
- * De 1-Wire-driver hier is een minimale implementatie die één DS18B20 op
- * de bus verwacht. Voor multi-drop bussen kan je ESP-IDF's driver/onewire
- * gebruiken via de component manager.
  */
 
 #include "sensors.h"
@@ -26,47 +25,60 @@
 
 static const char *TAG = "sensors";
 
-/* ========================== 1-Wire / DS18B20 ========================== */
+/* ========================== Dual-pin 1-Wire / DS18B20 ========================== */
+/* De Shelly Plus Add-on gebruikt een ISO7221A dual digital isolator.
+ * TX pin (GPIO9)  = output: ESP32 stuurt commando's naar de DS18B20
+ * RX pin (GPIO16) = input:  ESP32 leest antwoorden van de DS18B20
+ * Standaard 1-Wire (single-pin) werkt niet door de galvanische isolatie. */
 
-#define OW_PIN  PIN_ONEWIRE
+#define OW_TX  PIN_ONEWIRE_TX
+#define OW_RX  PIN_ONEWIRE_RX
 
-static inline void ow_low(void)  { gpio_set_direction(OW_PIN, GPIO_MODE_OUTPUT); gpio_set_level(OW_PIN, 0); }
-static inline void ow_hi(void)   { gpio_set_direction(OW_PIN, GPIO_MODE_INPUT);  }
-static inline int  ow_read(void) { return gpio_get_level(OW_PIN); }
+static inline void ow_tx_low(void)  { gpio_set_level(OW_TX, 0); }
+static inline void ow_tx_high(void) { gpio_set_level(OW_TX, 1); }
+static inline int  ow_rx_read(void) { return gpio_get_level(OW_RX); }
 
 static bool ow_reset(void)
 {
-    ow_low();
+    /* Wacht tot bus idle (RX=HIGH) */
+    uint8_t retries = 125;
+    do {
+        if (--retries == 0) return false;
+        esp_rom_delay_us(2);
+    } while (!ow_rx_read());
+
+    /* 480 µs reset-puls via TX */
+    ow_tx_low();
     esp_rom_delay_us(480);
-    ow_hi();
+    ow_tx_high();
     esp_rom_delay_us(70);
-    bool present = !ow_read();
+    bool present = !ow_rx_read();
     esp_rom_delay_us(410);
     return present;
 }
 
 static void ow_write_bit(int b)
 {
-    ow_low();
+    ow_tx_low();
     if (b) {
-        esp_rom_delay_us(6);
-        ow_hi();
-        esp_rom_delay_us(64);
-    } else {
-        esp_rom_delay_us(60);
-        ow_hi();
         esp_rom_delay_us(10);
+        ow_tx_high();
+        esp_rom_delay_us(55);
+    } else {
+        esp_rom_delay_us(65);
+        ow_tx_high();
+        esp_rom_delay_us(5);
     }
 }
 
 static int ow_read_bit(void)
 {
-    ow_low();
-    esp_rom_delay_us(6);
-    ow_hi();
+    ow_tx_low();
+    esp_rom_delay_us(3);
+    ow_tx_high();
     esp_rom_delay_us(9);
-    int v = ow_read();
-    esp_rom_delay_us(55);
+    int v = ow_rx_read();
+    esp_rom_delay_us(53);
     return v;
 }
 
@@ -118,19 +130,26 @@ static void temp_task(void *arg)
 {
     /* GPIO16 is standaard UART0 TX op de ESP32-C6. Verwijder de UART0
      * driver zodat de peripheral GPIO16 loslaat voordat we hem als
-     * 1-Wire pin herconfigureren. Zonder deze stap blijft UART0 de pin
+     * 1-Wire RX pin herconfigureren. Zonder deze stap blijft UART0 de pin
      * bezet en reageert de DS18B20 niet. Na uart_driver_delete is J6
      * TXD niet meer bruikbaar — dat is acceptabel in productie (BENCH_MODE=0). */
     uart_driver_delete(UART_NUM_0);
 
-    /* configure 1-Wire pin with pull-up (Add-on heeft eigen pull-up,
-     * interne pull-up als fallback voor gebruik zonder Add-on) */
-    gpio_config_t cfg = {
-        .pin_bit_mask = (1ULL << OW_PIN),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
+    /* TX pin: output, idle high */
+    gpio_config_t tx_cfg = {
+        .pin_bit_mask = (1ULL << OW_TX),
+        .mode = GPIO_MODE_OUTPUT,
     };
-    gpio_config(&cfg);
+    gpio_config(&tx_cfg);
+    ow_tx_high();
+
+    /* RX pin: input (Add-on heeft eigen 4.7kΩ pull-up via isolator) */
+    gpio_reset_pin(OW_RX);
+    gpio_config_t rx_cfg = {
+        .pin_bit_mask = (1ULL << OW_RX),
+        .mode = GPIO_MODE_INPUT,
+    };
+    gpio_config(&rx_cfg);
 
     while (1) {
         int16_t centi = 0;
@@ -200,9 +219,9 @@ void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
     /* BENCH_MODE: skip sensor-tasks zodat GPIO16 (U0TXD) en GPIO17 (U0RXD)
      * beschikbaar blijven voor UART0 serial debugging via J6 header.
      * Op de ESP32-C6 zijn GPIO16/17 de standaard UART0-pins; temp_task en
-     * occ_task herconfigureren ze als 1-Wire resp. GPIO-input, wat de
-     * seriële output doodt. */
-    ESP_LOGW(TAG, "BENCH_MODE: sensor-tasks overgeslagen (GPIO16/17 = UART0)");
+     * occ_task herconfigureren ze als 1-Wire RX resp. GPIO-input, wat de
+     * seriële output doodt. GPIO9 (1-Wire TX) wordt ook vrijgehouden. */
+    ESP_LOGW(TAG, "BENCH_MODE: sensor-tasks overgeslagen (GPIO9/16/17 vrijgehouden)");
 #else
     xTaskCreate(temp_task, "temp_task", 3072, NULL, 5, NULL);
     s_occ_q = xQueueCreate(8, sizeof(int64_t));

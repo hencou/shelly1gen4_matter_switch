@@ -76,8 +76,9 @@ CONFIG_CHIP_KVS_NAMESPACE_PARTITION_LABEL="chip_kvs"
 CONFIG_PIN_SWITCH_INPUT=10
 # Relay output (mains-switching, active-high)
 CONFIG_PIN_RELAY=5
-# 1-Wire DS18B20 op Shelly Plus Add-on data pin
-CONFIG_PIN_ONEWIRE=0
+# 1-Wire DS18B20 dual-pin via ISO7221A isolator op Shelly Plus Add-on
+CONFIG_PIN_ONEWIRE_TX=9
+CONFIG_PIN_ONEWIRE_RX=16
 # Status LED op onboard PCB-LED (active-low)
 CONFIG_PIN_STATUS_LED=15
 # STATUS_LED_ACTIVE_HIGH: default n (active-low) — geen extra regel nodig
