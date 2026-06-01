@@ -33,7 +33,7 @@ The relay (EP5) is **no longer hardcoded** to the button press. Via a Matter bin
 | Shelly Plus Add-on | DS18B20 (TX=GPIO9/RX=GPIO16) + TTP223 touch (GPIO18) + Analog IN as PWM duty cycle (GPIO17) |
 | Thread Border Router | **Google TV Streamer 4K** |
 | Matter primary admin | **Home Assistant Matter Server** add-on |
-| Matter-Thread bulb | **IKEA KAJPLATS** (Thread mode via setup code) |
+| Matter-Thread bulb | **IKEA KAJPLATS** (Matter mode) |
 | Commissioning tool | HA Matter Server UI or `chip-tool` command line |
 | Binding setup tool | `HA Python Matter Server` |
 
