@@ -19,6 +19,8 @@
 #include "driver/uart.h"
 #include "esp_timer.h"
 #include "driver/gpio.h"
+#include "esp_private/periph_ctrl.h"
+#include "soc/periph_defs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -206,17 +208,21 @@ void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
      * which kills serial output. GPIO9 (1-Wire TX) is also kept free. */
     ESP_LOGW(TAG, "BENCH_MODE: sensor tasks skipped (GPIO9/16/17 kept free)");
 #else
-    /* GPIO16/17 are UART0 TX/RX by default on the ESP32-C6.  The ROM
-     * bootloader uses UART0 directly (register access, no ESP-IDF driver),
-     * so a bare uart_driver_delete() returns early without disabling the
-     * UART0 peripheral module — its internal pull-up and IO-MUX routing on
-     * GPIO17 stay active, making gpio_get_level() always return 1.
+    /* GPIO16/17 are UART0 TX/RX by default on the ESP32-C6.
      *
-     * Fix: install a minimal ESP-IDF UART driver first so that
-     * uart_driver_delete() actually calls periph_module_disable() and
-     * fully releases both pins. */
+     * The UART0 peripheral clock is enabled twice before we get here:
+     *   1) ESP-IDF console init at boot  (ref_count 0→1)
+     *   2) uart_driver_install below     (ref_count 1→2)
+     * uart_driver_delete only decrements once (2→1), so the clock stays
+     * on and the UART0 module keeps its internal pull-up active on GPIO17,
+     * making gpio_get_level() always return 1.
+     *
+     * Fix: after the driver teardown, call periph_module_disable() once
+     * more to drain the remaining ref_count from console init and truly
+     * shut off the UART0 clock. */
     uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
     uart_driver_delete(UART_NUM_0);
+    periph_module_disable(PERIPH_UART0_MODULE);
     gpio_reset_pin(PIN_ONEWIRE_RX);    /* GPIO16 — 1-Wire RX / UART0 TX */
     gpio_reset_pin(PIN_LD2410_INPUT);   /* GPIO17 — occupancy / UART0 RX */
 
