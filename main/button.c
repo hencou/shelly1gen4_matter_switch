@@ -1,7 +1,7 @@
 /*
  * Button driver voor alle 3 inputs van de Shelly 1 Gen4:
  *   INPUT_DRUKKER     (GPIO10) System 55 impulsdrukker
- *   INPUT_TOUCH       (GPIO12) Add-on digital in klem
+ *   INPUT_TOUCH       (GPIO18) Add-on digital in klem
  *   INPUT_DEVICE_BTN  (GPIO4)  onboard pair-knop
  *
  * Alle 3 inputs hebben hetzelfde gedrag (zie on_button_event in app_main.cpp):
@@ -183,7 +183,7 @@ void button_driver_init(button_cb_t cb)
     s_state[INPUT_DRUKKER].enabled    = true;
     s_state[INPUT_DRUKKER].active_low = (BENCH_MODE != 0);
 
-    /* INPUT_TOUCH: GPIO12 Add-on digital in klem.
+    /* INPUT_TOUCH: GPIO18 Add-on digital in klem.
      * De Add-on heeft een ingebouwde pull-up naar 3V3, dus de pin staat in
      * rust hoog. Aansluiten naar GND = pressed -> active-low.
      * Geen interne pull instellen want die strijdt met de Add-on pull-up. */

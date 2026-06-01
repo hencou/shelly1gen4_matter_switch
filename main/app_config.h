@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 /* Add-on inputs — TTP223 en LD2410 hebben elk een eigen GPIO, altijd actief. */
-#define PIN_TOUCH_INPUT     CONFIG_PIN_TOUCH_INPUT      /* TTP223 capacitive touch (GPIO12) */
+#define PIN_TOUCH_INPUT     CONFIG_PIN_TOUCH_INPUT      /* TTP223 capacitive touch (GPIO18) */
 #define PIN_LD2410_INPUT    CONFIG_PIN_LD2410_INPUT      /* HLK-LD2410 occupancy   (GPIO17) */
 
 #define PIN_STATUS_LED      CONFIG_PIN_STATUS_LED      /* Shelly Add-on LED, -1 = uit */
