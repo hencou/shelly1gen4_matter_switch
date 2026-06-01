@@ -158,49 +158,36 @@ static void temp_task(void *arg)
 
 /* ========================== Occupancy / LD2410 ========================== */
 
-static QueueHandle_t    s_occ_q;
 static occupancy_cb_t   s_occ_cb;
-
-static void IRAM_ATTR occ_isr(void *arg)
-{
-    int64_t t = esp_timer_get_time();
-    BaseType_t hpw = pdFALSE;
-    xQueueSendFromISR(s_occ_q, &t, &hpw);
-    if (hpw) portYIELD_FROM_ISR();
-}
 
 static void occ_task(void *arg)
 {
     /* GPIO17 was UART0 RX; uart_driver_delete + gpio_reset_pin already ran
-     * in sensors_init before this task was created. */
+     * in sensors_init before this task was created.
+     *
+     * Use polling instead of ISR: the ANYEDGE interrupt on GPIO17 does not
+     * fire reliably after the UART0 peripheral release on ESP32-C6.
+     * Polling at OCC_DEBOUNCE_MS (200 ms) is fast enough for occupancy. */
     gpio_config_t cfg = {
         .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_ANYEDGE,
+        .intr_type    = GPIO_INTR_DISABLE,
     };
     gpio_config(&cfg);
-    gpio_isr_handler_add(PIN_LD2410_INPUT, occ_isr, NULL);
+    gpio_pullup_dis(PIN_LD2410_INPUT);
+    gpio_pulldown_en(PIN_LD2410_INPUT);
 
-    /* Read and report the initial level so the first state is correct
-     * without waiting for an edge transition. */
-    int last_level = gpio_get_level(PIN_LD2410_INPUT);
-    if (s_occ_cb) s_occ_cb(last_level == 1);
-    ESP_LOGI(TAG, "occupancy initial = %s", last_level ? "occupied" : "clear");
-
-    int64_t last = 0;
+    int last = -1;
     for (;;) {
-        int64_t t;
-        if (xQueueReceive(s_occ_q, &t, portMAX_DELAY) != pdTRUE) continue;
-        if ((t - last) / 1000 < OCC_DEBOUNCE_MS) continue;
-        last = t;
         int level = gpio_get_level(PIN_LD2410_INPUT);
-        if (level != last_level) {
-            last_level = level;
+        if (level != last) {
+            last = level;
             if (s_occ_cb) s_occ_cb(level == 1);
             ESP_LOGI(TAG, "occupancy = %s", level ? "occupied" : "clear");
         }
+        vTaskDelay(pdMS_TO_TICKS(OCC_DEBOUNCE_MS));
     }
 }
 
@@ -227,7 +214,6 @@ void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
     gpio_reset_pin(PIN_ONEWIRE_RX);    /* GPIO16 — 1-Wire RX / UART0 TX */
     gpio_reset_pin(PIN_LD2410_INPUT);   /* GPIO17 — occupancy / UART0 RX */
 
-    s_occ_q = xQueueCreate(8, sizeof(int64_t));
     xTaskCreate(temp_task, "temp_task", 3072, NULL, 5, NULL);
     xTaskCreate(occ_task,  "occ_task",  2560, NULL, 6, NULL);
 #endif
