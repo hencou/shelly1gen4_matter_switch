@@ -6,8 +6,10 @@
  *      RX (input) lines. TX = GPIO9 (data out), RX = GPIO16 (data in).
  *      Every TEMP_REPORT_INT_S seconds a conversion + ReadScratchpad.
  *      Reports centi-degrees Celsius (ZCL Temperature Measurement format).
- *   2) HLK-LD2410 OT2 pin (PIN_LD2410_INPUT): polled every 200 ms,
- *      reports occupied=true/false.
+ *   2) Analog IN / occupancy (PIN_LD2410_INPUT):
+ *      The Add-on encodes the 0–10 V analog input as a PWM duty cycle.
+ *      occ_task measures the duty cycle by rapid-sampling over a 100 ms
+ *      window and thresholds at 50 % to derive occupied / clear.
  */
 
 #include "sensors.h"
@@ -17,13 +19,11 @@
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "driver/uart.h"
-#include "esp_timer.h"
 #include "driver/gpio.h"
 #include "esp_private/periph_ctrl.h"
 #include "soc/periph_defs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
 
 static const char *TAG = "sensors";
 
@@ -158,36 +158,50 @@ static void temp_task(void *arg)
     }
 }
 
-/* ========================== Occupancy / LD2410 ========================== */
+/* ========================== Occupancy (Analog IN as PWM duty cycle) ====== */
 
-static occupancy_cb_t   s_occ_cb;
+/* The Add-on encodes the 0–10 V Analog IN voltage as a PWM duty cycle on
+ * GPIO17.  A single gpio_get_level() catches a random point in the PWM
+ * waveform, so we sample rapidly over a 100 ms window and compute the
+ * percentage of HIGH samples.  A duty cycle above OCC_DUTY_THRESHOLD_PCT
+ * means "occupied". */
+
+#define OCC_SAMPLE_WINDOW_US  100000   /* 100 ms measurement window */
+#define OCC_SAMPLE_INTERVAL_US   100   /* 100 µs between samples   */
+#define OCC_DUTY_THRESHOLD_PCT    50   /* ≥50 % duty → occupied    */
+
+static occupancy_cb_t s_occ_cb;
+
+static int measure_duty_pct(void)
+{
+    int high = 0, total = 0;
+    for (int us = 0; us < OCC_SAMPLE_WINDOW_US; us += OCC_SAMPLE_INTERVAL_US) {
+        if (gpio_get_level(PIN_LD2410_INPUT)) high++;
+        total++;
+        esp_rom_delay_us(OCC_SAMPLE_INTERVAL_US);
+    }
+    return (high * 100) / total;
+}
 
 static void occ_task(void *arg)
 {
-    /* GPIO17 was UART0 RX; uart_driver_delete + gpio_reset_pin already ran
-     * in sensors_init before this task was created.
-     *
-     * Use polling instead of ISR: the ANYEDGE interrupt on GPIO17 does not
-     * fire reliably after the UART0 peripheral release on ESP32-C6.
-     * Polling at OCC_DEBOUNCE_MS (200 ms) is fast enough for occupancy. */
     gpio_config_t cfg = {
         .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
-        .mode = GPIO_MODE_INPUT,
+        .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
         .intr_type    = GPIO_INTR_DISABLE,
     };
     gpio_config(&cfg);
-    gpio_pullup_dis(PIN_LD2410_INPUT);
-    gpio_pulldown_en(PIN_LD2410_INPUT);
 
-    int last = -1;
+    int last_occ = -1;
     for (;;) {
-        int level = gpio_get_level(PIN_LD2410_INPUT);
-        if (level != last) {
-            last = level;
-            if (s_occ_cb) s_occ_cb(level == 1);
-            ESP_LOGI(TAG, "occupancy = %s", level ? "occupied" : "clear");
+        int duty = measure_duty_pct();
+        int occ  = (duty >= OCC_DUTY_THRESHOLD_PCT) ? 1 : 0;
+        if (occ != last_occ) {
+            last_occ = occ;
+            if (s_occ_cb) s_occ_cb(occ == 1);
+            ESP_LOGI(TAG, "occupancy = %s (duty %d%%)", occ ? "occupied" : "clear", duty);
         }
         vTaskDelay(pdMS_TO_TICKS(OCC_DEBOUNCE_MS));
     }

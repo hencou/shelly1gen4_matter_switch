@@ -4,7 +4,7 @@
 
 1. **Matter OnOff/Dimmer Light Switch** (Toggle, EP1) — bind-client, short press = toggle, long = dim
 2. **Matter Temperature Sensor** (EP2) — DS18B20 via dual-pin 1-Wire: TX=GPIO9, RX=GPIO16 (Shelly Plus Add-on)
-3. **Matter Occupancy Sensor** (EP3) — HLK-LD2410 on GPIO17 (Add-on data input)
+3. **Matter Occupancy Sensor** (EP3) — Analog IN (GPIO17) via Add-on PWM duty cycle (e.g. HLK-LD2410)
 4. **Matter OnOff Light** (Relay on GPIO5, EP4) — server endpoint, directly controllable from HA
 5. **Matter OnOff Light Switch** (State-follow, EP5) — bind-client, On on contact close, Off on contact open
 
@@ -29,7 +29,7 @@ The relay (EP4) is **no longer hardcoded** to the button press. Via a Matter bin
 | Component | Status |
 |---|---|
 | Shelly 1 Gen4 (ESP32-C6, 8 MB flash) | Target hardware |
-| Shelly Plus Add-on | DS18B20 (TX=GPIO9/RX=GPIO16) + TTP223 touch (GPIO18) + LD2410 radar (GPIO17) |
+| Shelly Plus Add-on | DS18B20 (TX=GPIO9/RX=GPIO16) + TTP223 touch (GPIO18) + Analog IN as PWM duty cycle (GPIO17) |
 | Thread Border Router | **Google TV Streamer 4K** |
 | Matter primary admin | **Home Assistant Matter Server** add-on |
 | Matter-Thread bulb | **IKEA KAJPLATS** (Thread mode via setup code) |
@@ -55,7 +55,7 @@ The Add-on uses an **ISO7221A galvanic isolator** that splits the 1-Wire protoco
 |---|---|---|
 | **GPIO9** | 1-Wire TX (data out) — DS18B20 commands via isolator | Always active |
 | **GPIO16** | 1-Wire RX (data in) — DS18B20 responses via isolator | Always active |
-| **GPIO17** | HLK-LD2410 mmWave occupancy sensor (EP3 Occupancy) | Always active |
+| **GPIO17** | Analog IN — Add-on encodes 0–10 V as PWM duty cycle (EP3 Occupancy) | Always active |
 | **GPIO18** | TTP223 capacitive touch button (drives via EP1) | Always active |
 
 All pins are configurable via `idf.py menuconfig` → **"Shelly 1 Gen4 Matter Switch configuration"**.
@@ -87,7 +87,7 @@ Status LED patterns (`status_led.c`):
 |---|---|---|---|---|
 | **EP 1** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff, LevelControl | Pushbutton → Toggle → light |
 | **EP 2** | 0x0302 Temperature Sensor | TemperatureMeasurement | — | DS18B20 report |
-| **EP 3** | 0x0107 Occupancy Sensor | OccupancySensing | — | LD2410 binary |
+| **EP 3** | 0x0107 Occupancy Sensor | OccupancySensing | — | Analog IN duty ≥ 50 % |
 | **EP 4** | 0x0100 OnOff Light | OnOff | — | Relay GPIO5 — controllable from HA |
 | **EP 5** | 0x0103 OnOff Light Switch | Descriptor, Binding | OnOff | Maintained switch → On/Off → light |
 
@@ -261,7 +261,7 @@ shelly1gen4_matter_switch/
 
 `BENCH_MODE` in `app_config.h` controls the GPIO10 polarity and sensor initialization.
 
-On the ESP32-C6, **GPIO16 (U0TXD) and GPIO17 (U0RXD) are the default UART0 pins** — this is your serial connection via PuTTY / minicom. In production these pins are repurposed for DS18B20 (1-Wire) and LD2410 (occupancy) respectively. Once `sensors_init()` reconfigures them, UART output stops. In BENCH_MODE the sensor tasks are skipped so serial debugging remains available.
+On the ESP32-C6, **GPIO16 (U0TXD) and GPIO17 (U0RXD) are the default UART0 pins** — this is your serial connection via PuTTY / minicom. In production these pins are repurposed for DS18B20 (1-Wire RX) and Analog IN (PWM duty cycle for occupancy) respectively. Once `sensors_init()` reconfigures them, UART output stops. In BENCH_MODE the sensor tasks are skipped so serial debugging remains available.
 
 | BENCH_MODE | GPIO10 (pushbutton) | Sensor tasks (GPIO16/17) | When |
 |---|---|---|---|
