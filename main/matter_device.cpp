@@ -1,16 +1,17 @@
 /*
  * Matter device implementation for Shelly 1 Gen4 (ESP32-C6).
  *
- * 5 endpoints:
+ * 6 endpoints:
  *   EP1 = OnOff Light Switch  + OnOff client + LevelControl client + Binding — Toggle
- *   EP2 = Temperature Sensor  (server)
- *   EP3 = Occupancy Sensor    (server)
- *   EP4 = OnOff Light          (server) — physical relay, controllable from HA
- *   EP5 = OnOff Light Switch  + OnOff client + Binding — State-follow (On/Off)
+ *   EP2 = OnOff Light Switch  + OnOff client + Binding — State-follow (On/Off)
+ *   EP3 = Temperature Sensor  (server)
+ *   EP4 = Occupancy Sensor    (server)
+ *   EP5 = OnOff Light          (server) — physical relay, controllable from HA
+ *   EP6 = OnOff Light          (server) — OTA mode switch (turn ON → reboot to OTA)
  *
- * EP1 vs EP5:
+ * EP1 vs EP2:
  *   EP1 sends Toggle on every short press — suitable for momentary buttons.
- *   EP5 sends On on contact close and Off on contact open —
+ *   EP2 sends On on contact close and Off on contact open —
  *   suitable for maintained/toggle switches. The user chooses via
  *   binding which endpoint controls their light/relay.
  *
@@ -33,6 +34,7 @@
 extern "C" {
 #include "app_config.h"
 #include "relay.h"
+#include "ota.h"
 #include "esp_log.h"
 }
 
@@ -88,6 +90,7 @@ static uint16_t s_ep_state   = 0;
 static uint16_t s_ep_temp    = 0;
 static uint16_t s_ep_occ     = 0;
 static uint16_t s_ep_relay   = 0;
+static uint16_t s_ep_ota     = 0;
 
 
 /* ---------------- Binding-mediated command emit ---------------- */
@@ -363,13 +366,17 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
                                      uint32_t cluster_id, uint32_t attribute_id,
                                      esp_matter_attr_val_t *val, void * /*priv*/)
 {
-    if (type == PRE_UPDATE && endpoint_id == s_ep_relay) {
-        if (cluster_id == OnOff::Id &&
-            attribute_id == OnOff::Attributes::OnOff::Id) {
-            relay_set(val->val.b);
-            ESP_LOGI(TAG, "EP%u OnOff -> relay %s", endpoint_id,
-                     val->val.b ? "ON" : "OFF");
-        }
+    if (type != PRE_UPDATE) return ESP_OK;
+    if (cluster_id != OnOff::Id || attribute_id != OnOff::Attributes::OnOff::Id)
+        return ESP_OK;
+
+    if (endpoint_id == s_ep_relay) {
+        relay_set(val->val.b);
+        ESP_LOGI(TAG, "EP%u OnOff -> relay %s", endpoint_id,
+                 val->val.b ? "ON" : "OFF");
+    } else if (endpoint_id == s_ep_ota && val->val.b) {
+        ESP_LOGW(TAG, "EP%u OTA switch ON -> rebooting to OTA mode", endpoint_id);
+        ota_request_at_next_boot();  /* sets NVS flag + esp_restart() */
     }
     return ESP_OK;
 }
@@ -412,7 +419,7 @@ extern "C" esp_err_t matter_start(void)
     node_t *node = node::create(&node_cfg, attribute_update_cb, identify_cb);
     if (!node) { ESP_LOGE(TAG, "node create failed"); return ESP_FAIL; }
 
-    /* EP1 — OnOff Light Switch + LevelControl client + Binding */
+    /* EP1 — OnOff Light Switch + LevelControl client + Binding (Toggle) */
     on_off_switch::config_t sw_cfg;
     endpoint_t *ep_pushbutton = on_off_switch::create(node, &sw_cfg, ENDPOINT_FLAG_NONE, NULL);
     {
@@ -425,29 +432,10 @@ extern "C" esp_err_t matter_start(void)
     s_ep_pushbutton = endpoint::get_id(ep_pushbutton);
     ESP_LOGI(TAG, "EP%u = OnOff Light Switch (pushbutton)", s_ep_pushbutton);
 
-    /* EP2 — Temperature Sensor */
-    temperature_sensor::config_t t_cfg;
-    endpoint_t *ep_temp = temperature_sensor::create(node, &t_cfg, ENDPOINT_FLAG_NONE, NULL);
-    s_ep_temp = endpoint::get_id(ep_temp);
-    ESP_LOGI(TAG, "EP%u = Temperature Sensor", s_ep_temp);
-
-    /* EP3 — Occupancy Sensor (LD2410 on GPIO17) */
-    occupancy_sensor::config_t o_cfg;
-    endpoint_t *ep_occ = occupancy_sensor::create(node, &o_cfg, ENDPOINT_FLAG_NONE, NULL);
-    s_ep_occ = endpoint::get_id(ep_occ);
-    ESP_LOGI(TAG, "EP%u = Occupancy Sensor (LD2410)", s_ep_occ);
-
-    /* EP4 — OnOff Light (relay on GPIO5, server — controllable from HA) */
-    on_off_light::config_t relay_cfg;
-    relay_cfg.on_off.on_off = relay_get();  /* restore NVS state */
-    endpoint_t *ep_relay = on_off_light::create(node, &relay_cfg, ENDPOINT_FLAG_NONE, NULL);
-    s_ep_relay = endpoint::get_id(ep_relay);
-    ESP_LOGI(TAG, "EP%u = OnOff Light (relay)", s_ep_relay);
-
-    /* EP5 — OnOff Light Switch (state-follow) + Binding
+    /* EP2 — OnOff Light Switch (state-follow) + Binding
      * Same device type as EP1 but intended for maintained switches:
      * sends On on contact close, Off on contact open.
-     * User binds EP5 (instead of EP1) for state-following behavior. */
+     * User binds EP2 (instead of EP1) for state-following behavior. */
     on_off_switch::config_t sf_cfg;
     endpoint_t *ep_state = on_off_switch::create(node, &sf_cfg, ENDPOINT_FLAG_NONE, NULL);
     {
@@ -456,6 +444,33 @@ extern "C" esp_err_t matter_start(void)
     }
     s_ep_state = endpoint::get_id(ep_state);
     ESP_LOGI(TAG, "EP%u = OnOff Light Switch (state-follow)", s_ep_state);
+
+    /* EP3 — Temperature Sensor */
+    temperature_sensor::config_t t_cfg;
+    endpoint_t *ep_temp = temperature_sensor::create(node, &t_cfg, ENDPOINT_FLAG_NONE, NULL);
+    s_ep_temp = endpoint::get_id(ep_temp);
+    ESP_LOGI(TAG, "EP%u = Temperature Sensor", s_ep_temp);
+
+    /* EP4 — Occupancy Sensor (LD2410 on GPIO17) */
+    occupancy_sensor::config_t o_cfg;
+    endpoint_t *ep_occ = occupancy_sensor::create(node, &o_cfg, ENDPOINT_FLAG_NONE, NULL);
+    s_ep_occ = endpoint::get_id(ep_occ);
+    ESP_LOGI(TAG, "EP%u = Occupancy Sensor (LD2410)", s_ep_occ);
+
+    /* EP5 — OnOff Light (relay on GPIO5, server — controllable from HA) */
+    on_off_light::config_t relay_cfg;
+    relay_cfg.on_off.on_off = relay_get();  /* restore NVS state */
+    endpoint_t *ep_relay = on_off_light::create(node, &relay_cfg, ENDPOINT_FLAG_NONE, NULL);
+    s_ep_relay = endpoint::get_id(ep_relay);
+    ESP_LOGI(TAG, "EP%u = OnOff Light (relay)", s_ep_relay);
+
+    /* EP6 — OnOff Light (OTA mode switch — turn ON from HA to reboot into
+     * OTA mode for 10 minutes; auto-reverts to Matter if no upload occurs) */
+    on_off_light::config_t ota_cfg;
+    ota_cfg.on_off.on_off = false;  /* always starts OFF */
+    endpoint_t *ep_ota = on_off_light::create(node, &ota_cfg, ENDPOINT_FLAG_NONE, NULL);
+    s_ep_ota = endpoint::get_id(ep_ota);
+    ESP_LOGI(TAG, "EP%u = OnOff Light (OTA switch)", s_ep_ota);
 
     /* OTA cluster requestor (optional: for Matter OTA via TBR — works alongside our WiFi OTA) */
     esp_matter_ota_requestor_init();

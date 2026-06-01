@@ -31,7 +31,7 @@ static bool s_dim_up = true;
 
 extern "C" void on_button_event(input_id_t id, button_event_t evt)
 {
-    /* EP1 = toggle (momentary pushbutton), EP5 = state-follow (maintained switch).
+    /* EP1 = toggle (momentary pushbutton), EP2 = state-follow (maintained switch).
      * All 3 inputs send to both endpoints; the user chooses via
      * binding which endpoint controls their light/relay. */
     uint16_t ep = matter_ep_pushbutton();
