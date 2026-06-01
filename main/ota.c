@@ -371,6 +371,107 @@ static esp_err_t sensor_get(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---------- GPIO17 (occupancy) diagnostic ---------- */
+
+#include "soc/gpio_reg.h"
+#include "soc/io_mux_reg.h"
+
+static esp_err_t gpio17_diag_get(httpd_req_t *req)
+{
+    static char buf[3072];
+    int pos = 0;
+
+    /* ---- Step 0: read BEFORE any reconfiguration ---- */
+    uint32_t gpio_in_before = REG_READ(GPIO_IN_REG);
+    int raw_before = (gpio_in_before >> PIN_LD2410_INPUT) & 1;
+
+    /* ---- Step 1: install + delete UART0 driver ---- */
+    esp_err_t inst_err = uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+    esp_err_t del_err  = uart_driver_delete(UART_NUM_0);
+
+    /* ---- Step 2: reset pin and configure as input with pull-down ---- */
+    gpio_reset_pin(PIN_LD2410_INPUT);
+    gpio_config_t cfg = {
+        .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    esp_err_t cfg_err = gpio_config(&cfg);
+    gpio_pullup_dis(PIN_LD2410_INPUT);
+    gpio_pulldown_en(PIN_LD2410_INPUT);
+
+    /* ---- Step 3: read AFTER reconfiguration ---- */
+    int level_api = gpio_get_level(PIN_LD2410_INPUT);
+    uint32_t gpio_in_after = REG_READ(GPIO_IN_REG);
+    int raw_after = (gpio_in_after >> PIN_LD2410_INPUT) & 1;
+
+    /* ---- Step 4: multiple rapid reads ---- */
+    int reads[10];
+    for (int i = 0; i < 10; i++) {
+        reads[i] = gpio_get_level(PIN_LD2410_INPUT);
+        esp_rom_delay_us(1000); /* 1 ms between reads */
+    }
+
+    /* ---- Build HTML ---- */
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<!DOCTYPE html><html><head><meta charset=utf-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<meta http-equiv=refresh content=1>"
+        "<title>GPIO17 Diagnostic</title>"
+        "<style>body{font-family:monospace;max-width:560px;margin:2em auto;padding:1em}"
+        "h2{font-family:sans-serif}.ok{color:green}.err{color:red}"
+        ".hi{color:red;font-weight:bold}.lo{color:green;font-weight:bold}"
+        "table{border-collapse:collapse;margin:.5em 0}"
+        "td,th{border:1px solid #ccc;padding:4px 10px;text-align:left}"
+        "</style></head><body>"
+        "<h2>&#128270; GPIO17 (Occupancy) Diagnostic</h2>"
+        "<p>Auto-refreshes every 1s. Connect J6 pin 3 to pin 4 (3.3V) or pin 7 (GND).</p>");
+
+    /* Current level — big and visible */
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<h3>Current level: <span class=%s>%s (%d)</span></h3>",
+        level_api ? "hi" : "lo",
+        level_api ? "HIGH — occupied" : "LOW — clear",
+        level_api);
+
+    /* Detail table */
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<table>"
+        "<tr><th>Check</th><th>Result</th></tr>"
+        "<tr><td>PIN_LD2410_INPUT</td><td>GPIO%d</td></tr>"
+        "<tr><td>uart_driver_install</td><td>%s (0x%x)</td></tr>"
+        "<tr><td>uart_driver_delete</td><td>%s (0x%x)</td></tr>"
+        "<tr><td>gpio_config</td><td>%s (0x%x)</td></tr>"
+        "<tr><td>GPIO_IN_REG <b>before</b> config</td><td>bit %d = <b>%d</b> (raw 0x%08lx)</td></tr>"
+        "<tr><td>GPIO_IN_REG <b>after</b> config</td><td>bit %d = <b>%d</b> (raw 0x%08lx)</td></tr>"
+        "<tr><td>gpio_get_level()</td><td><b>%d</b></td></tr>"
+        "</table>",
+        PIN_LD2410_INPUT,
+        esp_err_to_name(inst_err), (unsigned)inst_err,
+        esp_err_to_name(del_err), (unsigned)del_err,
+        esp_err_to_name(cfg_err), (unsigned)cfg_err,
+        PIN_LD2410_INPUT, raw_before, (unsigned long)gpio_in_before,
+        PIN_LD2410_INPUT, raw_after, (unsigned long)gpio_in_after,
+        level_api);
+
+    /* Rapid-read burst */
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<h3>10 rapid reads (1ms apart)</h3><p>");
+    for (int i = 0; i < 10; i++) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%d ", reads[i]);
+    }
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "</p>");
+
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+        "<p><a href=/>&#8592; Back to OTA</a></p></body></html>");
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, buf, pos);
+    return ESP_OK;
+}
+
 /* ---------- SoftAP HTML page ---------- */
 
 /*
@@ -398,7 +499,8 @@ static const char FORM_HTML[] =
 "</style></head><body>"
 
 "<h2>&#128268; Shelly1Gen4 &mdash; OTA Update</h2>"
-"<p><a href=/sensor>&#127777; DS18B20 sensor test</a></p>"
+"<p><a href=/sensor>&#127777; DS18B20 sensor test</a>"
+" &nbsp;|&nbsp; <a href=/gpio17>&#128270; GPIO17 diagnostic</a></p>"
 
 /* ── Section 1: direct upload ── */
 "<h3>Upload firmware</h3>"
@@ -645,15 +747,17 @@ static void run_softap(void)
     hc.max_open_sockets   = 3;
     ESP_ERROR_CHECK(httpd_start(&srv, &hc));
 
-    httpd_uri_t get_root    = { "/",       HTTP_GET,  form_get,     NULL };
-    httpd_uri_t post_upload = { "/upload", HTTP_POST, upload_post,  NULL };
-    httpd_uri_t post_ota    = { "/ota",    HTTP_POST, ota_post,     NULL };
-    httpd_uri_t get_sensor  = { "/sensor", HTTP_GET,  sensor_get,   NULL };
+    httpd_uri_t get_root    = { "/",       HTTP_GET,  form_get,        NULL };
+    httpd_uri_t post_upload = { "/upload", HTTP_POST, upload_post,     NULL };
+    httpd_uri_t post_ota    = { "/ota",    HTTP_POST, ota_post,        NULL };
+    httpd_uri_t get_sensor  = { "/sensor", HTTP_GET,  sensor_get,      NULL };
+    httpd_uri_t get_gpio17  = { "/gpio17", HTTP_GET,  gpio17_diag_get, NULL };
 
     httpd_register_uri_handler(srv, &get_root);
     httpd_register_uri_handler(srv, &post_upload);
     httpd_register_uri_handler(srv, &post_ota);
     httpd_register_uri_handler(srv, &get_sensor);
+    httpd_register_uri_handler(srv, &get_gpio17);
 
     ESP_LOGW(TAG, "SoftAP ready. Connect to '%s', open http://192.168.4.1/", ssid);
 
