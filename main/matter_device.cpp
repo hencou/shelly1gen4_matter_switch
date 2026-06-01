@@ -1,13 +1,12 @@
 /*
  * Matter device implementation for Shelly 1 Gen4 (ESP32-C6).
  *
- * 6 endpoints:
+ * 5 endpoints:
  *   EP1 = OnOff Light Switch  + OnOff client + LevelControl client + Binding — Toggle
  *   EP2 = OnOff Light Switch  + OnOff client + Binding — State-follow (On/Off)
  *   EP3 = Temperature Sensor  (server)
  *   EP4 = Occupancy Sensor    (server)
  *   EP5 = OnOff Light          (server) — physical relay, controllable from HA
- *   EP6 = OnOff Light          (server) — OTA mode switch (turn ON → reboot to OTA)
  *
  * EP1 vs EP2:
  *   EP1 sends Toggle on every short press — suitable for momentary buttons.
@@ -34,7 +33,6 @@
 extern "C" {
 #include "app_config.h"
 #include "relay.h"
-#include "ota.h"
 #include "esp_log.h"
 }
 
@@ -90,7 +88,6 @@ static uint16_t s_ep_state   = 0;
 static uint16_t s_ep_temp    = 0;
 static uint16_t s_ep_occ     = 0;
 static uint16_t s_ep_relay   = 0;
-static uint16_t s_ep_ota     = 0;
 
 
 /* ---------------- Binding-mediated command emit ---------------- */
@@ -374,9 +371,6 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
         relay_set(val->val.b);
         ESP_LOGI(TAG, "EP%u OnOff -> relay %s", endpoint_id,
                  val->val.b ? "ON" : "OFF");
-    } else if (endpoint_id == s_ep_ota && val->val.b) {
-        ESP_LOGW(TAG, "EP%u OTA switch ON -> rebooting to OTA mode", endpoint_id);
-        ota_request_at_next_boot();  /* sets NVS flag + esp_restart() */
     }
     return ESP_OK;
 }
@@ -464,13 +458,7 @@ extern "C" esp_err_t matter_start(void)
     s_ep_relay = endpoint::get_id(ep_relay);
     ESP_LOGI(TAG, "EP%u = OnOff Light (relay)", s_ep_relay);
 
-    /* EP6 — OnOff Light (OTA mode switch — turn ON from HA to reboot into
-     * OTA mode for 10 minutes; auto-reverts to Matter if no upload occurs) */
-    on_off_light::config_t ota_cfg;
-    ota_cfg.on_off.on_off = false;  /* always starts OFF */
-    endpoint_t *ep_ota = on_off_light::create(node, &ota_cfg, ENDPOINT_FLAG_NONE, NULL);
-    s_ep_ota = endpoint::get_id(ep_ota);
-    ESP_LOGI(TAG, "EP%u = OnOff Light (OTA switch)", s_ep_ota);
+
 
     /* OTA cluster requestor (optional: for Matter OTA via TBR — works alongside our WiFi OTA) */
     esp_matter_ota_requestor_init();

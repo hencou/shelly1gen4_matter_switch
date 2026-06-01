@@ -9,13 +9,12 @@ extern "C" {
 #endif
 
 /**
- * Start the Matter stack with 6 endpoints:
+ * Start the Matter stack with 5 endpoints:
  *   EP1 = OnOff Light Switch (pushbutton) + Binding cluster — Toggle
  *   EP2 = OnOff Light Switch (state-follow) + Binding — On/Off follows contact
  *   EP3 = Temperature Sensor
  *   EP4 = Occupancy Sensor
  *   EP5 = OnOff Light (relay) — server, controllable from HA
- *   EP6 = OnOff Light (OTA switch) — turn ON to reboot into OTA mode
  */
 esp_err_t matter_start(void);
 

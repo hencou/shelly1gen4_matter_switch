@@ -7,9 +7,8 @@
 3. **Matter Temperature Sensor** (EP3) — DS18B20 via dual-pin 1-Wire: TX=GPIO9, RX=GPIO16 (Shelly Plus Add-on)
 4. **Matter Occupancy Sensor** (EP4) — Analog IN (GPIO17) via Add-on PWM duty cycle (e.g. HLK-LD2410)
 5. **Matter OnOff Light** (Relay on GPIO5, EP5) — server endpoint, directly controllable from HA
-6. **Matter OnOff Light** (OTA switch, EP6) — turn ON from HA to enter OTA mode (10 min timeout)
 
-All 6 endpoints are always active — no compile-time choice needed. Universal firmware for all configurations.
+All 5 endpoints are always active — no compile-time choice needed. Universal firmware for all configurations.
 EP1 (Toggle) and EP2 (State-follow) drive the same physical inputs — the user chooses via binding which endpoint controls their light/relay:
 - **Momentary pushbutton** → bind EP1
 - **Maintained/toggle switch** → bind EP2
@@ -91,7 +90,6 @@ Status LED patterns (`status_led.c`):
 | **EP 3** | 0x0302 Temperature Sensor | TemperatureMeasurement | — | DS18B20 report |
 | **EP 4** | 0x0107 Occupancy Sensor | OccupancySensing | — | Analog IN duty ≥ 25 % (≈ 2.5 V) |
 | **EP 5** | 0x0100 OnOff Light | OnOff | — | Relay GPIO5 — controllable from HA |
-| **EP 6** | 0x0100 OnOff Light | OnOff | — | OTA mode switch — turn ON to enter OTA (10 min timeout) |
 
 EP1 and EP2 each have a **Binding cluster** (server). The Binding table is populated by HA Matter Server or `chip-tool` with:
 - Unicast binding (1 specific bulb, identified by node-ID + endpoint)
@@ -102,8 +100,6 @@ On each button event, `matter_device.cpp` sends commands directly via `FindOrEst
 **EP1 vs EP2:** Both endpoints are driven by the same physical inputs. EP1 sends Toggle (for momentary pushbuttons), EP2 sends On/Off (for maintained switches that hold a position). Bind the endpoint that matches your switch type.
 
 **EP5 (relay)** is a server endpoint — HA sees this as a switch you can directly turn on/off. To make the relay switch along with the pushbutton, create a binding from EP1 or EP2 to EP5 (see binding setup below).
-
-**EP6 (OTA switch)** is a server endpoint — turn it ON from HA to reboot the device into OTA mode for 10 minutes. If no firmware upload occurs within that time, the device automatically reboots back to Matter mode. This provides a remote alternative to the 6× click gesture.
 
 ## User interaction
 
@@ -132,17 +128,7 @@ All 3 inputs behave **identically** — they send via EP1 (Toggle) and EP2 (Stat
 2. Open Home Assistant → Settings → Devices & Services → Matter → "Add device".
 3. Enter setup code: **20202021** (default test passcode, configurable in `sdkconfig.defaults`).
 4. HA Matter Server pairs via BLE, provisions Thread credentials (requests from Google TV Streamer as TBR), the device joins the Thread network.
-5. After ~30-60 s the device appears in HA with 6 entities: switch toggle (EP1), switch state-follow (EP2), temperature sensor (EP3), occupancy sensor (EP4), relay (EP5), OTA switch (EP6).
-
-### OTA switch in HA (EP6)
-
-The device exposes an "OTA switch" entity (light type). To enter OTA mode remotely:
-1. In HA, turn **ON** the OTA switch entity.
-2. The device reboots into OTA mode (SoftAP or STA).
-3. Upload firmware via `http://192.168.4.1/` (SoftAP) or the saved URL (STA).
-4. If no upload happens within **10 minutes**, the device reboots back to Matter mode automatically.
-
-> After the reboot back to Matter mode, the OTA switch attribute returns to OFF (it always initializes as OFF at boot).
+5. After ~30-60 s the device appears in HA with 5 entities: switch toggle (EP1), switch state-follow (EP2), temperature sensor (EP3), occupancy sensor (EP4), relay (EP5).
 
 ⚠️ **The Thread network must already exist** — Google TV Streamer is your TBR. If HA Matter Server is not yet connected to that same Thread network, use an HA Connect ZBT-2 or similar dongle as secondary TBR (they automatically share the Thread credential set via the Thread Credentials API).
 
@@ -234,12 +220,11 @@ Once configured: pushbutton → multicast `OnOff.Toggle` on group 0x0001 → all
 
 ## OTA — WiFi update without cable
 
-WiFi is normally **off**. Two ways to enter OTA mode:
+WiFi is normally **off**. To enter OTA mode:
 
 | Method | How | When to use |
 |---|---|---|
-| **EP6 OTA switch** (recommended) | Turn ON the "OTA switch" entity in HA | Remote trigger — works even with active bindings |
-| **6× rapid clicks** | Press any button 6 times within 2.5 s | Fallback when HA is unavailable |
+| **6× rapid clicks** | Press any button 6 times within 2.5 s | Universal — works anytime |
 
 After entering OTA mode the device reboots into a dedicated WiFi state: direct STA fetch (with stored credentials) or SoftAP `shelly-ota-XXXXXX` for first provisioning. **10 minute timeout** — if no upload occurs, the device reboots back to Matter mode automatically. Another 6× clicks in OTA mode → factory reset.
 
