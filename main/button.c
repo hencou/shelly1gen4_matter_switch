@@ -184,9 +184,9 @@ void button_driver_init(button_cb_t cb)
     s_state[INPUT_PUSHBUTTON].active_low = (BENCH_MODE != 0);
 
     /* INPUT_TOUCH: GPIO18 Add-on digital input terminal.
-     * The Add-on has a built-in pull-up to 3V3, so the pin idles high.
      * Connecting to GND = pressed -> active-low.
-     * Do not set internal pull because it conflicts with the Add-on pull-up. */
+     * Internal pull-up provides a definite idle-HIGH state; the Add-on
+     * isolator does not supply a pull-up on the ESP32 side of this line. */
     s_state[INPUT_TOUCH].gpio       = PIN_TOUCH_INPUT;
     s_state[INPUT_TOUCH].enabled    = true;
     s_state[INPUT_TOUCH].active_low = true;   /* was false, corrected */
@@ -216,12 +216,13 @@ void button_driver_init(button_cb_t cb)
     gpio_config(&pushbutton_cfg);
     ESP_LOGI(TAG, "BD-STEP-2: gpio_config pushbutton done");
 
-    /* Add-on digital in: no internal pull because Add-on has its own pull-up */
+    /* Add-on digital in: internal pull-up so the pin idles HIGH when
+     * nothing drives it (the isolator does not pull up the ESP32 side). */
     gpio_config_t touch_cfg = {
         .pin_bit_mask = (1ULL << PIN_TOUCH_INPUT),
         .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,  /* was ENABLE, corrected */
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type    = GPIO_INTR_ANYEDGE,
     };
     gpio_config(&touch_cfg);
