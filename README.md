@@ -119,6 +119,7 @@ All 3 inputs behave **identically** — they send via EP1 (Toggle) and EP5 (Stat
 | Long press (> 500 ms) | `LevelControl.Move` (up/down, alternating) via EP1 |
 | Release | `LevelControl.Stop` via EP1 |
 | 6× rapid (< 2.5 s) | **Mode toggle** — in Matter mode: reboot to OTA mode; in OTA mode: factory reset (wipe nvs + chip_kvs) |
+| Hold 10 s | **Mode toggle** (alternative) — same as 6× click but works reliably when many bindings are active |
 
 > ℹ️ All 3 inputs use the same callback in `app_main.cpp`. EP1 (Toggle) and EP5 (State-follow) each have their own Binding table. Bind EP1 for momentary pushbuttons, EP5 for maintained switches — or both if you want both toggle and state-follow.
 
@@ -220,7 +221,7 @@ Once configured: pushbutton → multicast `OnOff.Toggle` on group 0x0001 → all
 
 ## OTA — WiFi update without cable
 
-WiFi is normally **off**. Trigger via **6× rapid clicks** (MODE_TOGGLE) on the pushbutton → reboot to OTA mode → direct STA fetch (with stored credentials) or SoftAP `shelly-ota-XXXXXX` for first provisioning. Another 6× clicks in OTA mode → factory reset.
+WiFi is normally **off**. Trigger via **6× rapid clicks** or **holding any button for 10 s** (MODE_TOGGLE) → reboot to OTA mode → direct STA fetch (with stored credentials) or SoftAP `shelly-ota-XXXXXX` for first provisioning. The 10 s hold is recommended when bindings are active (rapid clicks saturate the ESP32-C6 with binding commands). Another 6× clicks / 10 s hold in OTA mode → factory reset.
 
 In addition to this WiFi OTA, **Matter OTA** is also possible: `esp_matter_ota_requestor_init()` is called in `matter_start()`, so when HA Matter Server or Google TV Streamer offers an OTA image via the Matter OTA Provider cluster (1.3+ standard), that can also work via Thread. For most users WiFi OTA remains more practical (faster, local HTTP file).
 

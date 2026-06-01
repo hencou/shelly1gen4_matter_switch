@@ -9,6 +9,7 @@
  *   LONG_PRESS_START  -> dim start
  *   LONG_PRESS_STOP   -> dim stop
  *   6x click          -> MODE_TOGGLE (universal: Matter <-> OTA mode)
+ *   hold 10 s         -> MODE_TOGGLE (alternative, bypasses binding load)
  *
  * Polarity per input:
  *   - INPUT_PUSHBUTTON:    active-high (production 230V optocoupler);
@@ -60,6 +61,7 @@ typedef struct {
     bool    pressed;
     int64_t press_start_us;
     bool    long_fired;
+    bool    mode_fired;    /* very-long-press already triggered OTA */
     int64_t click_hist[CLICK_HISTORY];
     uint8_t click_idx;
 } btn_state_t;
@@ -109,6 +111,7 @@ static void handle_edge(btn_isr_msg_t *m)
         s->pressed        = true;
         s->press_start_us = m->t_us;
         s->long_fired     = false;
+        s->mode_fired     = false;
         if (s_cb) s_cb(m->id, BTN_EVT_CONTACT_CLOSED);
 
     } else if (!pressed_now && s->pressed) {
@@ -153,11 +156,23 @@ static void check_long_press(int64_t now_us)
 {
     for (int i = 0; i < INPUT_COUNT; i++) {
         btn_state_t *s = &s_state[i];
-        if (!s->enabled || !s->pressed || s->long_fired) continue;
+        if (!s->enabled || !s->pressed) continue;
         int64_t dur_ms = (now_us - s->press_start_us) / 1000;
-        if (dur_ms >= LONG_PRESS_MS) {
+
+        if (!s->long_fired && dur_ms >= LONG_PRESS_MS) {
             s->long_fired = true;
             if (s_cb) s_cb((input_id_t)i, BTN_EVT_LONG_PRESS_START);
+        }
+
+        /* Very long press (10 s) → OTA mode.  Alternative to 6× click
+         * that works reliably even when many bindings are active
+         * (the binding commands from 6× rapid clicks can saturate
+         * the single-core ESP32-C6). */
+        if (!s->mode_fired && dur_ms >= VERY_LONG_PRESS_MS) {
+            s->mode_fired = true;
+            ESP_LOGW(TAG, "very-long-press %d s on input %d -> MODE_TOGGLE",
+                     VERY_LONG_PRESS_MS / 1000, i);
+            if (s_cb) s_cb((input_id_t)i, BTN_EVT_MODE_TOGGLE);
         }
     }
 }

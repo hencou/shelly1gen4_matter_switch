@@ -14,6 +14,7 @@ extern "C" {
  * - LONG_PRESS_START fires when held > LONG_PRESS_MS
  * - LONG_PRESS_STOP  fires on release after a LONG_PRESS_START
  * - MODE_TOGGLE      fires after MODE_TOGGLE_CLICKS (6) taps in MODE_TOGGLE_WINDOW_MS
+ *                    OR after holding any button for VERY_LONG_PRESS_MS (10 s).
  *                    Universal across all 3 inputs. Handler decides based on
  *                    current boot mode:
  *                      - Matter mode -> reboot into OTA mode

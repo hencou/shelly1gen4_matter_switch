@@ -44,14 +44,18 @@ extern "C" {
 #define LONG_PRESS_MS       CONFIG_LONG_PRESS_MS
 #define OCC_DEBOUNCE_MS     CONFIG_OCC_DEBOUNCE_MS
 #define TEMP_REPORT_INT_S   CONFIG_TEMP_REPORT_INTERVAL_S
-/* 6x click = mode toggle (universal on all 3 inputs):
- *   - Matter mode + 6x  -> reboot to OTA mode (dedicated)
- *   - OTA mode    + 6x  -> factory reset (wipe nvs + chip_kvs) -> Matter mode
- * Tamper-proof: same gesture on same button for both directions.
+/* Mode toggle — two gestures, either triggers OTA mode (Matter→OTA)
+ * or factory reset (OTA→Matter):
+ *   1) 6× click within 2.5 s  (original method)
+ *   2) Hold any button for 10 s (alternative — works reliably even
+ *      when many bindings are active, because no binding commands
+ *      are sent for a sustained hold unlike 6× rapid toggles)
  * Long press does NOT trigger factory reset (too risky with
- * a wall switch that accidentally stays pressed). */
+ * a wall switch that accidentally stays pressed), but the 10 s
+ * very-long-press is intentional enough to be safe. */
 #define MODE_TOGGLE_CLICKS      6
 #define MODE_TOGGLE_WINDOW_MS   2500
+#define VERY_LONG_PRESS_MS      10000   /* 10 s hold → OTA mode */
 
 /* Matter endpoints */
 #define EP_SWITCH_PUSHBUTTON   1
@@ -68,6 +72,7 @@ extern "C" {
  *   - LONG_PRESS_START  -> Matter LevelControl Move (dim up/down)
  *   - LONG_PRESS_STOP   -> Matter LevelControl Stop
  *   - 6x click          -> mode toggle (Matter <-> OTA, universal)
+ *   - hold 10 s         -> mode toggle (alternative, avoids binding load)
  */
 typedef enum {
     INPUT_PUSHBUTTON = 0,    /* GPIO10 — System 55 pushbutton (active-high in production,
