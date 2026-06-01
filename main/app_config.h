@@ -55,16 +55,17 @@ extern "C" {
 
 /* Matter endpoints */
 #define EP_SWITCH_PUSHBUTTON   1
-#define EP_TEMPERATURE      2
-#define EP_OCCUPANCY        3
-#define EP_RELAY            4
-#define EP_SWITCH_STATE     5
+#define EP_SWITCH_STATE     2
+#define EP_TEMPERATURE      3
+#define EP_OCCUPANCY        4
+#define EP_RELAY            5
+#define EP_OTA              6
 
 /* Logical input source identifiers.
  * All 3 inputs have uniform behavior (see on_button_event in app_main.cpp):
  *   - SHORT_PRESS       -> Matter Toggle to EP1 bound devices (momentary)
- *   - CONTACT_CLOSED    -> Matter On to EP5 bound devices (state-follow)
- *   - CONTACT_OPEN      -> Matter Off to EP5 bound devices (state-follow)
+ *   - CONTACT_CLOSED    -> Matter On to EP2 bound devices (state-follow)
+ *   - CONTACT_OPEN      -> Matter Off to EP2 bound devices (state-follow)
  *   - LONG_PRESS_START  -> Matter LevelControl Move (dim up/down)
  *   - LONG_PRESS_STOP   -> Matter LevelControl Stop
  *   - 6x click          -> mode toggle (Matter <-> OTA, universal)

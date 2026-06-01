@@ -12,14 +12,17 @@ extern "C" {
  *
  * Flow:
  *   1) During normal operation: WiFi OFF, only Thread/Matter.
- *   2) User trigger (6x clicks on pushbutton, or remote trigger) ->
- *      ota_request_at_next_boot() sets flag in NVS and reboots.
+ *   2) User trigger:
+ *        a) Turn ON EP6 (OTA switch) from HA (recommended), OR
+ *        b) 6x clicks on pushbutton (fallback).
+ *      Both call ota_request_at_next_boot() -> NVS flag + reboot.
  *   3) At boot: ota_handle_pending() inspects the flag.
  *      - If saved WiFi creds exist -> direct STA OTA.
  *      - Otherwise -> SoftAP "shelly-ota-XXXXXX" with HTTP form on
  *        http://192.168.4.1/ to enter SSID/pass/URL once.
- *   4) On success: esp_restart() -> new firmware boots, Thread resumes.
- *   5) On failure: ESP-IDF rollback does not mark new app as valid;
+ *   4) 10-minute timeout: if no upload occurs, reboot back to Matter.
+ *   5) On success: esp_restart() -> new firmware boots, Thread resumes.
+ *   6) On failure: ESP-IDF rollback does not mark new app as valid;
  *      after 3rd failed boot it reverts to the previous slot.
  */
 
