@@ -56,7 +56,7 @@ The Add-on uses an **ISO7221A galvanic isolator** that splits the 1-Wire protoco
 | **GPIO9** | 1-Wire TX (data out) — DS18B20 commands via isolator | Always active |
 | **GPIO16** | 1-Wire RX (data in) — DS18B20 responses via isolator | Always active |
 | **GPIO17** | Analog IN — Add-on encodes 0–10 V as PWM duty cycle (EP3 Occupancy) | Always active |
-| **GPIO18** | TTP223 capacitive touch button (drives via EP1) | Always active |
+| **GPIO18** | Digital IN - TTP223 capacitive touch button (drives via EP1) | Always active |
 
 All pins are configurable via `idf.py menuconfig` → **"Shelly 1 Gen4 Matter Switch configuration"**.
 
@@ -66,7 +66,7 @@ Numbering runs from the pin farthest from the J6 label (pin 1) to the pin right 
 
 | Pin | Function | GPIO | Notes |
 |---|---|---|---|
-| 1 | **ESP_DBG_UART** | GPIO18 (Digital IN) | TTP223 touch / not used for flashing |
+| 1 | **ESP_DBG_UART** | GPIO18 (Digital IN) | not used for flashing |
 | 2 | **TXD** | GPIO16 (UART0 TX // 1-Wire RX) | Shelly TXD → CP2102 RXD |
 | 3 | **RXD** | GPIO17 (UART0 RX // Analog IN) | Shelly RXD ← CP2102 TXD |
 | 4 | **3.3V** | -- | power supply (3.3V only — **no 5V**) |
