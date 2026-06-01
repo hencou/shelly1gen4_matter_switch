@@ -128,13 +128,6 @@ static bool ds18b20_read_centi_c(int16_t *out)
 static temp_cb_t s_temp_cb;
 static void temp_task(void *arg)
 {
-    /* GPIO16 is UART0 TX by default on the ESP32-C6. Delete the UART0
-     * driver so the peripheral releases GPIO16 before we reconfigure it
-     * as 1-Wire RX pin. Without this step UART0 keeps the pin occupied
-     * and the DS18B20 does not respond. After uart_driver_delete, J6
-     * TXD is no longer usable — this is acceptable in production (BENCH_MODE=0). */
-    uart_driver_delete(UART_NUM_0);
-
     /* TX pin: output, idle high */
     gpio_config_t tx_cfg = {
         .pin_bit_mask = (1ULL << OW_TX),
@@ -143,8 +136,8 @@ static void temp_task(void *arg)
     gpio_config(&tx_cfg);
     ow_tx_high();
 
-    /* RX pin: input (Add-on has its own 4.7kΩ pull-up via isolator) */
-    gpio_reset_pin(OW_RX);
+    /* RX pin: input (gpio_reset_pin already called in sensors_init;
+     * Add-on has its own 4.7kΩ pull-up via isolator) */
     gpio_config_t rx_cfg = {
         .pin_bit_mask = (1ULL << OW_RX),
         .mode = GPIO_MODE_INPUT,
@@ -178,11 +171,8 @@ static void IRAM_ATTR occ_isr(void *arg)
 
 static void occ_task(void *arg)
 {
-    /* GPIO17 is UART0 RX by default on the ESP32-C6 — the UART driver sets
-     * an internal pull-up. gpio_reset_pin() disconnects the UART peripheral
-     * and resets all pulls, so our gpio_config with pull_down takes effect. */
-    gpio_reset_pin(PIN_LD2410_INPUT);
-
+    /* GPIO17 was UART0 RX; uart_driver_delete + gpio_reset_pin already ran
+     * in sensors_init before this task was created. */
     gpio_config_t cfg = {
         .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
         .mode = GPIO_MODE_INPUT,
@@ -192,8 +182,13 @@ static void occ_task(void *arg)
     gpio_config(&cfg);
     gpio_isr_handler_add(PIN_LD2410_INPUT, occ_isr, NULL);
 
+    /* Read and report the initial level so the first state is correct
+     * without waiting for an edge transition. */
+    int last_level = gpio_get_level(PIN_LD2410_INPUT);
+    if (s_occ_cb) s_occ_cb(last_level == 1);
+    ESP_LOGI(TAG, "occupancy initial = %s", last_level ? "occupied" : "clear");
+
     int64_t last = 0;
-    int last_level = -1;
     for (;;) {
         int64_t t;
         if (xQueueReceive(s_occ_q, &t, portMAX_DELAY) != pdTRUE) continue;
@@ -223,8 +218,16 @@ void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
      * which kills serial output. GPIO9 (1-Wire TX) is also kept free. */
     ESP_LOGW(TAG, "BENCH_MODE: sensor tasks skipped (GPIO9/16/17 kept free)");
 #else
-    xTaskCreate(temp_task, "temp_task", 3072, NULL, 5, NULL);
+    /* GPIO16/17 are UART0 TX/RX by default on the ESP32-C6. Delete the UART0
+     * driver and reset both pins BEFORE creating sensor tasks so the UART
+     * peripheral no longer holds pull-ups or IO-MUX routing on these GPIOs.
+     * After this, J6 TXD is no longer usable — acceptable in production. */
+    uart_driver_delete(UART_NUM_0);
+    gpio_reset_pin(PIN_ONEWIRE_RX);    /* GPIO16 — 1-Wire RX / UART0 TX */
+    gpio_reset_pin(PIN_LD2410_INPUT);   /* GPIO17 — occupancy / UART0 RX */
+
     s_occ_q = xQueueCreate(8, sizeof(int64_t));
+    xTaskCreate(temp_task, "temp_task", 3072, NULL, 5, NULL);
     xTaskCreate(occ_task,  "occ_task",  2560, NULL, 6, NULL);
 #endif
 }
