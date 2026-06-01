@@ -176,6 +176,7 @@ static void occ_task(void *arg)
     gpio_config_t cfg = {
         .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
         .mode = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_ENABLE,
         .intr_type = GPIO_INTR_ANYEDGE,
     };
