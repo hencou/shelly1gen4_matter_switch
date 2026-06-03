@@ -91,10 +91,12 @@ static bool ota_load_credentials(char *ssid, size_t ssidlen,
 {
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
-    bool ok = nvs_load_str(h, NVS_KEY_SSID, ssid, ssidlen) &&
-              nvs_load_str(h, NVS_KEY_URL,  url,  urllen);
-    /* password may be empty (open network) */
-    if (ok) nvs_load_str(h, NVS_KEY_PASS, pass, passlen);
+    bool ok = nvs_load_str(h, NVS_KEY_SSID, ssid, ssidlen);
+    /* password and URL may be empty */
+    if (ok) {
+        nvs_load_str(h, NVS_KEY_PASS, pass, passlen);
+        nvs_load_str(h, NVS_KEY_URL,  url,  urllen);
+    }
     nvs_close(h);
     return ok;
 }
@@ -488,13 +490,14 @@ static const char FORM_HTML[] =
 
 /* ── Section 2: WiFi + URL for STA boot ── */
 "<h3>Save WiFi (optional)</h3>"
-"<p style='font-size:.9em;color:#555'>Save WiFi credentials so the device can "
-"fetch a URL on the next OTA trigger by itself (without SoftAP).</p>"
+"<p style='font-size:.9em;color:#555'>Save WiFi credentials so on the next OTA trigger "
+"the device connects to your network. The web interface will be reachable on the "
+"router-assigned IP. If a firmware URL is set, it will also try auto-fetch.</p>"
 "<form method=POST action=/ota>"
 "<label>WiFi SSID</label><input name=ssid>"
 "<label>WiFi Password</label><input name=pass type=password>"
-"<label>Firmware URL (.bin)</label>"
-"<input name=url value='http://homeassistant.local:8123/local/shelly1gen4.bin'>"
+"<label>Firmware URL (.bin, optional)</label>"
+"<input name=url placeholder='http://homeassistant.local:8123/local/shelly1gen4.bin'>"
 "<button class=btn type=submit>Save &amp; Restart</button>"
 "</form>"
 
@@ -663,12 +666,12 @@ static esp_err_t ota_post(httpd_req_t *req)
     form_field(body, "ssid", ssid, sizeof(ssid));
     form_field(body, "pass", pass, sizeof(pass));
     form_field(body, "url",  url,  sizeof(url));
-    if (!ssid[0] || !url[0]) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "ssid+url required");
+    if (!ssid[0]) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "ssid required");
         return ESP_FAIL;
     }
     ota_save_credentials(ssid, pass, url);
-    const char *msg = "Saved. Device restarting and fetching firmware...\n";
+    const char *msg = "Saved. Device restarting into OTA mode on your WiFi...\n";
     httpd_resp_send(req, msg, HTTPD_RESP_USE_STRLEN);
     vTaskDelay(pdMS_TO_TICKS(500));
     nvs_handle_t h;
@@ -679,6 +682,52 @@ static esp_err_t ota_post(httpd_req_t *req)
     }
     esp_restart();
     return ESP_OK;
+}
+
+/* ---------- HTTP server (shared by SoftAP and STA modes) ---------- */
+
+#define OTA_TIMEOUT_MS   (10 * 60 * 1000)   /* 10 minutes */
+#define OTA_TICK_MS      5000                /* log every 5 seconds */
+
+static void start_httpd(void)
+{
+    httpd_handle_t srv = NULL;
+    httpd_config_t hc = HTTPD_DEFAULT_CONFIG();
+    hc.recv_wait_timeout  = 30;   /* seconds waiting for data */
+    hc.send_wait_timeout  = 10;
+    hc.max_open_sockets   = 3;
+    ESP_ERROR_CHECK(httpd_start(&srv, &hc));
+
+    httpd_uri_t get_root    = { "/",       HTTP_GET,  form_get,        NULL };
+    httpd_uri_t post_upload = { "/upload", HTTP_POST, upload_post,     NULL };
+    httpd_uri_t post_ota    = { "/ota",    HTTP_POST, ota_post,        NULL };
+    httpd_uri_t get_sensor  = { "/sensor", HTTP_GET,  sensor_get,      NULL };
+    httpd_uri_t get_gpio17  = { "/gpio17", HTTP_GET,  gpio17_diag_get, NULL };
+
+    httpd_register_uri_handler(srv, &get_root);
+    httpd_register_uri_handler(srv, &post_upload);
+    httpd_register_uri_handler(srv, &post_ota);
+    httpd_register_uri_handler(srv, &get_sensor);
+    httpd_register_uri_handler(srv, &get_gpio17);
+}
+
+static void wait_for_upload_or_timeout(void)
+{
+    int32_t remaining_ms = OTA_TIMEOUT_MS;
+    while (remaining_ms > 0) {
+        int32_t sleep = (remaining_ms < OTA_TICK_MS)
+                        ? remaining_ms : OTA_TICK_MS;
+        vTaskDelay(pdMS_TO_TICKS(sleep));
+        remaining_ms -= sleep;
+        if (remaining_ms > 0) {
+            ESP_LOGW(TAG, "OTA: %"PRId32" seconds remaining, waiting for upload...",
+                     remaining_ms / 1000);
+        }
+    }
+
+    ESP_LOGW(TAG, "OTA timeout expired — rebooting to Matter mode");
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_restart();
 }
 
 /* ---------- Start SoftAP ---------- */
@@ -714,50 +763,11 @@ static void run_softap(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &apc));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    /* Increase max body size for the upload handler */
-    httpd_handle_t srv = NULL;
-    httpd_config_t hc = HTTPD_DEFAULT_CONFIG();
-    hc.recv_wait_timeout  = 30;   /* seconds waiting for data */
-    hc.send_wait_timeout  = 10;
-    hc.max_open_sockets   = 3;
-    ESP_ERROR_CHECK(httpd_start(&srv, &hc));
-
-    httpd_uri_t get_root    = { "/",       HTTP_GET,  form_get,        NULL };
-    httpd_uri_t post_upload = { "/upload", HTTP_POST, upload_post,     NULL };
-    httpd_uri_t post_ota    = { "/ota",    HTTP_POST, ota_post,        NULL };
-    httpd_uri_t get_sensor  = { "/sensor", HTTP_GET,  sensor_get,      NULL };
-    httpd_uri_t get_gpio17  = { "/gpio17", HTTP_GET,  gpio17_diag_get, NULL };
-
-    httpd_register_uri_handler(srv, &get_root);
-    httpd_register_uri_handler(srv, &post_upload);
-    httpd_register_uri_handler(srv, &post_ota);
-    httpd_register_uri_handler(srv, &get_sensor);
-    httpd_register_uri_handler(srv, &get_gpio17);
+    start_httpd();
 
     ESP_LOGW(TAG, "SoftAP ready. Connect to '%s', open http://192.168.4.1/", ssid);
 
-    /* Wait up to OTA_SOFTAP_TIMEOUT_MS. If no upload or form post happens,
-     * we simply reboot back to Matter mode. The NVS flag has already been
-     * cleared upon entering ota_handle_pending(), so after reboot Matter
-     * starts automatically. */
-#define OTA_SOFTAP_TIMEOUT_MS   (10 * 60 * 1000)   /* 10 minutes */
-#define OTA_SOFTAP_TICK_MS      5000                /* log every 5 seconds */
-
-    int32_t remaining_ms = OTA_SOFTAP_TIMEOUT_MS;
-    while (remaining_ms > 0) {
-        int32_t sleep = (remaining_ms < OTA_SOFTAP_TICK_MS)
-                        ? remaining_ms : OTA_SOFTAP_TICK_MS;
-        vTaskDelay(pdMS_TO_TICKS(sleep));
-        remaining_ms -= sleep;
-        if (remaining_ms > 0) {
-            ESP_LOGW(TAG, "OTA SoftAP: %"PRId32" seconds remaining, waiting for upload...",
-                     remaining_ms / 1000);
-        }
-    }
-
-    ESP_LOGW(TAG, "OTA timeout expired — rebooting to Matter mode");
-    vTaskDelay(pdMS_TO_TICKS(200));
-    esp_restart();
+    wait_for_upload_or_timeout();  /* never returns (reboots) */
 }
 
 /* ---------- Factory reset ---------- */
@@ -806,12 +816,21 @@ void ota_handle_pending(void)
     if (have_creds) {
         ESP_LOGI(TAG, "trying STA OTA -> ssid=%s url=%s", ssid, url);
         if (wifi_init_sta(ssid, pass) == ESP_OK) {
-            if (do_ota_from_url(url) == ESP_OK) {
+            /* STA connected — start HTTP server so user can reach the
+             * OTA web interface on the router-assigned IP address */
+            start_httpd();
+            ESP_LOGW(TAG, "STA connected. OTA web interface available on local IP");
+
+            if (url[0] && do_ota_from_url(url) == ESP_OK) {
                 vTaskDelay(pdMS_TO_TICKS(500));
                 esp_restart();
             }
+            /* URL fetch failed or no URL — keep HTTP server running
+             * so user can upload manually via browser */
+            ESP_LOGW(TAG, "URL fetch skipped/failed, waiting for manual upload...");
+            wait_for_upload_or_timeout();  /* never returns (reboots) */
         }
-        ESP_LOGW(TAG, "STA path failed, falling back to SoftAP");
+        ESP_LOGW(TAG, "STA connection failed, falling back to SoftAP");
         esp_wifi_stop();
         esp_wifi_deinit();
     }
