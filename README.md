@@ -122,6 +122,10 @@ All 3 inputs behave **identically** — they send via EP1 (Toggle) and EP2 (Stat
 
 > ℹ️ All 3 inputs use the same callback in `app_main.cpp`. EP1 (Toggle) and EP2 (State-follow) each have their own Binding table. Bind EP1 for momentary pushbuttons, EP2 for maintained switches — or both if you want both toggle and state-follow.
 
+## Sensors hardware
+> TTP223 Touch: solder jumper A to achieve non locking low level output when active
+> HLK-LD2410**S**: use "S" variant, Shelly addon will deliver a max of 10mA current, only low power variant of LD2410 will be compatible with this.
+
 ## Commissioning in Home Assistant Matter Server
 
 1. Flash the firmware (see INSTALL.md). On first boot, the device advertises for 5 minutes via BLE and SRP/DNS-SD.
