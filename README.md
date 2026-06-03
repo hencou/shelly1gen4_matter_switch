@@ -226,7 +226,12 @@ WiFi is normally **off**. To enter OTA mode:
 |---|---|---|
 | **6× rapid clicks** | Press any button 6 times within 2.5 s | Universal — works anytime |
 
-After entering OTA mode the device reboots into a dedicated WiFi state: direct STA fetch (with stored credentials) or SoftAP `shelly-ota-XXXXXX` for first provisioning. **10 minute timeout** — if no upload occurs, the device reboots back to Matter mode automatically. Another 6× clicks in OTA mode → factory reset.
+After entering OTA mode the device reboots into a dedicated WiFi state:
+
+1. **With saved WiFi credentials** — the device connects to your network (STA mode). The OTA web interface is reachable on the router-assigned IP address. If a firmware URL was also saved, auto-fetch is attempted first; on failure the web interface remains available for manual upload.
+2. **Without saved credentials** — SoftAP `shelly-ota-XXXXXX` opens (open network, `http://192.168.4.1/`).
+
+**10 minute timeout** — if no upload occurs, the device reboots back to Matter mode automatically. Another 6× clicks in OTA mode → factory reset.
 
 In addition to this WiFi OTA, **Matter OTA** is also possible: `esp_matter_ota_requestor_init()` is called in `matter_start()`, so when HA Matter Server or Google TV Streamer offers an OTA image via the Matter OTA Provider cluster (1.3+ standard), that can also work via Thread. For most users WiFi OTA remains more practical (faster, local HTTP file).
 
