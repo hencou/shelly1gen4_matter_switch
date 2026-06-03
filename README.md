@@ -5,7 +5,7 @@
 1. **Matter OnOff/Dimmer Light Switch** (Toggle, EP1) — bind-client, short press = toggle, long = dim
 2. **Matter OnOff Light Switch** (State-follow, EP2) — bind-client, On on contact close, Off on contact open
 3. **Matter Temperature Sensor** (EP3) — DS18B20 via dual-pin 1-Wire: TX=GPIO9, RX=GPIO16 (Shelly Plus Add-on)
-4. **Matter Occupancy Sensor** (EP4) — Analog IN (GPIO17) via Add-on PWM duty cycle (e.g. HLK-LD2410)
+4. **Matter Occupancy Sensor** (EP4) — Analog IN (GPIO17) via Add-on PWM duty cycle (e.g. HLK-LD2410S)
 5. **Matter OnOff Light** (Relay on GPIO5, EP5) — server endpoint, directly controllable from HA
 
 All 5 endpoints are always active — no compile-time choice needed. Universal firmware for all configurations.
@@ -55,7 +55,7 @@ The Add-on uses an **ISO7221A galvanic isolator** that splits the 1-Wire protoco
 |---|---|---|
 | **GPIO9** | 1-Wire TX (data out) — DS18B20 commands via isolator | Always active |
 | **GPIO16** | 1-Wire RX (data in) — DS18B20 responses via isolator | Always active |
-| **GPIO17** | Analog IN — Add-on encodes 0–10 V as PWM duty cycle (EP3 Occupancy) | Always active |
+| **GPIO17** | Analog IN — HLK-LD2410**S** mmWave sensor (EP3 Occupancy) | Always active |
 | **GPIO18** | Digital IN - TTP223 capacitive touch button (drives via EP1) | Always active |
 
 All pins are configurable via `idf.py menuconfig` → **"Shelly 1 Gen4 Matter Switch configuration"**.
