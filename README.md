@@ -29,7 +29,7 @@ The relay (EP5) is **no longer hardcoded** to the button press. Via a Matter bin
 | Component | Status |
 |---|---|
 | Shelly 1 Gen4 (ESP32-C6, 8 MB flash) | Target hardware |
-| Shelly Plus Add-on | DS18B20 (TX=GPIO9/RX=GPIO16) + TTP223 touch (GPIO18) + Analog IN as PWM duty cycle (GPIO17) |
+| Shelly Plus Add-on | DS18B20 (TX=GPIO9/RX=GPIO16) + TTP223 touch (GPIO18) + Analog IN as PWM duty cycle (GPIO17). Please be aware addon can deliver max 10mA so choose HLK-LD2410S to use as less current as possible |
 | Thread Border Router | **Google TV Streamer 4K** |
 | Matter primary admin | **Home Assistant Matter Server** add-on |
 | Matter-Thread bulb | **IKEA KAJPLATS** (Matter mode) |
