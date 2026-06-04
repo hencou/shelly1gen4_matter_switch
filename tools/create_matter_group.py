@@ -149,7 +149,7 @@ async def write_group_key_map(ws, node_id: int, group_id: int,
                e.get("groupId", e.get("groupID")) != group_id
         ]
 
-    new_entry = {"groupId": group_id, "groupKeySetID": keyset_id}
+    new_entry = {"groupId": group_id, "groupKeySetID": keyset_id, "fabricIndex": 1}
     new_map   = existing + [new_entry]
 
     if dry_run:
