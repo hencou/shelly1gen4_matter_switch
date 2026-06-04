@@ -1,26 +1,4 @@
 #!/usr/bin/env python3
-"""
-=============================================================================
-HOWTO: ALLES-IN-ÉÉN MATTER MULTICAST & BINDING SETUP
-=============================================================================
-
-1. VOORBEREIDING:
-   Installeer 'websockets' op je externe machine als dat nog niet is gebeurd:
-   pip install websockets
-
-2. UITVOERING (ALLES IN 1 HANDELING):
-   Run het script en geef zowel de lampen (--nodes) als de switch (--switch) mee:
-   
-   python3 matter_multicast_setup.py --nodes 32 33 34 35 --switch 29 --group-id 0x0001
-
-   Optionele parameters:
-   --group-name "Kantoor"    (Standaard: "Kantoor")
-   --switch-endpoint 1       (Standaard: 1, verhoog dit als de knop op een ander endpoint zit)
-   --keyset-id 42            (Standaard: 42)
-
-=============================================================================
-"""
-
 import argparse
 import asyncio
 import json
@@ -28,6 +6,11 @@ import os
 import sys
 import time
 import websockets
+
+# Hier stonden de missende variabelen:
+DEFAULT_GROUP_ID   = 0x0001
+DEFAULT_GROUP_NAME = "Kantoor"
+DEFAULT_KEYSET_ID  = 42
 
 SERVER_IP   = "192.168.178.2"
 SERVER_PORT = 5580
@@ -41,7 +24,7 @@ class MatterRemoteClient:
     async def connect(self):
         print(f"[*] Verbinden met Matter Server op {self.url}...")
         self.ws = await websockets.connect(self.url)
-        await self.ws.recv() # Welkomstbericht opvangen
+        await self.ws.recv()
 
     async def send_command(self, command, args):
         msg_id = str(self._message_id)
@@ -57,12 +40,10 @@ class MatterRemoteClient:
     async def close(self):
         if self.ws: await self.ws.close()
 
-
 async def run_logic(args):
     if len(args.group_name) > 16:
         sys.exit(f"FOUT: group-name te lang (max 16 tekens).")
 
-    # Genereer één unieke sleutel voor deze hele sessie
     epoch_key = os.urandom(16).hex()
     epoch_key_bytes = list(bytes.fromhex(epoch_key))
     now_us = int(time.time() * 1_000_000)
@@ -129,7 +110,6 @@ async def run_logic(args):
                     print(f"    [OK] Node al lid (DUPLICATE)")
                 else:
                     try:
-                        # Variant B voor specifieke SDK versies
                         await client.send_command("device_command", {
                             "node_id": node_id, "endpoint_id": 1, "cluster_id": 4,
                             "command_name": "AddGroup",
@@ -146,7 +126,6 @@ async def run_logic(args):
         print("[DEEL 2] Schakelaar (Switch) koppelen aan de groep...")
         print(f"  --> Configureer Schakelaar (Node {args.switch})...")
 
-        # Stap 2.1: Zelfde KeySetWrite naar de switch sturen
         try:
             await client.send_command("device_command", {
                 "node_id": args.switch, "endpoint_id": 0, "cluster_id": 63,
@@ -156,7 +135,7 @@ async def run_logic(args):
                         "groupKeySetID": args.keyset_id,
                         "groupKeySecurityPolicy": 1,
                         "epochKey0": epoch_key_bytes,
-                        "epochStartTime0": 1 # Direct bruikbaar voor zenden
+                        "epochStartTime0": 1
                     }
                 }
             })
@@ -164,27 +143,23 @@ async def run_logic(args):
         except Exception as e:
             print(f"    [!] Fout bij KeySetWrite op switch: {e}")
 
-        # Stap 2.2: Binding tabel wegschrijven naar de switch
         try:
             binding_entry = {
                 "groupId": args.group_id,
-                "clusterId": 6, # OnOff cluster commando's zenden
+                "clusterId": 6,
                 "fabricIndex": 1
             }
             await client.send_command("write_attribute", {
                 "node_id": args.switch,
-                "attribute_path": f"{args.switch_endpoint}/30/0", # 30 = Binding Cluster, 0 = Binding list
+                "attribute_path": f"{args.switch_endpoint}/30/0",
                 "value": [binding_entry]
             })
             print(f"    [OK] Binding succesvol weggeschreven op endpoint {args.switch_endpoint}!")
         except Exception as e:
             print(f"    [!] Fout bij schrijven binding tabel: {e}")
 
-        # VOLTOOID
         print("\n" + "="*60)
         print("[*] ALLES SUCCESVOL UITGEVOERD!")
-        print(f"    De lampen {args.nodes} luisteren nu naar Groep 0x{args.group_id:04X}.")
-        print(f"    Switch {args.switch} stuurt nu opdrachten rechtstreeks naar deze groep.")
         print("="*60)
 
     except Exception as general_error:
@@ -194,8 +169,8 @@ async def run_logic(args):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--nodes", type=int, nargs="+", required=True, help="Lijst met Node ID's van de lampen")
-    ap.add_argument("--switch", type=int, required=True, help="Node ID van de schakelaar")
+    ap.add_argument("--nodes", type=int, nargs="+", required=True)
+    ap.add_argument("--switch", type=int, required=True)
     ap.add_argument("--group-id", type=lambda x: int(x, 0), default=DEFAULT_GROUP_ID)
     ap.add_argument("--group-name", default=DEFAULT_GROUP_NAME)
     ap.add_argument("--switch-endpoint", type=int, default=1)
