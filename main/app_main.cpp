@@ -22,6 +22,7 @@ extern "C" {
 }
 
 #include "matter_device.h"
+#include <app/InteractionModelEngine.h>
 #include <credentials/GroupDataProviderImpl.h>
 
 static const char *TAG = "app";
@@ -106,10 +107,17 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done, calling button_driver_init");
 
     // =========================================================================
-    // MULTICAST FIX: Activate Group Key Lookup for outgoing groupbindings
+    // MULTICAST FIX: Initialiseer de standaard Group Data Provider
     // =========================================================================
-    ESP_LOGI(TAG, "Activate Matter Group Key Provider...");
-    chip::Credentials::SetGroupTextLookup(chip::Credentials::GetGroupTextLookup());
+    ESP_LOGI(TAG, "Initialise Matter Group Data Provider...");
+    chip::Credentials::GroupDataProvider * provider = chip::Credentials::GetGroupDataProvider();
+    if (provider != nullptr) {
+        // Provide the Interaction Model Engine listning to provider
+        chip::app::InteractionModelEngine::GetInstance()->SetGroupDataProvider(provider);
+        ESP_LOGI(TAG, "Group Data Provider successfully joined to IM Engine!");
+    } else {
+        ESP_LOGE(TAG, "ERROR: Can't get Group Data Provider!");
+    }
     // =========================================================================
     
     button_driver_init(on_button_event);
