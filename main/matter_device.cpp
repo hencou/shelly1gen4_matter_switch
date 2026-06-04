@@ -125,29 +125,31 @@ static auto make_on_error() {
 
 static void send_onoff_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
 {
+    auto *em = &chip::Server::GetInstance().GetExchangeManager();
     if (d.commandId == OnOff::Commands::Toggle::Id) {
         OnOff::Commands::Toggle::Type cmd;
-        chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
+        chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     } else if (d.commandId == OnOff::Commands::On::Id) {
         OnOff::Commands::On::Type cmd;
-        chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
+        chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     } else if (d.commandId == OnOff::Commands::Off::Id) {
         OnOff::Commands::Off::Type cmd;
-        chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
+        chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     }
 }
 
 static void send_level_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
 {
+    auto *em = &chip::Server::GetInstance().GetExchangeManager();
     if (d.commandId == LevelControl::Commands::Move::Id) {
         LevelControl::Commands::Move::Type cmd;
         cmd.moveMode = (d.moveMode == 0) ? LevelControl::MoveModeEnum::kUp
                                          : LevelControl::MoveModeEnum::kDown;
         cmd.rate.SetNonNull(d.rate);
-        chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
+        chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     } else if (d.commandId == LevelControl::Commands::Stop::Id) {
         LevelControl::Commands::Stop::Type cmd;
-        chip::Controller::InvokeGroupCommandRequest(nullptr, b.fabricIndex, b.groupId, cmd);
+        chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     }
 }
 
