@@ -29,6 +29,7 @@ HOWTO: MATTER MULTICAST GROUP & BINDING SETUP (CUSTOM FIRMWARE)
 
 import argparse
 import asyncio
+import base64
 import json
 import sys
 import websockets
@@ -46,6 +47,7 @@ GROUP_KEYSET_ID = 1
 # Default 128-bit epoch key (hex). All nodes in the group MUST share the
 # same key to encrypt/decrypt multicast messages.  Change this if you want
 # your own key; it must be exactly 32 hex characters (16 bytes).
+# IMPORTANT: must match the key in app_main.cpp (kGroupEpochKey).
 DEFAULT_EPOCH_KEY = "d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
 
 class MatterRemoteClient:
@@ -95,6 +97,16 @@ async def run_logic(args):
         # using the IPK directly for group encryption.
         print("[STEP 1] Installing group encryption key (KeySetWrite)...")
 
+        # Convert hex key to base64 (python-matter-server API expects
+        # bytes fields as base64-encoded strings)
+        key_bytes = bytes.fromhex(args.epoch_key)
+        if len(key_bytes) != 16:
+            print(f"[!] ERROR: epoch key must be exactly 16 bytes (32 hex chars)")
+            return
+        epoch_key_b64 = base64.b64encode(key_bytes).decode()
+        print(f"    Key (hex):    {args.epoch_key}")
+        print(f"    Key (base64): {epoch_key_b64}")
+
         all_nodes = list(args.nodes) + [args.switch]
         for node_id in all_nodes:
             label = "Switch" if node_id == args.switch else f"Lamp (Node {node_id})"
@@ -109,7 +121,7 @@ async def run_logic(args):
                         "groupKeySet": {
                             "groupKeySetID": GROUP_KEYSET_ID,
                             "groupKeySecurityPolicy": 0,  # TrustFirst
-                            "epochKey0": args.epoch_key,
+                            "epochKey0": epoch_key_b64,
                             "epochStartTime0": 1,  # 1 microsecond = always valid
                             "epochKey1": None,
                             "epochStartTime1": None,
