@@ -110,23 +110,23 @@ extern "C" void app_main(void)
     // =========================================================================
     // MULTICAST BINDING WORKAROUND
     // =========================================================================
-    ESP_LOGI(TAG, "Configuring local Matter Group Key Mapping...");
-    chip::Credentials::GroupDataProvider *provider = chip::Credentials::GetGroupDataProvider();
-    if (provider != nullptr) {
-        chip::FabricIndex fabricIdx = 1; // Eerste actieve fabric (Home Assistant)
+    //ESP_LOGI(TAG, "Configuring local Matter Group Key Mapping...");
+    //chip::Credentials::GroupDataProvider *provider = chip::Credentials::GetGroupDataProvider();
+    //if (provider != nullptr) {
+    //    chip::FabricIndex fabricIdx = 1; // Eerste actieve fabric (Home Assistant)
         
-        chip::Credentials::GroupDataProvider::GroupKey mapping;
-        mapping.group_id = 0x0001;   // Gecorrigeerd naar snake_case
-        mapping.keyset_id = 0x0001;  // Gecorrigeerd naar snake_case
+    //    chip::Credentials::GroupDataProvider::GroupKey mapping;
+    //    mapping.group_id = 0x0001;   // Gecorrigeerd naar snake_case
+    //    mapping.keyset_id = 0x0001;  // Gecorrigeerd naar snake_case
         
-        if (provider->SetGroupKeyAt(fabricIdx, 0, mapping) == CHIP_NO_ERROR) {
-            ESP_LOGI(TAG, "Group 0x0001 bound to KeySet 0x0001 successfully");
-        } else {
-            ESP_LOGE(TAG, "Failed to inject group key mapping entry");
-        }
-    } else {
-        ESP_LOGE(TAG, "Critical: Group Data Provider instance is null");
-    }
+    //    if (provider->SetGroupKeyAt(fabricIdx, 0, mapping) == CHIP_NO_ERROR) {
+    //        ESP_LOGI(TAG, "Group 0x0001 bound to KeySet 0x0001 successfully");
+    //    } else {
+    //        ESP_LOGE(TAG, "Failed to inject group key mapping entry");
+    //    }
+    //} else {
+    //    ESP_LOGE(TAG, "Critical: Group Data Provider instance is null");
+    //}
     // =========================================================================
     
     button_driver_init(on_button_event);
