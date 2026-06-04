@@ -3,12 +3,15 @@
 Maak een Matter-groep aan voor meerdere lampen via python-matter-server.
 
 De volgorde per node (verplicht door de Matter-spec):
-  1. KeySetWrite  — schrijf een group keyset naar het device
-                    (cluster 0x3F = GroupKeyManagement, endpoint 0)
-  2. GroupKeyMap  — koppel de group-ID aan de keyset
-                    (write_attribute op pad 0/63/3)
-  3. AddGroup     — registreer het endpoint als groepslid
-                    (device_command op cluster 0x04, endpoint 1)
+  1. KeySetWrite  — schrijf een group keyset (cluster 0x3F, endpoint 0)
+  2. GroupKeyMap  — koppel group-ID aan keyset (cluster 0x3F, endpoint 0,
+                    via write_attribute met attribuut-pad "0/63/3")
+  3. AddGroup     — registreer endpoint als groepslid (cluster 0x04, endpoint 1)
+
+Serialisatie-regels python-matter-server (schema 11):
+  - bytes-velden → base64-string in JSON (de server decodeert dit intern)
+  - GroupKeyMap (attribuut 0/63/3) is een lijst van structs; de server
+    verwacht als "value" een lijst van dicts met camelCase sleutels
 
 Gebruik:
     python3 create_matter_group.py --dry-run
@@ -22,6 +25,7 @@ Vereisten:
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -58,10 +62,10 @@ def check_error(resp: dict, context: str) -> bool:
     return False
 
 
-def hex_to_bytes_list(hex_str: str) -> list[int]:
-    """Converteer hex-string naar lijst van integers (bytes).
-    matter-server verwacht epoch keys als lijst van integers, niet als string."""
-    return list(bytes.fromhex(hex_str))
+def hex_to_base64(hex_str: str) -> str:
+    """Converteer hex-string naar base64 — python-matter-server verwacht
+    bytes-velden als base64-string in het JSON-payload."""
+    return base64.b64encode(bytes.fromhex(hex_str)).decode("ascii")
 
 
 # ---------------------------------------------------------------------------
@@ -69,18 +73,15 @@ def hex_to_bytes_list(hex_str: str) -> list[int]:
 # ---------------------------------------------------------------------------
 async def keyset_write(ws, node_id: int, keyset_id: int, epoch_key_hex: str,
                        dry_run: bool) -> bool:
-    # Epoch key als lijst van integers (bytes), niet als hex-string
-    epoch_key_bytes = hex_to_bytes_list(epoch_key_hex)
-
-    # epochStartTime in microseconds since epoch (Matter-vereiste: > 0)
-    # Gebruik huidige tijd in microseconden
+    # python-matter-server (schema 11) deserialiseert base64 → bytes intern
+    epoch_key_b64 = hex_to_base64(epoch_key_hex)
     now_us = int(time.time() * 1_000_000)
 
     payload = {
         "groupKeySet": {
             "groupKeySetID":          keyset_id,
-            "groupKeySecurityPolicy": 0,           # 0 = TrustFirst
-            "epochKey0":              epoch_key_bytes,
+            "groupKeySecurityPolicy": 0,       # 0 = TrustFirst
+            "epochKey0":              epoch_key_b64,
             "epochStartTime0":        now_us,
             "epochKey1":              None,
             "epochStartTime1":        None,
@@ -90,7 +91,8 @@ async def keyset_write(ws, node_id: int, keyset_id: int, epoch_key_hex: str,
     }
 
     if dry_run:
-        print(f"  [dry-run] KeySetWrite keyset_id={keyset_id} epoch_key=[{len(epoch_key_bytes)} bytes]")
+        print(f"  [dry-run] KeySetWrite keyset_id={keyset_id} "
+              f"epochKey0=<base64, {len(epoch_key_hex)//2} bytes>")
         return True
 
     resp = await send_command(
@@ -108,7 +110,6 @@ async def keyset_write(ws, node_id: int, keyset_id: int, epoch_key_hex: str,
 
     if check_error(resp, "KeySetWrite"):
         return False
-
     print(f"  [OK] KeySetWrite geslaagd (keyset_id={keyset_id})")
     return True
 
@@ -118,6 +119,13 @@ async def keyset_write(ws, node_id: int, keyset_id: int, epoch_key_hex: str,
 # ---------------------------------------------------------------------------
 async def write_group_key_map(ws, node_id: int, group_id: int,
                               keyset_id: int, dry_run: bool) -> bool:
+    """
+    Schrijft de GroupKeyMap via write_attribute.
+    Pad: 0/63/3  (endpoint 0, cluster GroupKeyManagement=63, attribuut 3)
+    
+    De server verwacht de value als lijst van dicts. De server-side
+    parse_value functie zet de camelCase dict om naar het juiste CHIP-type.
+    """
     existing = []
     if not dry_run:
         resp = await send_command(
@@ -126,19 +134,20 @@ async def write_group_key_map(ws, node_id: int, group_id: int,
             message_id=f"read-gkm-{node_id}",
         )
         result = resp.get("result")
-        # Normaliseer: kan dict, lijst of integer (leeg/0) zijn
         if isinstance(result, dict):
             val = next(iter(result.values()), None)
             existing = val if isinstance(val, list) else []
         elif isinstance(result, list):
             existing = result
         else:
-            existing = []  # lege map of onverwacht type → begin leeg
+            existing = []
 
-        # Verwijder eventuele bestaande entry voor dezelfde group_id
-        existing = [e for e in existing
-                    if isinstance(e, dict) and
-                    e.get("groupId", e.get("groupID")) != group_id]
+        # Verwijder bestaande entry voor dezelfde group_id (dedup)
+        existing = [
+            e for e in existing
+            if isinstance(e, dict) and
+               e.get("groupId", e.get("groupID")) != group_id
+        ]
 
     new_entry = {"groupId": group_id, "groupKeySetID": keyset_id}
     new_map   = existing + [new_entry]
@@ -159,7 +168,20 @@ async def write_group_key_map(ws, node_id: int, group_id: int,
     )
 
     if check_error(resp, "GroupKeyMap write"):
-        return False
+        # Alternatief proberen: soms werkt een enkele entry zonder lijst-wrapper
+        print(f"  [?] Poging 2: GroupKeyMap als enkelvoudige dict...")
+        resp2 = await send_command(
+            ws,
+            "write_attribute",
+            {
+                "node_id":        node_id,
+                "attribute_path": "0/63/3",
+                "value":          new_entry,
+            },
+            message_id=f"write-gkm2-{node_id}",
+        )
+        if check_error(resp2, "GroupKeyMap write (poging 2)"):
+            return False
 
     print(f"  [OK] GroupKeyMap geschreven (group_id=0x{group_id:04X} → keyset {keyset_id})")
     return True
@@ -202,7 +224,7 @@ async def add_group(ws, node_id: int, group_id: int, group_name: str,
         print(f"  [OK] Node was al lid van de groep (DUPLICATE — normaal)")
         return True
     else:
-        print(f"  [!] AddGroup status={status} (0x{status:02X}). Volledig antwoord: {resp}")
+        print(f"  [!] AddGroup status={status} (0x{status:02X}). Antwoord: {resp}")
         return False
 
 
@@ -237,8 +259,7 @@ async def main() -> int:
     else:
         epoch_key = os.urandom(16).hex()
         print(f"[*] Automatisch gegenereerde epoch key: {epoch_key}")
-        print(f"    Bewaar deze als je de drukknop of andere controllers")
-        print(f"    aan dezelfde groep wilt toevoegen.\n")
+        print(f"    Bewaar deze als je de drukknop aan dezelfde groep wilt toevoegen.\n")
 
     print(f"[*] Verbinding maken met {args.ws} ...")
     try:
@@ -257,6 +278,7 @@ async def main() -> int:
 
         print(f"\n[*] Groep: ID=0x{args.group_id:04X} ({args.group_id}), "
               f"naam='{args.group_name}', keyset_id={args.keyset_id}")
+        print(f"[*] Epoch key (base64): {hex_to_base64(epoch_key)}")
         print(f"[*] Nodes: {args.nodes}")
         if args.dry_run:
             print("[*] DRY-RUN — niets wordt geschreven\n")
