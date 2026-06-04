@@ -22,6 +22,7 @@ extern "C" {
 }
 
 #include "matter_device.h"
+#include <credentials/GroupDataProviderImpl.h>
 
 static const char *TAG = "app";
 
@@ -104,6 +105,13 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(matter_start());
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done, calling button_driver_init");
 
+    // =========================================================================
+    // MULTICAST FIX: Activate Group Key Lookup for outgoing groupbindings
+    // =========================================================================
+    ESP_LOGI(TAG, "Activate Matter Group Key Provider...");
+    chip::Credentials::SetGroupTextLookup(chip::Credentials::GetGroupTextLookup());
+    // =========================================================================
+    
     button_driver_init(on_button_event);
     ESP_LOGI(TAG, "BOOT-STEP: button_driver_init done, calling sensors_init");
 
