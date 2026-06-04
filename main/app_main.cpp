@@ -27,6 +27,7 @@ extern "C" {
 #include <credentials/GroupDataProvider.h>
 #include <lib/core/CHIPError.h>
 #include <lib/core/DataModelTypes.h>
+#include <lib/support/Span.h>
 
 static const char *TAG = "app";
 
@@ -128,7 +129,14 @@ extern "C" void app_main(void)
 
             for (const auto & fabricInfo : chip::Server::GetInstance().GetFabricTable()) {
                 chip::FabricIndex idx = fabricInfo.GetFabricIndex();
-                chip::CompressedFabricId cfid = fabricInfo.GetCompressedFabricId();
+
+                // GetCompressedFabricIdBytes fills a MutableByteSpan
+                uint8_t cfid_buf[sizeof(uint64_t)];
+                chip::MutableByteSpan cfid_span(cfid_buf);
+                if (fabricInfo.GetCompressedFabricIdBytes(cfid_span) != CHIP_NO_ERROR) {
+                    ESP_LOGW(TAG, "GroupKeySet 1: fabric %u cannot get CompressedFabricId", idx);
+                    continue;
+                }
 
                 // Install KeySet 1 with our epoch key
                 GroupDataProvider::KeySet keySet;
@@ -138,7 +146,7 @@ extern "C" void app_main(void)
                 keySet.epoch_keys[0].start_time = 1; // 1 µs = always valid
                 memcpy(keySet.epoch_keys[0].key, kGroupEpochKey, 16);
 
-                CHIP_ERROR err = provider->SetKeySet(idx, cfid, keySet);
+                CHIP_ERROR err = provider->SetKeySet(idx, cfid_span, keySet);
                 if (err == CHIP_NO_ERROR) {
                     ESP_LOGI(TAG, "GroupKeySet 1: fabric %u installed OK", idx);
                 } else {
