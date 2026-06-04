@@ -9,9 +9,9 @@ HOWTO: MATTER MULTICAST GROUP & BINDING SETUP (CUSTOM FIRMWARE)
    pip install websockets
 
 2. USAGE:
-   Run this script from your laptop. It adds lamps to the multicast group,
-   writes the GroupKeyMap on all nodes, and sets the binding table on the
-   switch (Endpoint 1).
+   Run this script from your laptop. It installs a shared group encryption
+   key on all nodes, adds lamps to the multicast group, writes the
+   GroupKeyMap, and sets the binding table on the switch (Endpoint 1).
 
    python3 tools/create_matter_group.py --nodes 32 33 34 35 --switch 29 --group-id 0x0001
 
@@ -38,6 +38,15 @@ DEFAULT_GROUP_NAME = "Kantoor"
 
 SERVER_IP   = "192.168.178.2"
 SERVER_PORT = 5580
+
+# KeySet ID used for group encryption. We use 1 (not 0/IPK) because some
+# SDK versions cannot use the IPK directly for group messaging.
+GROUP_KEYSET_ID = 1
+
+# Default 128-bit epoch key (hex). All nodes in the group MUST share the
+# same key to encrypt/decrypt multicast messages.  Change this if you want
+# your own key; it must be exactly 32 hex characters (16 bytes).
+DEFAULT_EPOCH_KEY = "d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
 
 class MatterRemoteClient:
     def __init__(self, ip, port):
@@ -78,9 +87,46 @@ async def run_logic(args):
 
     try:
         # =======================================================================
-        # STEP 1: ADD LAMPS TO THE MULTICAST GROUP
+        # STEP 1: INSTALL GROUP ENCRYPTION KEY ON ALL NODES (KeySetWrite)
         # =======================================================================
-        print("[STEP 1] Adding lamps to multicast group...")
+        # Matter group multicast messages are encrypted with a shared key.
+        # All nodes (sender + receivers) must have the same KeySet installed.
+        # We use KeySet ID 1 (not 0/IPK) because some SDK versions have issues
+        # using the IPK directly for group encryption.
+        print("[STEP 1] Installing group encryption key (KeySetWrite)...")
+
+        all_nodes = list(args.nodes) + [args.switch]
+        for node_id in all_nodes:
+            label = "Switch" if node_id == args.switch else f"Lamp (Node {node_id})"
+            print(f"  --> KeySetWrite on {label}...")
+            try:
+                await client.send_command("device_command", {
+                    "node_id": node_id,
+                    "endpoint_id": 0,
+                    "cluster_id": 63,  # GroupKeyManagement
+                    "command_name": "KeySetWrite",
+                    "payload": {
+                        "groupKeySet": {
+                            "groupKeySetID": GROUP_KEYSET_ID,
+                            "groupKeySecurityPolicy": 0,  # TrustFirst
+                            "epochKey0": args.epoch_key,
+                            "epochStartTime0": 1,  # 1 microsecond = always valid
+                            "epochKey1": None,
+                            "epochStartTime1": None,
+                            "epochKey2": None,
+                            "epochStartTime2": None,
+                        }
+                    }
+                })
+                print(f"    [OK] KeySet {GROUP_KEYSET_ID} installed")
+            except Exception as e:
+                print(f"    [!] KeySetWrite failed: {e}")
+
+        # =======================================================================
+        # STEP 2: ADD LAMPS TO THE MULTICAST GROUP
+        # =======================================================================
+        print("\n" + "-"*50)
+        print("[STEP 2] Adding lamps to multicast group...")
         for node_id in args.nodes:
             print(f"  --> Configure Lamp (Node {node_id})...")
             try:
@@ -94,27 +140,23 @@ async def run_logic(args):
                 print(f"    [!] AddGroup failed: {e}")
 
         # =======================================================================
-        # STEP 2: WRITE GROUPKEYMAP ON LAMPS AND SWITCH
+        # STEP 3: WRITE GROUPKEYMAP ON ALL NODES
         # =======================================================================
-        # Every device that needs to receive or send group multicast messages
-        # requires a GroupKeyMap entry linking the group ID to a key set.
-        # KeySet 0 = the IPK (Identity Protection Key) installed by the
-        # controller during commissioning — present on all nodes in the fabric.
+        # Maps the group ID to our KeySet so the SDK can find the encryption key.
         print("\n" + "-"*50)
-        print("[STEP 2] Writing GroupKeyMap (group -> IPK keyset)...")
+        print(f"[STEP 3] Writing GroupKeyMap (group -> keyset {GROUP_KEYSET_ID})...")
 
         # GroupKeyMap: endpoint 0, cluster 63 (GroupKeyManagement), attribute 0
         group_key_entry = {
             "groupId": args.group_id,
-            "groupKeySetID": 0,  # IPK keyset
+            "groupKeySetID": GROUP_KEYSET_ID,
         }
 
-        all_nodes = list(args.nodes) + [args.switch]
         for node_id in all_nodes:
             label = "Switch" if node_id == args.switch else f"Lamp (Node {node_id})"
             print(f"  --> GroupKeyMap on {label}...")
             try:
-                result = await client.send_command("write_attribute", {
+                await client.send_command("write_attribute", {
                     "node_id": node_id,
                     "attribute_path": "0/63/0",
                     "value": [group_key_entry]
@@ -124,17 +166,11 @@ async def run_logic(args):
                 print(f"    [!] GroupKeyMap failed: {e}")
 
         # =======================================================================
-        # STEP 3: WRITE BINDING ON THE SWITCH
+        # STEP 4: WRITE BINDING ON THE SWITCH
         # =======================================================================
         print("\n" + "-"*50)
-        print("[STEP 3] Writing binding table to the Switch...")
+        print("[STEP 4] Writing binding table to the Switch...")
 
-        # TargetStruct field names per CHIP Python SDK:
-        #   node     = target node ID (for unicast)
-        #   group    = target group ID (for multicast)
-        #   endpoint = target endpoint (for unicast)
-        #   cluster  = target cluster ID
-        #   fabricIndex = auto-filled by the server
         binding_entry = {
             "group": args.group_id,
             "cluster": 6,           # OnOff cluster
@@ -151,7 +187,6 @@ async def run_logic(args):
             print(f"    Result: {result}")
         except Exception as e:
             print(f"    [!] set_node_binding failed ({e}), trying write_attribute...")
-            # Fallback: write_attribute with correct field names
             try:
                 result = await client.send_command("write_attribute", {
                     "node_id": args.switch,
@@ -164,10 +199,10 @@ async def run_logic(args):
                 print(f"    [!] write_attribute also failed: {e2}")
 
         # =======================================================================
-        # STEP 4: VERIFICATION - READ BINDING BACK
+        # STEP 5: VERIFICATION - READ BINDING BACK
         # =======================================================================
         print("\n" + "-"*50)
-        print("[STEP 4] Verification - reading binding back...")
+        print("[STEP 5] Verification - reading binding back...")
         try:
             result = await client.send_command("read_attribute", {
                 "node_id": args.switch,
@@ -183,8 +218,8 @@ async def run_logic(args):
         print("\nTest the switch now — press the button briefly and check")
         print("whether all lamps in the group toggle simultaneously.")
         print("\nIf it does not work:")
-        print("  1. Check the Shelly log for 'SwitchWorker' lines")
-        print("  2. Verify that 'total' > 0 (binding found)")
+        print("  1. Check the Shelly log for 'send_onoff_multicast' lines")
+        print("  2. Look for OK (sent) vs FAILED (SDK error)")
         print("  3. Do NOT restart the Shelly — bindings should work immediately")
 
     except Exception as general_error:
@@ -209,4 +244,6 @@ if __name__ == "__main__":
                     help=f"IP of the HA Matter Server (default: {SERVER_IP})")
     ap.add_argument("--server-port", type=int, default=SERVER_PORT,
                     help=f"Port of the HA Matter Server (default: {SERVER_PORT})")
+    ap.add_argument("--epoch-key", default=DEFAULT_EPOCH_KEY,
+                    help="128-bit hex key for group encryption (32 hex chars)")
     asyncio.run(run_logic(ap.parse_args()))
