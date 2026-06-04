@@ -107,16 +107,16 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done, calling button_driver_init");
 
     // =========================================================================
-    // MULTICAST FIX: Initialiseer de standaard Group Data Provider
+    // MULTICAST FIX: Initialize the standard Group Data Provider
     // =========================================================================
-    ESP_LOGI(TAG, "Initialise Matter Group Data Provider...");
+    ESP_LOGI(TAG, "Initializing Matter Group Data Provider...");
     chip::Credentials::GroupDataProvider * provider = chip::Credentials::GetGroupDataProvider();
     if (provider != nullptr) {
-        // Provide the Interaction Model Engine listning to provider
+        // Ensure the Interaction Model Engine uses this provider for group communication
         chip::app::InteractionModelEngine::GetInstance()->SetGroupDataProvider(provider);
-        ESP_LOGI(TAG, "Group Data Provider successfully joined to IM Engine!");
+        ESP_LOGI(TAG, "Group Data Provider successfully linked to IM Engine");
     } else {
-        ESP_LOGE(TAG, "ERROR: Can't get Group Data Provider!");
+        ESP_LOGE(TAG, "ERROR: Failed to retrieve Group Data Provider");
     }
     // =========================================================================
     
