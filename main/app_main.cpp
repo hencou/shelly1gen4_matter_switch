@@ -22,6 +22,9 @@ extern "C" {
 }
 
 #include "matter_device.h"
+#include <credentials/GroupDataProvider.h>
+#include <lib/core/CHIPError.h>
+#include <lib/core/DataModelTypes.h>
 
 static const char *TAG = "app";
 
@@ -105,18 +108,17 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done, calling button_driver_init");
 
     // =========================================================================
-    // MULTICAST BINDING WORKAROUND: Explicit structure mapping
+    // MULTICAST BINDING WORKAROUND
     // =========================================================================
     ESP_LOGI(TAG, "Configuring local Matter Group Key Mapping...");
     chip::Credentials::GroupDataProvider *provider = chip::Credentials::GetGroupDataProvider();
     if (provider != nullptr) {
-        chip::FabricIndex fabricIdx = 1; // Primary active commissioning fabric
+        chip::FabricIndex fabricIdx = 1; // Eerste actieve fabric (Home Assistant)
         
         chip::Credentials::GroupDataProvider::GroupKey mapping;
-        mapping.groupId = 0x0001;   // Verified member name (no 'm' prefix)
-        mapping.keysetId = 0x0001;  // Verified member name (no 'm' prefix)
+        mapping.groupId = 0x0001;
+        mapping.keysetId = 0x0001;
         
-        // Zero-index write to inject the mapping straight into the provider runtime
         if (provider->SetGroupKeyAt(fabricIdx, 0, mapping) == CHIP_NO_ERROR) {
             ESP_LOGI(TAG, "Group 0x0001 bound to KeySet 0x0001 successfully");
         } else {
