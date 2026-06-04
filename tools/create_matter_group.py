@@ -1,4 +1,31 @@
 #!/usr/bin/env python3
+"""
+=============================================================================
+HOWTO: ALLES-IN-ÉÉN MATTER MULTICAST & BINDING SETUP (CUSTOM FIRMWARE)
+=============================================================================
+
+1. VOORBEREIDING:
+   Installeer 'websockets' op je externe machine als dat nog niet is gebeurd:
+   pip install websockets
+
+2. UITVOERING:
+   Run het script vanaf je laptop en geef zowel de lampen (--nodes) als de 
+   schakelaar (--switch) mee. De multicast-groep wordt automatisch aangemaakt
+   en de switch krijgt direct de juiste groeps- en ACL-rechten op Endpoint 2.
+   
+   python3 tools/create_matter_group.py --nodes 32 33 34 35 --switch 29 --group-id 0x0001
+
+3. PARAMETERS:
+   --nodes            Lijst met Node ID's van de doellampen (bijv. 32 33 34 35)
+   --switch           Node ID van de Shelly schakelaar (bijv. 29)
+   --group-id         De multicast Group ID (Standaard: 0x0001)
+   --switch-endpoint  Het endpoint van de knop op de switch (Standaard: 2 voor custom firmware)
+   --group-name       Naam van de groep (Standaard: "Kantoor")
+   --keyset-id        Interne sleutelset ID (Standaard: 42)
+
+=============================================================================
+"""
+
 import argparse
 import asyncio
 import json
@@ -7,7 +34,6 @@ import sys
 import time
 import websockets
 
-# Hier stonden de missende variabelen:
 DEFAULT_GROUP_ID   = 0x0001
 DEFAULT_GROUP_NAME = "Kantoor"
 DEFAULT_KEYSET_ID  = 42
@@ -52,7 +78,7 @@ async def run_logic(args):
     await client.connect()
 
     print(f"\n" + "="*60)
-    print(f"[*] START MULTICAST CONFIGURATIE")
+    print(f"[*] START MULTICAST CONFIGURATIE (CUSTOM FIRMWARE MODE)")
     print(f"[*] Groep ID:   0x{args.group_id:04X} ({args.group_name})")
     print(f"[*] Keyset ID:  {args.keyset_id}")
     print(f"[*] Epoch Key:  {epoch_key}")
@@ -69,7 +95,6 @@ async def run_logic(args):
         for node_id in args.nodes:
             print(f"\n  --> Configureer Lamp (Node {node_id})...")
             
-            # Stap 1.1: KeySetWrite naar lamp
             try:
                 await client.send_command("device_command", {
                     "node_id": node_id, "endpoint_id": 0, "cluster_id": 63,
@@ -87,7 +112,6 @@ async def run_logic(args):
             except Exception as e:
                 print(f"    [!] Fout bij KeySetWrite: {e}")
 
-            # Stap 1.2: GroupKeyMap naar lamp
             try:
                 await client.send_command("write_attribute", {
                     "node_id": node_id, "attribute_path": "0/63/0",
@@ -97,7 +121,6 @@ async def run_logic(args):
             except Exception as e:
                 print(f"    [!] Fout bij GroupKeyMap: {e}")
 
-            # Stap 1.3: AddGroup naar lamp
             try:
                 await client.send_command("device_command", {
                     "node_id": node_id, "endpoint_id": 1, "cluster_id": 4,
@@ -126,6 +149,7 @@ async def run_logic(args):
         print("[DEEL 2] Schakelaar (Switch) koppelen aan de groep...")
         print(f"  --> Configureer Schakelaar (Node {args.switch})...")
 
+        # 2.1 KeySetWrite naar de switch
         try:
             await client.send_command("device_command", {
                 "node_id": args.switch, "endpoint_id": 0, "cluster_id": 63,
@@ -143,6 +167,7 @@ async def run_logic(args):
         except Exception as e:
             print(f"    [!] Fout bij KeySetWrite op switch: {e}")
 
+        # 2.2 Binding tabel wegschrijven
         try:
             binding_entry = {
                 "groupId": args.group_id,
@@ -157,6 +182,41 @@ async def run_logic(args):
             print(f"    [OK] Binding succesvol weggeschreven op endpoint {args.switch_endpoint}!")
         except Exception as e:
             print(f"    [!] Fout bij schrijven binding tabel: {e}")
+
+        # 2.3 ACL Rechten aanpassen (Veilige verwerking van dict/list returns)
+        try:
+            print("    [*] ACL-rechten ophalen en bijwerken...")
+            response_data = await client.send_command("read_attribute", {
+                "node_id": args.switch,
+                "attribute_path": "0/31/0"
+            })
+            
+            if isinstance(response_data, dict):
+                acl_list = response_data.get("value", response_data.get("acl", []))
+            elif isinstance(response_data, list):
+                acl_list = response_data
+            else:
+                acl_list = []
+
+            # Maak de nieuwe regel aan voor de multicast groep
+            group_acl_entry = {
+                "privilege": 3, # Manage privileges
+                "authMode": 3,  # Group auth mode
+                "subjects": [args.group_id],
+                "targets": None,
+                "fabricIndex": 1
+            }
+            
+            acl_list.append(group_acl_entry)
+            
+            await client.send_command("write_attribute", {
+                "node_id": args.switch,
+                "attribute_path": "0/31/0",
+                "value": acl_list
+            })
+            print("    [OK] ACL rechten succesvol geüpdatet (Groepsautorisatie toegevoegd).")
+        except Exception as e:
+            print(f"    [!] Fout bij configureren ACL rechten: {e}")
 
         print("\n" + "="*60)
         print("[*] ALLES SUCCESVOL UITGEVOERD!")
@@ -173,6 +233,6 @@ if __name__ == "__main__":
     ap.add_argument("--switch", type=int, required=True)
     ap.add_argument("--group-id", type=lambda x: int(x, 0), default=DEFAULT_GROUP_ID)
     ap.add_argument("--group-name", default=DEFAULT_GROUP_NAME)
-    ap.add_argument("--switch-endpoint", type=int, default=1)
+    ap.add_argument("--switch-endpoint", type=int, default=2)
     ap.add_argument("--keyset-id", type=int, default=DEFAULT_KEYSET_ID)
     asyncio.run(run_logic(ap.parse_args()))
