@@ -22,7 +22,6 @@ extern "C" {
 }
 
 #include "matter_device.h"
-#include <app/InteractionModelEngine.h>
 #include <credentials/GroupDataProviderImpl.h>
 
 static const char *TAG = "app";
@@ -106,17 +105,27 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(matter_start());
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done, calling button_driver_init");
 
+// =========================================================================
+    // MULTICAST FIX: Bind GroupId 0x0001 to the default KeySetId
     // =========================================================================
-    // MULTICAST FIX: Initialize the standard Group Data Provider
-    // =========================================================================
-    ESP_LOGI(TAG, "Initializing Matter Group Data Provider...");
-    chip::Credentials::GroupDataProvider * provider = chip::Credentials::GetGroupDataProvider();
+    ESP_LOGI(TAG, "Configuring local Matter Group Key Mapping...");
+    chip::Credentials::GroupDataProvider *provider = chip::Credentials::GetGroupDataProvider();
     if (provider != nullptr) {
-        // Ensure the Interaction Model Engine uses this provider for group communication
-        chip::app::InteractionModelEngine::GetInstance()->SetGroupDataProvider(provider);
-        ESP_LOGI(TAG, "Group Data Provider successfully linked to IM Engine");
+        // Fabric index 1 is the default primary fabric (Home Assistant)
+        chip::FabricIndex fabricIdx = 1; 
+        
+        // Map Group 0x0001 to KeySet 0x0001 (default epoch keyset)
+        chip::Credentials::GroupDataProvider::GroupKey mapping;
+        mapping.mGroupId = 0x0001;
+        mapping.mKeySetId = 0x0001;
+        
+        if (provider->SetGroupKeyAt(fabricIdx, 0, mapping) == CHIP_NO_ERROR) {
+            ESP_LOGI(TAG, "Group 0x0001 successfully mapped to KeySet 0x0001");
+        } else {
+            ESP_LOGE(TAG, "FAILED to write group key mapping to provider");
+        }
     } else {
-        ESP_LOGE(TAG, "ERROR: Failed to retrieve Group Data Provider");
+        ESP_LOGE(TAG, "ERROR: Group Data Provider is null");
     }
     // =========================================================================
     
