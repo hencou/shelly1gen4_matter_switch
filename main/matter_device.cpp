@@ -126,30 +126,46 @@ static auto make_on_error() {
 static void send_onoff_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
 {
     auto *em = &chip::Server::GetInstance().GetExchangeManager();
+    CHIP_ERROR err = CHIP_NO_ERROR;
     if (d.commandId == OnOff::Commands::Toggle::Id) {
         OnOff::Commands::Toggle::Type cmd;
-        chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+        err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     } else if (d.commandId == OnOff::Commands::On::Id) {
         OnOff::Commands::On::Type cmd;
-        chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+        err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     } else if (d.commandId == OnOff::Commands::Off::Id) {
         OnOff::Commands::Off::Type cmd;
-        chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+        err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+    }
+    if (err != CHIP_NO_ERROR) {
+        ESP_LOGE(TAG, "send_onoff_multicast FAILED: fabric=%u group=0x%04X cmd=0x%lx err=%" CHIP_ERROR_FORMAT,
+                 b.fabricIndex, b.groupId, (unsigned long)d.commandId, err.Format());
+    } else {
+        ESP_LOGI(TAG, "send_onoff_multicast OK: fabric=%u group=0x%04X cmd=0x%lx",
+                 b.fabricIndex, b.groupId, (unsigned long)d.commandId);
     }
 }
 
 static void send_level_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
 {
     auto *em = &chip::Server::GetInstance().GetExchangeManager();
+    CHIP_ERROR err = CHIP_NO_ERROR;
     if (d.commandId == LevelControl::Commands::Move::Id) {
         LevelControl::Commands::Move::Type cmd;
         cmd.moveMode = (d.moveMode == 0) ? LevelControl::MoveModeEnum::kUp
                                          : LevelControl::MoveModeEnum::kDown;
         cmd.rate.SetNonNull(d.rate);
-        chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+        err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     } else if (d.commandId == LevelControl::Commands::Stop::Id) {
         LevelControl::Commands::Stop::Type cmd;
-        chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+        err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+    }
+    if (err != CHIP_NO_ERROR) {
+        ESP_LOGE(TAG, "send_level_multicast FAILED: fabric=%u group=0x%04X err=%" CHIP_ERROR_FORMAT,
+                 b.fabricIndex, b.groupId, err.Format());
+    } else {
+        ESP_LOGI(TAG, "send_level_multicast OK: fabric=%u group=0x%04X",
+                 b.fabricIndex, b.groupId);
     }
 }
 
