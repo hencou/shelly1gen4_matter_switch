@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 =============================================================================
-HOWTO: GESTROOMLIJNDE MATTER MULTICAST & BINDING SETUP (CUSTOM FIRMWARE)
+HOWTO: MATTER MULTICAST GROUP & BINDING SETUP (CUSTOM FIRMWARE)
 =============================================================================
 
 1. VOORBEREIDING:
@@ -10,7 +10,7 @@ HOWTO: GESTROOMLIJNDE MATTER MULTICAST & BINDING SETUP (CUSTOM FIRMWARE)
 
 2. UITVOERING:
    Run het script vanaf je laptop. Dit script voegt de lampen toe aan de
-   multicast-groep en schrijft de binding-tabel naar de switch op Endpoint 2.
+   multicast-groep en schrijft de binding-tabel naar de switch op Endpoint 1.
    
    python3 tools/create_matter_group.py --nodes 32 33 34 35 --switch 29 --group-id 0x0001
 
@@ -18,8 +18,10 @@ HOWTO: GESTROOMLIJNDE MATTER MULTICAST & BINDING SETUP (CUSTOM FIRMWARE)
    --nodes            Lijst met Node ID's van de doellampen (bijv. 32 33 34 35)
    --switch           Node ID van de Shelly schakelaar (bijv. 29)
    --group-id         De multicast Group ID (Standaard: 0x0001)
-   --switch-endpoint  Het endpoint van de knop op de switch (Standaard: 2 voor custom firmware)
+   --switch-endpoint  Het endpoint van de knop op de switch (Standaard: 1)
    --group-name       Naam van de groep (Standaard: "Kantoor")
+   --server-ip        IP adres van de HA Matter Server (Standaard: 192.168.178.2)
+   --server-port      Poort van de HA Matter Server (Standaard: 5580)
 
 =============================================================================
 """
@@ -55,18 +57,19 @@ class MatterRemoteClient:
         async for message in self.ws:
             response = json.loads(message)
             if response.get("message_id") == msg_id:
-                if "error" in response: raise Exception(response["error"])
+                if "error_code" in response and response["error_code"] != 0:
+                    raise Exception(f"{response.get('details', response)}")
                 return response.get("result")
 
     async def close(self):
         if self.ws: await self.ws.close()
 
 async def run_logic(args):
-    client = MatterRemoteClient(SERVER_IP, SERVER_PORT)
+    client = MatterRemoteClient(args.server_ip, args.server_port)
     await client.connect()
 
     print(f"\n" + "="*60)
-    print(f"[*] START GESTROOMLIJNDE MULTICAST CONFIGURATIE")
+    print(f"[*] START MATTER MULTICAST CONFIGURATIE")
     print(f"[*] Groep ID:   0x{args.group_id:04X} ({args.group_name})")
     print(f"[*] Doellampen: {args.nodes}")
     print(f"[*] Schakelaar: Node {args.switch} (Endpoint {args.switch_endpoint})")
@@ -85,53 +88,94 @@ async def run_logic(args):
                     "command_name": "AddGroup",
                     "payload": {"groupId": args.group_id, "groupName": args.group_name}
                 })
-                print(f"    [OK] AddGroup succesvol afgerond")
+                print(f"    [OK] AddGroup succesvol")
             except Exception as e:
-                print(f"    [!] AddGroup variant A mislukt, probeer variant B: {e}")
-                try:
-                    await client.send_command("device_command", {
-                        "node_id": node_id, "endpoint_id": 1, "cluster_id": 4,
-                        "command_name": "AddGroup",
-                        "payload": {"groupID": args.group_id, "groupName": args.group_name}
-                    })
-                    print(f"    [OK] AddGroup succesvol afgerond (Variant B)")
-                except Exception as e2:
-                    print(f"    [!] Fout bij toevoegen aan groep: {e2}")
+                print(f"    [!] AddGroup mislukt: {e}")
 
         # =======================================================================
         # DEEL 2: DE BINDING OP DE SWITCH ZETTEN
         # =======================================================================
         print("\n" + "-"*50)
         print("[DEEL 2] Binding tabel wegschrijven naar de Switch...")
+
+        # TargetStruct veldnamen conform CHIP Python SDK:
+        #   node     = target node ID (voor unicast)
+        #   group    = target group ID (voor multicast)
+        #   endpoint = target endpoint (voor unicast)
+        #   cluster  = target cluster ID
+        #   fabricIndex = wordt automatisch ingevuld door de server
+        binding_entry = {
+            "group": args.group_id,
+            "cluster": 6,           # OnOff cluster
+        }
+
+        # Probeer eerst set_node_binding (purpose-built API)
         try:
-            binding_entry = {
-                "groupId": args.group_id,
-                "clusterId": 6,
-                "fabricIndex": 1
-            }
-            await client.send_command("write_attribute", {
+            result = await client.send_command("set_node_binding", {
                 "node_id": args.switch,
-                "attribute_path": f"{args.switch_endpoint}/30/0",
-                "value": [binding_entry]
+                "endpoint": args.switch_endpoint,
+                "bindings": [binding_entry]
             })
-            print(f"    [OK] Binding succesvol weggeschreven op endpoint {args.switch_endpoint}!")
+            print(f"    [OK] Binding weggeschreven via set_node_binding!")
+            print(f"    Resultaat: {result}")
         except Exception as e:
-            print(f"    [!] Fout bij schrijven binding tabel: {e}")
+            print(f"    [!] set_node_binding mislukt ({e}), probeer write_attribute...")
+            # Fallback: write_attribute met correcte veldnamen
+            try:
+                result = await client.send_command("write_attribute", {
+                    "node_id": args.switch,
+                    "attribute_path": f"{args.switch_endpoint}/30/0",
+                    "value": [binding_entry]
+                })
+                print(f"    [OK] Binding weggeschreven via write_attribute!")
+                print(f"    Resultaat: {result}")
+            except Exception as e2:
+                print(f"    [!] write_attribute ook mislukt: {e2}")
+
+        # =======================================================================
+        # DEEL 3: VERIFICATIE - LEES BINDING TERUG
+        # =======================================================================
+        print("\n" + "-"*50)
+        print("[DEEL 3] Verificatie - binding teruglezen...")
+        try:
+            result = await client.send_command("read_attribute", {
+                "node_id": args.switch,
+                "attribute_path": f"{args.switch_endpoint}/30/0"
+            })
+            print(f"    Huidige binding tabel: {json.dumps(result, indent=2)}")
+        except Exception as e:
+            print(f"    [!] Kon binding niet teruglezen: {e}")
 
         print("\n" + "="*60)
         print("[*] SCRIPT VOLTOOID!")
         print("="*60)
+        print("\nTest nu de schakelaar — druk kort op de knop en controleer")
+        print("of alle lampen in de groep tegelijk schakelen.")
+        print("\nAls het niet werkt:")
+        print("  1. Controleer de Shelly log op 'SwitchWorker' regels")
+        print("  2. Controleer of 'total' > 0 (binding gevonden)")
+        print("  3. Herstart de Shelly NIET — bindings moeten direct werken")
 
     except Exception as general_error:
-        print(f"\n[!] Algemene fout tijdens het proces: {general_error}")
+        print(f"\n[!] Algemene fout: {general_error}")
     finally:
         await client.close()
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--nodes", type=int, nargs="+", required=True)
-    ap.add_argument("--switch", type=int, required=True)
-    ap.add_argument("--group-id", type=lambda x: int(x, 0), default=DEFAULT_GROUP_ID)
-    ap.add_argument("--group-name", default=DEFAULT_GROUP_NAME)
-    ap.add_argument("--switch-endpoint", type=int, default=2)
+    ap = argparse.ArgumentParser(
+        description="Configureer Matter multicast groep + binding voor Shelly switch")
+    ap.add_argument("--nodes", type=int, nargs="+", required=True,
+                    help="Node ID's van de doellampen")
+    ap.add_argument("--switch", type=int, required=True,
+                    help="Node ID van de Shelly schakelaar")
+    ap.add_argument("--group-id", type=lambda x: int(x, 0), default=DEFAULT_GROUP_ID,
+                    help="Multicast Group ID (standaard: 0x0001)")
+    ap.add_argument("--group-name", default=DEFAULT_GROUP_NAME,
+                    help="Naam van de groep (standaard: Kantoor)")
+    ap.add_argument("--switch-endpoint", type=int, default=1,
+                    help="Endpoint op de switch (standaard: 1 = pushbutton/toggle)")
+    ap.add_argument("--server-ip", default=SERVER_IP,
+                    help=f"IP van de HA Matter Server (standaard: {SERVER_IP})")
+    ap.add_argument("--server-port", type=int, default=SERVER_PORT,
+                    help=f"Poort van de HA Matter Server (standaard: {SERVER_PORT})")
     asyncio.run(run_logic(ap.parse_args()))

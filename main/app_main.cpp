@@ -22,6 +22,7 @@ extern "C" {
 }
 
 #include "matter_device.h"
+#include <app/server/Server.h>
 #include <credentials/GroupDataProvider.h>
 #include <lib/core/CHIPError.h>
 #include <lib/core/DataModelTypes.h>
@@ -108,25 +109,31 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done, calling button_driver_init");
 
     // =========================================================================
-    // MULTICAST BINDING WORKAROUND
+    // MULTICAST GROUP KEY MAPPING
     // =========================================================================
-    //ESP_LOGI(TAG, "Configuring local Matter Group Key Mapping...");
-    //chip::Credentials::GroupDataProvider *provider = chip::Credentials::GetGroupDataProvider();
-    //if (provider != nullptr) {
-    //    chip::FabricIndex fabricIdx = 1; // Eerste actieve fabric (Home Assistant)
-        
-    //    chip::Credentials::GroupDataProvider::GroupKey mapping;
-    //    mapping.group_id = 0x0001;   // Gecorrigeerd naar snake_case
-    //    mapping.keyset_id = 0x0001;  // Gecorrigeerd naar snake_case
-        
-    //    if (provider->SetGroupKeyAt(fabricIdx, 0, mapping) == CHIP_NO_ERROR) {
-    //        ESP_LOGI(TAG, "Group 0x0001 bound to KeySet 0x0001 successfully");
-    //    } else {
-    //        ESP_LOGE(TAG, "Failed to inject group key mapping entry");
-    //    }
-    //} else {
-    //    ESP_LOGE(TAG, "Critical: Group Data Provider instance is null");
-    //}
+    // Matter multicast requires a GroupKeyMap entry linking the group ID to a
+    // key set.  The controller (HA) installs the IPK as KeySet 0 during
+    // commissioning.  We map group 0x0001 → KeySet 0 on every active fabric
+    // so that InvokeGroupCommandRequest can encrypt the multicast message.
+    {
+        using namespace chip::Credentials;
+        GroupDataProvider *provider = GetGroupDataProvider();
+        if (provider != nullptr) {
+            for (const auto & fabricInfo : chip::Server::GetInstance().GetFabricTable()) {
+                chip::FabricIndex idx = fabricInfo.GetFabricIndex();
+                GroupDataProvider::GroupKey mapping;
+                mapping.group_id  = 0x0001;
+                mapping.keyset_id = 0;   // IPK key set installed by controller
+                if (provider->SetGroupKeyAt(idx, 0, mapping) == CHIP_NO_ERROR) {
+                    ESP_LOGI(TAG, "GroupKeyMap: fabric %u -> group 0x0001 keyset 0", idx);
+                } else {
+                    ESP_LOGW(TAG, "GroupKeyMap: failed for fabric %u", idx);
+                }
+            }
+        } else {
+            ESP_LOGE(TAG, "GroupKeyMap: GroupDataProvider is null");
+        }
+    }
     // =========================================================================
     
     button_driver_init(on_button_event);
