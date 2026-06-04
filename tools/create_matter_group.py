@@ -93,10 +93,40 @@ async def run_logic(args):
                 print(f"    [!] AddGroup mislukt: {e}")
 
         # =======================================================================
-        # DEEL 2: DE BINDING OP DE SWITCH ZETTEN
+        # DEEL 2: GROUPKEYMAP SCHRIJVEN OP LAMPEN EN SWITCH
+        # =======================================================================
+        # Elk apparaat dat groep-multicast moet ontvangen of versturen, heeft
+        # een GroupKeyMap entry nodig die de group ID koppelt aan een key set.
+        # KeySet 0 = de IPK (Identity Protection Key) die de controller
+        # installeert bij commissioning — aanwezig op alle nodes in de fabric.
+        print("\n" + "-"*50)
+        print("[DEEL 2] GroupKeyMap schrijven (group → IPK keyset)...")
+
+        # GroupKeyMap: endpoint 0, cluster 63 (GroupKeyManagement), attribute 0
+        group_key_entry = {
+            "groupId": args.group_id,
+            "groupKeySetID": 0,  # IPK keyset
+        }
+
+        all_nodes = list(args.nodes) + [args.switch]
+        for node_id in all_nodes:
+            label = "Switch" if node_id == args.switch else f"Lamp (Node {node_id})"
+            print(f"  --> GroupKeyMap op {label}...")
+            try:
+                result = await client.send_command("write_attribute", {
+                    "node_id": node_id,
+                    "attribute_path": "0/63/0",
+                    "value": [group_key_entry]
+                })
+                print(f"    [OK] GroupKeyMap geschreven")
+            except Exception as e:
+                print(f"    [!] GroupKeyMap mislukt: {e}")
+
+        # =======================================================================
+        # DEEL 3: DE BINDING OP DE SWITCH ZETTEN
         # =======================================================================
         print("\n" + "-"*50)
-        print("[DEEL 2] Binding tabel wegschrijven naar de Switch...")
+        print("[DEEL 3] Binding tabel wegschrijven naar de Switch...")
 
         # TargetStruct veldnamen conform CHIP Python SDK:
         #   node     = target node ID (voor unicast)
@@ -133,10 +163,10 @@ async def run_logic(args):
                 print(f"    [!] write_attribute ook mislukt: {e2}")
 
         # =======================================================================
-        # DEEL 3: VERIFICATIE - LEES BINDING TERUG
+        # DEEL 4: VERIFICATIE - LEES BINDING TERUG
         # =======================================================================
         print("\n" + "-"*50)
-        print("[DEEL 3] Verificatie - binding teruglezen...")
+        print("[DEEL 4] Verificatie - binding teruglezen...")
         try:
             result = await client.send_command("read_attribute", {
                 "node_id": args.switch,
