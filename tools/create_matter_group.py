@@ -3,24 +3,18 @@
 Maak een Matter-groep aan voor meerdere lampen via python-matter-server.
 
 De volgorde per node (verplicht door de Matter-spec):
-  1. KeySetWrite  — schrijf een nieuwe group keyset naar het device
+  1. KeySetWrite  — schrijf een group keyset naar het device
                     (cluster 0x3F = GroupKeyManagement, endpoint 0)
   2. GroupKeyMap  — koppel de group-ID aan de keyset
                     (write_attribute op pad 0/63/3)
-  3. AddGroup     — registreer het endpoint als lid van de groep
+  3. AddGroup     — registreer het endpoint als groepslid
                     (device_command op cluster 0x04, endpoint 1)
-
-De epoch key (16 bytes) genereer je zelf; hij hoeft niet van HA te komen.
-Sla de gegenereerde key op als je later ook de drukknop of andere
-controllers in dezelfde groep wilt zetten — zij hebben dezelfde key nodig.
-
-Getest met: schema=11, sdk=2025.7.0
 
 Gebruik:
     python3 create_matter_group.py --dry-run
     python3 create_matter_group.py
     python3 create_matter_group.py --group-id 0x0001 --group-name "Kantoor"
-    python3 create_matter_group.py --keyset-id 42 --epoch-key <32 hex chars>
+    python3 create_matter_group.py --epoch-key fa34333653f7dd864bc05e49a71923a8
 
 Vereisten:
     pip install websockets
@@ -31,6 +25,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 
 try:
     import websockets
@@ -40,11 +35,10 @@ except ImportError:
 DEFAULT_NODES      = [32, 33, 34, 35]
 DEFAULT_GROUP_ID   = 0x0001
 DEFAULT_GROUP_NAME = "Kantoor"
-DEFAULT_KEYSET_ID  = 42        # willekeurig getal 1-65535, niet 0
+DEFAULT_KEYSET_ID  = 42
 
-# Cluster IDs
-CLUSTER_GROUP_KEY_MGMT = 63   # 0x3F
-CLUSTER_GROUPS         = 4    # 0x04
+CLUSTER_GROUP_KEY_MGMT = 63
+CLUSTER_GROUPS         = 4
 
 
 async def send_command(ws, command: str, args: dict, message_id: str) -> dict:
@@ -58,37 +52,45 @@ async def send_command(ws, command: str, args: dict, message_id: str) -> dict:
 
 
 def check_error(resp: dict, context: str) -> bool:
-    """Geeft True als er een fout is, print de melding."""
     if "error_code" in resp or "error" in resp:
         print(f"  [!] Fout bij {context}: {resp}")
         return True
     return False
 
 
+def hex_to_bytes_list(hex_str: str) -> list[int]:
+    """Converteer hex-string naar lijst van integers (bytes).
+    matter-server verwacht epoch keys als lijst van integers, niet als string."""
+    return list(bytes.fromhex(hex_str))
+
+
 # ---------------------------------------------------------------------------
 # Stap 1: KeySetWrite
 # ---------------------------------------------------------------------------
 async def keyset_write(ws, node_id: int, keyset_id: int, epoch_key_hex: str,
-                        dry_run: bool) -> bool:
-    """
-    Schrijf een nieuwe group keyset naar het device.
-    epoch_key_hex: 32 hex-tekens = 16 bytes, bv. "d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
-    """
+                       dry_run: bool) -> bool:
+    # Epoch key als lijst van integers (bytes), niet als hex-string
+    epoch_key_bytes = hex_to_bytes_list(epoch_key_hex)
+
+    # epochStartTime in microseconds since epoch (Matter-vereiste: > 0)
+    # Gebruik huidige tijd in microseconden
+    now_us = int(time.time() * 1_000_000)
+
     payload = {
         "groupKeySet": {
-            "groupKeySetID":       keyset_id,
-            "groupKeySecurityPolicy": 0,          # 0 = TrustFirst
-            "epochKey0":           epoch_key_hex,
-            "epochStartTime0":     1,             # epoch 1 = geldig
-            "epochKey1":           None,
-            "epochStartTime1":     None,
-            "epochKey2":           None,
-            "epochStartTime2":     None,
+            "groupKeySetID":          keyset_id,
+            "groupKeySecurityPolicy": 0,           # 0 = TrustFirst
+            "epochKey0":              epoch_key_bytes,
+            "epochStartTime0":        now_us,
+            "epochKey1":              None,
+            "epochStartTime1":        None,
+            "epochKey2":              None,
+            "epochStartTime2":        None,
         }
     }
 
     if dry_run:
-        print(f"  [dry-run] KeySetWrite keyset_id={keyset_id} epoch_key={epoch_key_hex}")
+        print(f"  [dry-run] KeySetWrite keyset_id={keyset_id} epoch_key=[{len(epoch_key_bytes)} bytes]")
         return True
 
     resp = await send_command(
@@ -115,12 +117,7 @@ async def keyset_write(ws, node_id: int, keyset_id: int, epoch_key_hex: str,
 # Stap 2: GroupKeyMap schrijven
 # ---------------------------------------------------------------------------
 async def write_group_key_map(ws, node_id: int, group_id: int,
-                               keyset_id: int, dry_run: bool) -> bool:
-    """
-    Koppel group_id aan keyset_id via attribuut GroupKeyMap (0/63/3).
-    Dit is een lijst; lees eerst de bestaande entries en voeg toe.
-    """
-    # Lees huidige map
+                              keyset_id: int, dry_run: bool) -> bool:
     existing = []
     if not dry_run:
         resp = await send_command(
@@ -129,14 +126,19 @@ async def write_group_key_map(ws, node_id: int, group_id: int,
             message_id=f"read-gkm-{node_id}",
         )
         result = resp.get("result")
+        # Normaliseer: kan dict, lijst of integer (leeg/0) zijn
         if isinstance(result, dict):
-            existing = next(iter(result.values()), []) or []
+            val = next(iter(result.values()), None)
+            existing = val if isinstance(val, list) else []
         elif isinstance(result, list):
-            existing = result or []
+            existing = result
+        else:
+            existing = []  # lege map of onverwacht type → begin leeg
 
         # Verwijder eventuele bestaande entry voor dezelfde group_id
         existing = [e for e in existing
-                    if e.get("groupId", e.get("groupID")) != group_id]
+                    if isinstance(e, dict) and
+                    e.get("groupId", e.get("groupID")) != group_id]
 
     new_entry = {"groupId": group_id, "groupKeySetID": keyset_id}
     new_map   = existing + [new_entry]
@@ -193,14 +195,11 @@ async def add_group(ws, node_id: int, group_id: int, group_name: str,
     result = resp.get("result") or {}
     status = result.get("status", result.get("0"))
 
-    if status == 0:
+    if status in (0, None):
         print(f"  [OK] AddGroup geslaagd (group_id=0x{group_id:04X})")
         return True
     elif status == 137:
         print(f"  [OK] Node was al lid van de groep (DUPLICATE — normaal)")
-        return True
-    elif status is None:
-        print(f"  [OK] AddGroup — geen fout ontvangen. Resultaat: {result}")
         return True
     else:
         print(f"  [!] AddGroup status={status} (0x{status:02X}). Volledig antwoord: {resp}")
@@ -212,36 +211,33 @@ async def add_group(ws, node_id: int, group_id: int, group_name: str,
 # ---------------------------------------------------------------------------
 async def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Voeg Matter-lampen toe aan een groep (KeySetWrite + GroupKeyMap + AddGroup).",
+        description="Voeg Matter-lampen toe aan een groep.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     ap.add_argument("--ws",         default="ws://192.168.178.2:5580/ws")
-    ap.add_argument("--nodes",      type=int, nargs="+", default=DEFAULT_NODES,
-                    help="node-IDs om aan de groep toe te voegen")
+    ap.add_argument("--nodes",      type=int, nargs="+", default=DEFAULT_NODES)
     ap.add_argument("--group-id",   type=lambda x: int(x, 0), default=DEFAULT_GROUP_ID,
                     help="groep-ID (hex of dec, bv. 0x0001)")
     ap.add_argument("--group-name", default=DEFAULT_GROUP_NAME,
                     help="naam (max 16 tekens)")
     ap.add_argument("--keyset-id",  type=int, default=DEFAULT_KEYSET_ID,
-                    help="keyset-ID (1-65535, niet 0)")
+                    help="keyset-ID (1-65535)")
     ap.add_argument("--epoch-key",  default=None,
                     help="16-byte epoch key als 32 hex-tekens. Leeglaten = automatisch genereren.")
-    ap.add_argument("--dry-run",    action="store_true",
-                    help="toon wat er zou worden gedaan, schrijf niets")
+    ap.add_argument("--dry-run",    action="store_true")
     args = ap.parse_args()
 
     if len(args.group_name) > 16:
         sys.exit(f"FOUT: group-name mag maximaal 16 tekens zijn (nu {len(args.group_name)})")
 
-    # Epoch key: genereer automatisch als niet opgegeven
     if args.epoch_key:
-        epoch_key = args.epoch_key.lower().replace("0x", "")
+        epoch_key = args.epoch_key.lower().replace("0x", "").replace(" ", "")
         if len(epoch_key) != 32 or not all(c in "0123456789abcdef" for c in epoch_key):
             sys.exit("FOUT: epoch-key moet exact 32 hex-tekens zijn (16 bytes)")
     else:
         epoch_key = os.urandom(16).hex()
         print(f"[*] Automatisch gegenereerde epoch key: {epoch_key}")
-        print(f"    Bewaar deze als je later de drukknop of andere controllers")
+        print(f"    Bewaar deze als je de drukknop of andere controllers")
         print(f"    aan dezelfde groep wilt toevoegen.\n")
 
     print(f"[*] Verbinding maken met {args.ws} ...")
@@ -268,7 +264,6 @@ async def main() -> int:
         results = {}
         for node_id in args.nodes:
             print(f"\n--- Node {node_id} ---")
-
             ok  = await keyset_write(ws, node_id, args.keyset_id, epoch_key, args.dry_run)
             ok &= await write_group_key_map(ws, node_id, args.group_id, args.keyset_id, args.dry_run)
             ok &= await add_group(ws, node_id, args.group_id, args.group_name, args.dry_run)
@@ -284,11 +279,10 @@ async def main() -> int:
 
         if all_ok and not args.dry_run:
             print(f"\n[*] Klaar. Alle nodes zijn lid van groep 0x{args.group_id:04X}.")
-            print(f"\n--- Volgende stap: drukknop koppelen ---")
-            print(f"  group-id  : 0x{args.group_id:04X} ({args.group_id})")
-            print(f"  keyset-id : {args.keyset_id}")
-            print(f"  epoch-key : {epoch_key}")
-            print(f"  Gebruik deze waarden bij het binding-script voor de drukknop.")
+            print(f"\n--- Waarden voor het binding-script (drukknop) ---")
+            print(f"  --group-id  0x{args.group_id:04X}")
+            print(f"  --keyset-id {args.keyset_id}")
+            print(f"  --epoch-key {epoch_key}")
 
         return 0 if all_ok else 1
 
