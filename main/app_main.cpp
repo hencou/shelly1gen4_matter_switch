@@ -12,6 +12,7 @@ extern "C" {
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <string.h>
 
 #include "app_config.h"
 #include "button.h"
@@ -109,23 +110,45 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done, calling button_driver_init");
 
     // =========================================================================
-    // MULTICAST GROUP KEY MAPPING
+    // MULTICAST GROUP KEY — install KeySet 1 + GroupKeyMap
     // =========================================================================
-    // Matter multicast requires a GroupKeyMap entry linking the group ID to a
-    // key set.  We use KeySet 1 (written by the setup script via KeySetWrite)
-    // because the IPK (KeySet 0) cannot be used directly for group encryption
-    // on this SDK version (returns CHIP_ERROR_INTERNAL).
-    // The setup script installs the actual key material for KeySet 1 on all
-    // nodes; this code just ensures the mapping table is correct after reboot.
+    // The IPK (KeySet 0) cannot be used directly for group encryption on this
+    // SDK version (returns CHIP_ERROR_INTERNAL).  We install our own KeySet 1
+    // with a fixed epoch key directly via the GroupDataProvider API.
+    // The same key must be installed on the lamps via the setup script.
     {
         using namespace chip::Credentials;
         GroupDataProvider *provider = GetGroupDataProvider();
         if (provider != nullptr) {
+            // Shared 128-bit epoch key — must match the script's --epoch-key
+            static const uint8_t kGroupEpochKey[16] = {
+                0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7,
+                0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf
+            };
+
             for (const auto & fabricInfo : chip::Server::GetInstance().GetFabricTable()) {
                 chip::FabricIndex idx = fabricInfo.GetFabricIndex();
+                chip::CompressedFabricId cfid = fabricInfo.GetCompressedFabricId();
+
+                // Install KeySet 1 with our epoch key
+                GroupDataProvider::KeySet keySet;
+                keySet.keyset_id    = 1;
+                keySet.policy       = GroupDataProvider::SecurityPolicy::kTrustFirst;
+                keySet.num_keys_used = 1;
+                keySet.epoch_keys[0].start_time = 1; // 1 µs = always valid
+                memcpy(keySet.epoch_keys[0].key, kGroupEpochKey, 16);
+
+                CHIP_ERROR err = provider->SetKeySet(idx, cfid, keySet);
+                if (err == CHIP_NO_ERROR) {
+                    ESP_LOGI(TAG, "GroupKeySet 1: fabric %u installed OK", idx);
+                } else {
+                    ESP_LOGW(TAG, "GroupKeySet 1: fabric %u FAILED %" CHIP_ERROR_FORMAT, idx, err.Format());
+                }
+
+                // Map group 0x0001 → KeySet 1
                 GroupDataProvider::GroupKey mapping;
                 mapping.group_id  = 0x0001;
-                mapping.keyset_id = 1;   // KeySet 1 installed by setup script
+                mapping.keyset_id = 1;
                 if (provider->SetGroupKeyAt(idx, 0, mapping) == CHIP_NO_ERROR) {
                     ESP_LOGI(TAG, "GroupKeyMap: fabric %u -> group 0x0001 keyset 1", idx);
                 } else {
