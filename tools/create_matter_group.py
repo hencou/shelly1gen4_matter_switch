@@ -152,11 +152,62 @@ async def run_logic(args):
                 print(f"    [!] AddGroup failed: {e}")
 
         # =======================================================================
-        # STEP 3: WRITE GROUPKEYMAP ON ALL NODES
+        # STEP 3: ADD GROUP ACL ON LAMPS
+        # =======================================================================
+        # Matter Access Control requires an explicit ACL entry that allows
+        # group commands.  Without this, the lamp decrypts the message but
+        # silently rejects it because no ACL grants Operate privilege for
+        # the group's authMode.
+        print("\n" + "-"*50)
+        print("[STEP 3] Adding Group ACL entry on lamps...")
+
+        for node_id in args.nodes:
+            print(f"  --> ACL on Lamp (Node {node_id})...")
+            try:
+                # Read current ACL (cluster 31, attribute 0, endpoint 0)
+                acl = await client.send_command("read_attribute", {
+                    "node_id": node_id,
+                    "attribute_path": "0/31/0"
+                })
+                # Extract the list (response format: {"0/31/0": [...]} )
+                acl_key = list(acl.keys())[0] if isinstance(acl, dict) else None
+                acl_list = acl[acl_key] if acl_key else acl
+                if not isinstance(acl_list, list):
+                    acl_list = [acl_list] if acl_list else []
+
+                # Check if a group ACL entry for our group already exists
+                group_acl_exists = False
+                for entry in acl_list:
+                    if (entry.get("authMode") == 3 and
+                        args.group_id in (entry.get("subjects") or [])):
+                        group_acl_exists = True
+                        break
+
+                if group_acl_exists:
+                    print(f"    [OK] Group ACL already present")
+                else:
+                    # Append group ACL: Operate privilege, Group authMode
+                    acl_list.append({
+                        "privilege": 3,   # Operate
+                        "authMode": 3,    # Group
+                        "subjects": [args.group_id],
+                        "targets": None,  # All endpoints/clusters
+                    })
+                    await client.send_command("write_attribute", {
+                        "node_id": node_id,
+                        "attribute_path": "0/31/0",
+                        "value": acl_list
+                    })
+                    print(f"    [OK] Group ACL added (Operate privilege for group 0x{args.group_id:04X})")
+            except Exception as e:
+                print(f"    [!] ACL setup failed: {e}")
+
+        # =======================================================================
+        # STEP 4: WRITE GROUPKEYMAP ON ALL NODES
         # =======================================================================
         # Maps the group ID to our KeySet so the SDK can find the encryption key.
         print("\n" + "-"*50)
-        print(f"[STEP 3] Writing GroupKeyMap (group -> keyset {GROUP_KEYSET_ID})...")
+        print(f"[STEP 4] Writing GroupKeyMap (group -> keyset {GROUP_KEYSET_ID})...")
 
         # GroupKeyMap: endpoint 0, cluster 63 (GroupKeyManagement), attribute 0
         group_key_entry = {
@@ -178,10 +229,10 @@ async def run_logic(args):
                 print(f"    [!] GroupKeyMap failed: {e}")
 
         # =======================================================================
-        # STEP 4: WRITE BINDING ON THE SWITCH
+        # STEP 5: WRITE BINDING ON THE SWITCH
         # =======================================================================
         print("\n" + "-"*50)
-        print("[STEP 4] Writing binding table to the Switch...")
+        print("[STEP 5] Writing binding table to the Switch...")
 
         binding_entry = {
             "group": args.group_id,
@@ -211,10 +262,10 @@ async def run_logic(args):
                 print(f"    [!] write_attribute also failed: {e2}")
 
         # =======================================================================
-        # STEP 5: VERIFICATION - READ BINDING BACK
+        # STEP 6: VERIFICATION - READ BINDING BACK
         # =======================================================================
         print("\n" + "-"*50)
-        print("[STEP 5] Verification - reading binding back...")
+        print("[STEP 6] Verification - reading binding back...")
         try:
             result = await client.send_command("read_attribute", {
                 "node_id": args.switch,
