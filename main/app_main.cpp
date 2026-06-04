@@ -112,9 +112,11 @@ extern "C" void app_main(void)
     // MULTICAST GROUP KEY MAPPING
     // =========================================================================
     // Matter multicast requires a GroupKeyMap entry linking the group ID to a
-    // key set.  The controller (HA) installs the IPK as KeySet 0 during
-    // commissioning.  We map group 0x0001 → KeySet 0 on every active fabric
-    // so that InvokeGroupCommandRequest can encrypt the multicast message.
+    // key set.  We use KeySet 1 (written by the setup script via KeySetWrite)
+    // because the IPK (KeySet 0) cannot be used directly for group encryption
+    // on this SDK version (returns CHIP_ERROR_INTERNAL).
+    // The setup script installs the actual key material for KeySet 1 on all
+    // nodes; this code just ensures the mapping table is correct after reboot.
     {
         using namespace chip::Credentials;
         GroupDataProvider *provider = GetGroupDataProvider();
@@ -123,9 +125,9 @@ extern "C" void app_main(void)
                 chip::FabricIndex idx = fabricInfo.GetFabricIndex();
                 GroupDataProvider::GroupKey mapping;
                 mapping.group_id  = 0x0001;
-                mapping.keyset_id = 0;   // IPK key set installed by controller
+                mapping.keyset_id = 1;   // KeySet 1 installed by setup script
                 if (provider->SetGroupKeyAt(idx, 0, mapping) == CHIP_NO_ERROR) {
-                    ESP_LOGI(TAG, "GroupKeyMap: fabric %u -> group 0x0001 keyset 0", idx);
+                    ESP_LOGI(TAG, "GroupKeyMap: fabric %u -> group 0x0001 keyset 1", idx);
                 } else {
                     ESP_LOGW(TAG, "GroupKeyMap: failed for fabric %u", idx);
                 }
