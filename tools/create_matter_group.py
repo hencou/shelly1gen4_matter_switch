@@ -1,33 +1,35 @@
 #!/usr/bin/env python3
 """
-Maak een Matter-groep aan voor meerdere lampen (nodes 32, 33, 34, 35).
+Maak een Matter-groep aan voor meerdere lampen via python-matter-server.
 
-Wat dit script doet, per lamp:
-  1. Leest de huidige groepslidmaatschappen uit (endpoint 1, cluster 0x04, attribuut 0)
-  2. Stuurt AddGroup-commando naar elk device afzonderlijk
-  3. Leest het resultaat terug ter verificatie
+De volgorde per node (verplicht door de Matter-spec):
+  1. KeySetWrite  — schrijf een nieuwe group keyset naar het device
+                    (cluster 0x3F = GroupKeyManagement, endpoint 0)
+  2. GroupKeyMap  — koppel de group-ID aan de keyset
+                    (write_attribute op pad 0/63/3)
+  3. AddGroup     — registreer het endpoint als lid van de groep
+                    (device_command op cluster 0x04, endpoint 1)
 
-Wat dit script NIET doet (en ook niet hoeft te doen):
-  - KeySetWrite / GroupKeyMap: HA/python-matter-server beheert de group keys
-    intern. Omdat de lampen al als entiteiten in HA zichtbaar zijn, is de
-    IPK (Identity Protection Key) al aanwezig op elk device.
-  - ACL aanpassen voor de groep: alleen nodig als je multicast-commando's
-    wilt sturen als andere controller. HA stuurt unicast per lamp, dus dit
-    is optioneel. Zie de opmerking onderaan dit bestand.
+De epoch key (16 bytes) genereer je zelf; hij hoeft niet van HA te komen.
+Sla de gegenereerde key op als je later ook de drukknop of andere
+controllers in dezelfde groep wilt zetten — zij hebben dezelfde key nodig.
+
+Getest met: schema=11, sdk=2025.7.0
+
+Gebruik:
+    python3 create_matter_group.py --dry-run
+    python3 create_matter_group.py
+    python3 create_matter_group.py --group-id 0x0001 --group-name "Kantoor"
+    python3 create_matter_group.py --keyset-id 42 --epoch-key <32 hex chars>
 
 Vereisten:
     pip install websockets
-
-Gebruik:
-    python3 create_matter_group.py
-    python3 create_matter_group.py --ws ws://192.168.178.2:5580/ws
-    python3 create_matter_group.py --group-id 0x0042 --group-name "Woonkamer"
-    python3 create_matter_group.py --dry-run
 """
 
 import argparse
 import asyncio
 import json
+import os
 import sys
 
 try:
@@ -35,24 +37,17 @@ try:
 except ImportError:
     sys.exit("Ontbrekende dependency. Installeer met: pip install websockets")
 
-# Nodes die tot de groep moeten behoren
-DEFAULT_NODES = [32, 33, 34, 35]
+DEFAULT_NODES      = [32, 33, 34, 35]
+DEFAULT_GROUP_ID   = 0x0001
+DEFAULT_GROUP_NAME = "Kantoor"
+DEFAULT_KEYSET_ID  = 42        # willekeurig getal 1-65535, niet 0
 
-# Groups cluster: cluster_id=4, endpoint=1
-# Attribuut 0 = NameSupport (lezen of names ondersteund worden)
-# Attribuut 0 op pad "1/4/0" = group membership list
-GROUPS_CLUSTER_ID = 4
-GROUPS_ENDPOINT   = 1
-
-# Standaard group-ID. Kies een waarde tussen 0x0001 en 0xFFF7.
-# Vermijd 0x0000 (gereserveerd). Noteer deze waarde — je drukknop
-# heeft hem later nodig.
-DEFAULT_GROUP_ID   = 0x0042   # = 66 decimaal
-DEFAULT_GROUP_NAME = "Lampengroep"
+# Cluster IDs
+CLUSTER_GROUP_KEY_MGMT = 63   # 0x3F
+CLUSTER_GROUPS         = 4    # 0x04
 
 
 async def send_command(ws, command: str, args: dict, message_id: str) -> dict:
-    """Stuur een JSON-commando naar matter-server, wacht op antwoord."""
     payload = {"message_id": message_id, "command": command, "args": args}
     await ws.send(json.dumps(payload))
     while True:
@@ -62,35 +57,38 @@ async def send_command(ws, command: str, args: dict, message_id: str) -> dict:
             return msg
 
 
-async def read_group_membership(ws, node_id: int) -> list:
-    """Lees de huidige groepslijst van een node (pad 1/4/0)."""
-    resp = await send_command(
-        ws,
-        "read_attribute",
-        {"node_id": node_id, "attribute_path": "1/4/0"},
-        message_id=f"read-groups-{node_id}",
-    )
+def check_error(resp: dict, context: str) -> bool:
+    """Geeft True als er een fout is, print de melding."""
     if "error_code" in resp or "error" in resp:
-        print(f"  [!] Kon groepslijst niet lezen van node {node_id}: {resp}")
-        return []
-
-    result = resp.get("result")
-    # matter-server kan resultaat als dict {"1/4/0": [...]} of als list teruggeven
-    if isinstance(result, dict):
-        return next(iter(result.values()), []) or []
-    elif isinstance(result, list):
-        return result
-    return []
+        print(f"  [!] Fout bij {context}: {resp}")
+        return True
+    return False
 
 
-async def add_to_group(ws, node_id: int, group_id: int, group_name: str, dry_run: bool) -> bool:
-    """Stuur AddGroup-commando naar één node. Geeft True terug bij succes."""
-
-    # Payload als camelCase (schema 11 / sdk 2025.x)
-    payload = {"groupId": group_id, "groupName": group_name}
+# ---------------------------------------------------------------------------
+# Stap 1: KeySetWrite
+# ---------------------------------------------------------------------------
+async def keyset_write(ws, node_id: int, keyset_id: int, epoch_key_hex: str,
+                        dry_run: bool) -> bool:
+    """
+    Schrijf een nieuwe group keyset naar het device.
+    epoch_key_hex: 32 hex-tekens = 16 bytes, bv. "d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
+    """
+    payload = {
+        "groupKeySet": {
+            "groupKeySetID":       keyset_id,
+            "groupKeySecurityPolicy": 0,          # 0 = TrustFirst
+            "epochKey0":           epoch_key_hex,
+            "epochStartTime0":     1,             # epoch 1 = geldig
+            "epochKey1":           None,
+            "epochStartTime1":     None,
+            "epochKey2":           None,
+            "epochStartTime2":     None,
+        }
+    }
 
     if dry_run:
-        print(f"  [dry-run] Zou sturen: device_command AddGroup {payload}")
+        print(f"  [dry-run] KeySetWrite keyset_id={keyset_id} epoch_key={epoch_key_hex}")
         return True
 
     resp = await send_command(
@@ -98,60 +96,153 @@ async def add_to_group(ws, node_id: int, group_id: int, group_name: str, dry_run
         "device_command",
         {
             "node_id":      node_id,
-            "endpoint_id":  GROUPS_ENDPOINT,
-            "cluster_id":   GROUPS_CLUSTER_ID,
+            "endpoint_id":  0,
+            "cluster_id":   CLUSTER_GROUP_KEY_MGMT,
+            "command_name": "KeySetWrite",
+            "payload":      payload,
+        },
+        message_id=f"keyset-write-{node_id}",
+    )
+
+    if check_error(resp, "KeySetWrite"):
+        return False
+
+    print(f"  [OK] KeySetWrite geslaagd (keyset_id={keyset_id})")
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Stap 2: GroupKeyMap schrijven
+# ---------------------------------------------------------------------------
+async def write_group_key_map(ws, node_id: int, group_id: int,
+                               keyset_id: int, dry_run: bool) -> bool:
+    """
+    Koppel group_id aan keyset_id via attribuut GroupKeyMap (0/63/3).
+    Dit is een lijst; lees eerst de bestaande entries en voeg toe.
+    """
+    # Lees huidige map
+    existing = []
+    if not dry_run:
+        resp = await send_command(
+            ws, "read_attribute",
+            {"node_id": node_id, "attribute_path": "0/63/3"},
+            message_id=f"read-gkm-{node_id}",
+        )
+        result = resp.get("result")
+        if isinstance(result, dict):
+            existing = next(iter(result.values()), []) or []
+        elif isinstance(result, list):
+            existing = result or []
+
+        # Verwijder eventuele bestaande entry voor dezelfde group_id
+        existing = [e for e in existing
+                    if e.get("groupId", e.get("groupID")) != group_id]
+
+    new_entry = {"groupId": group_id, "groupKeySetID": keyset_id}
+    new_map   = existing + [new_entry]
+
+    if dry_run:
+        print(f"  [dry-run] GroupKeyMap schrijven: {new_entry}")
+        return True
+
+    resp = await send_command(
+        ws,
+        "write_attribute",
+        {
+            "node_id":        node_id,
+            "attribute_path": "0/63/3",
+            "value":          new_map,
+        },
+        message_id=f"write-gkm-{node_id}",
+    )
+
+    if check_error(resp, "GroupKeyMap write"):
+        return False
+
+    print(f"  [OK] GroupKeyMap geschreven (group_id=0x{group_id:04X} → keyset {keyset_id})")
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Stap 3: AddGroup
+# ---------------------------------------------------------------------------
+async def add_group(ws, node_id: int, group_id: int, group_name: str,
+                    dry_run: bool) -> bool:
+    payload = {"groupId": group_id, "groupName": group_name}
+
+    if dry_run:
+        print(f"  [dry-run] AddGroup {payload}")
+        return True
+
+    resp = await send_command(
+        ws,
+        "device_command",
+        {
+            "node_id":      node_id,
+            "endpoint_id":  1,
+            "cluster_id":   CLUSTER_GROUPS,
             "command_name": "AddGroup",
             "payload":      payload,
         },
         message_id=f"addgroup-{node_id}",
     )
 
-    if "error_code" in resp or "error" in resp:
-        print(f"  [!] Fout van matter-server: {resp}")
+    if check_error(resp, "AddGroup"):
         return False
 
-    # AddGroup stuurt een AddGroupResponse terug met een status-veld.
-    # Status 0 = SUCCESS, status 137 = DUPLICATE (lamp zat al in de groep).
     result = resp.get("result") or {}
-    status = None
-    if isinstance(result, dict):
-        # Veld heet "status" of TLV-key "0"
-        status = result.get("status", result.get("0"))
+    status = result.get("status", result.get("0"))
 
     if status == 0:
-        print(f"  [OK] Node {node_id} toegevoegd aan groep 0x{group_id:04X}")
+        print(f"  [OK] AddGroup geslaagd (group_id=0x{group_id:04X})")
         return True
     elif status == 137:
-        print(f"  [OK] Node {node_id} was al lid van groep 0x{group_id:04X} (DUPLICATE=normaal)")
+        print(f"  [OK] Node was al lid van de groep (DUPLICATE — normaal)")
         return True
     elif status is None:
-        # Sommige versies sturen geen expliciete status bij succes
-        print(f"  [OK] Node {node_id}: geen fout, aangenomen als succes. Resultaat: {result}")
+        print(f"  [OK] AddGroup — geen fout ontvangen. Resultaat: {result}")
         return True
     else:
-        print(f"  [!] Node {node_id}: AddGroup status={status} (onverwacht). Volledig antwoord: {resp}")
+        print(f"  [!] AddGroup status={status} (0x{status:02X}). Volledig antwoord: {resp}")
         return False
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 async def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Voeg Matter-lampen toe aan een groep.",
+        description="Voeg Matter-lampen toe aan een groep (KeySetWrite + GroupKeyMap + AddGroup).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--ws",         default="ws://192.168.178.2:5580/ws",
-                    help="matter-server WebSocket URL")
+    ap.add_argument("--ws",         default="ws://192.168.178.2:5580/ws")
     ap.add_argument("--nodes",      type=int, nargs="+", default=DEFAULT_NODES,
                     help="node-IDs om aan de groep toe te voegen")
     ap.add_argument("--group-id",   type=lambda x: int(x, 0), default=DEFAULT_GROUP_ID,
-                    help="groep-ID (hex of dec, bv. 0x0042 of 66)")
+                    help="groep-ID (hex of dec, bv. 0x0001)")
     ap.add_argument("--group-name", default=DEFAULT_GROUP_NAME,
-                    help="naam van de groep (max 16 tekens)")
+                    help="naam (max 16 tekens)")
+    ap.add_argument("--keyset-id",  type=int, default=DEFAULT_KEYSET_ID,
+                    help="keyset-ID (1-65535, niet 0)")
+    ap.add_argument("--epoch-key",  default=None,
+                    help="16-byte epoch key als 32 hex-tekens. Leeglaten = automatisch genereren.")
     ap.add_argument("--dry-run",    action="store_true",
                     help="toon wat er zou worden gedaan, schrijf niets")
     args = ap.parse_args()
 
     if len(args.group_name) > 16:
         sys.exit(f"FOUT: group-name mag maximaal 16 tekens zijn (nu {len(args.group_name)})")
+
+    # Epoch key: genereer automatisch als niet opgegeven
+    if args.epoch_key:
+        epoch_key = args.epoch_key.lower().replace("0x", "")
+        if len(epoch_key) != 32 or not all(c in "0123456789abcdef" for c in epoch_key):
+            sys.exit("FOUT: epoch-key moet exact 32 hex-tekens zijn (16 bytes)")
+    else:
+        epoch_key = os.urandom(16).hex()
+        print(f"[*] Automatisch gegenereerde epoch key: {epoch_key}")
+        print(f"    Bewaar deze als je later de drukknop of andere controllers")
+        print(f"    aan dezelfde groep wilt toevoegen.\n")
 
     print(f"[*] Verbinding maken met {args.ws} ...")
     try:
@@ -160,7 +251,6 @@ async def main() -> int:
         sys.exit(f"FOUT: kan niet verbinden: {exc}")
 
     async with ws:
-        # Server-info pakket direct na connect
         try:
             info = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
             print(f"[*] matter-server: schema={info.get('schema_version')} "
@@ -169,103 +259,39 @@ async def main() -> int:
         except asyncio.TimeoutError:
             print("[!] Geen server-info pakket binnen 5s — ga door")
 
-        print(f"\n[*] Groep aanmaken: ID=0x{args.group_id:04X} ({args.group_id}), "
-              f"naam='{args.group_name}'")
+        print(f"\n[*] Groep: ID=0x{args.group_id:04X} ({args.group_id}), "
+              f"naam='{args.group_name}', keyset_id={args.keyset_id}")
         print(f"[*] Nodes: {args.nodes}")
         if args.dry_run:
-            print("[*] DRY-RUN modus — er wordt niets geschreven\n")
+            print("[*] DRY-RUN — niets wordt geschreven\n")
 
         results = {}
         for node_id in args.nodes:
             print(f"\n--- Node {node_id} ---")
 
-            # Lees huidige groepslidmaatschappen
-            current = await read_group_membership(ws, node_id)
-            if current:
-                print(f"  Huidige groepen: {current}")
-            else:
-                print(f"  Huidige groepen: (geen of kon niet lezen)")
-
-            # Voeg toe aan groep
-            ok = await add_to_group(ws, node_id, args.group_id, args.group_name, args.dry_run)
+            ok  = await keyset_write(ws, node_id, args.keyset_id, epoch_key, args.dry_run)
+            ok &= await write_group_key_map(ws, node_id, args.group_id, args.keyset_id, args.dry_run)
+            ok &= await add_group(ws, node_id, args.group_id, args.group_name, args.dry_run)
             results[node_id] = ok
 
-            # Verificatie: lees opnieuw (alleen bij echte schrijfactie)
-            if ok and not args.dry_run:
-                await asyncio.sleep(0.5)   # kleine pauze zodat lamp kan bijwerken
-                updated = await read_group_membership(ws, node_id)
-                print(f"  Groepen na toevoeging: {updated}")
-
-        # Samenvatting
-        print("\n" + "="*50)
+        print("\n" + "=" * 50)
         print("Samenvatting:")
         all_ok = True
         for node_id, ok in results.items():
-            status_str = "OK" if ok else "MISLUKT"
-            print(f"  Node {node_id}: {status_str}")
+            print(f"  Node {node_id}: {'OK' if ok else 'MISLUKT'}")
             if not ok:
                 all_ok = False
 
-        if all_ok:
+        if all_ok and not args.dry_run:
             print(f"\n[*] Klaar. Alle nodes zijn lid van groep 0x{args.group_id:04X}.")
-            if not args.dry_run:
-                print(f"\n--- Volgende stap: drukknop koppelen ---")
-                print(f"Noteer dit group-ID voor de binding van je drukknop: 0x{args.group_id:04X} ({args.group_id})")
-                print("Zie de uitleg in de comments onderaan dit script.")
-        else:
-            print("\n[!] Eén of meer nodes mislukten. Controleer de output hierboven.")
+            print(f"\n--- Volgende stap: drukknop koppelen ---")
+            print(f"  group-id  : 0x{args.group_id:04X} ({args.group_id})")
+            print(f"  keyset-id : {args.keyset_id}")
+            print(f"  epoch-key : {epoch_key}")
+            print(f"  Gebruik deze waarden bij het binding-script voor de drukknop.")
 
         return 0 if all_ok else 1
 
-
-# =============================================================================
-# UITLEG: drukknop koppelen aan de groep
-# =============================================================================
-#
-# Een Matter-drukknop (Generic Switch of On/Off Switch) bestuurt lampen via
-# een Binding in het Binding cluster (cluster 0x001E, endpoint 1).
-#
-# Voor groepsbesturing schrijf je een binding-entry die verwijst naar de
-# group-ID in plaats van een individuele node. De knop stuurt dan een
-# multicast OnOff-commando naar het groepsadres — alle lampen in de groep
-# reageren tegelijk.
-#
-# Stap 1: ACL op elke lamp uitbreiden met een Group-entry
-# -------------------------------------------------------
-# Elke lamp moet in zijn ACL een entry hebben die het groepsadres toelaat.
-# Voeg aan de bestaande ACL van elke lamp een entry toe:
-#
-#   {
-#     "privilege": 3,          # Operate
-#     "authMode": 3,           # Group
-#     "subjects": [<group_id>],
-#     "targets": null
-#   }
-#
-# Dit kun je doen met een aangepaste versie van wipe_acl.py: lees de ACL,
-# voeg deze entry toe (als die nog niet aanwezig is), en schrijf terug.
-#
-# Stap 2: Binding schrijven op de drukknop
-# -----------------------------------------
-# Schrijf naar de drukknop (jouw node-ID) de volgende binding-entry via
-# write_attribute op pad "1/30/0":
-#
-#   [
-#     {
-#       "node": <knop_node_id>,         # verplicht eigen node
-#       "group": <group_id>,            # 0x0042 (of wat je hebt gekozen)
-#       "endpoint": null,
-#       "cluster": 6                    # OnOff cluster
-#     }
-#   ]
-#
-# Na deze stap stuurt de knop bij een druk een multicast OnOff-commando
-# naar groep 0x0042 — alle lampen reageren gelijktijdig zonder dat HA
-# tussenkomt.
-#
-# Let op: de drukknop en de lampen moeten in hetzelfde Matter-fabric zitten
-# (dat is het geval als ze allemaal via dezelfde HA zijn gecommissiond).
-# =============================================================================
 
 if __name__ == "__main__":
     sys.exit(asyncio.run(main()) or 0)
