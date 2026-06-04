@@ -120,71 +120,58 @@ async def keyset_write(ws, node_id: int, keyset_id: int, epoch_key_hex: str,
 async def write_group_key_map(ws, node_id: int, group_id: int,
                               keyset_id: int, dry_run: bool) -> bool:
     """
-    Schrijft de GroupKeyMap via write_attribute.
-    Pad: 0/63/3  (endpoint 0, cluster GroupKeyManagement=63, attribuut 3)
-    
-    De server verwacht de value als lijst van dicts. De server-side
-    parse_value functie zet de camelCase dict om naar het juiste CHIP-type.
+    Schrijft de GroupKeyMap via write_attribute met geïndexeerd pad.
+
+    python-matter-server's write_attribute kan geen top-level lijst-attributen
+    verwerken voor complexe CHIP-structs (fout: expected chip.tlv.uint).
+    Oplossing: schrijf via het geïndexeerde pad "0/63/3/0" voor het eerste
+    list-item, wat de server wel correct kan deserialiseren.
     """
-    existing = []
-    if not dry_run:
-        resp = await send_command(
-            ws, "read_attribute",
-            {"node_id": node_id, "attribute_path": "0/63/3"},
-            message_id=f"read-gkm-{node_id}",
-        )
-        result = resp.get("result")
-        if isinstance(result, dict):
-            val = next(iter(result.values()), None)
-            existing = val if isinstance(val, list) else []
-        elif isinstance(result, list):
-            existing = result
-        else:
-            existing = []
-
-        # Verwijder bestaande entry voor dezelfde group_id (dedup)
-        existing = [
-            e for e in existing
-            if isinstance(e, dict) and
-               e.get("groupId", e.get("groupID")) != group_id
-        ]
-
     new_entry = {"groupId": group_id, "groupKeySetID": keyset_id, "fabricIndex": 1}
-    new_map   = existing + [new_entry]
 
     if dry_run:
-        print(f"  [dry-run] GroupKeyMap schrijven: {new_entry}")
+        print(f"  [dry-run] GroupKeyMap schrijven via 0/63/3/0: {new_entry}")
         return True
 
+    # Poging 1: geïndexeerd pad (eerste list-item)
     resp = await send_command(
         ws,
         "write_attribute",
         {
             "node_id":        node_id,
-            "attribute_path": "0/63/3",
-            "value":          new_map,
+            "attribute_path": "0/63/3/0",
+            "value":          new_entry,
         },
         message_id=f"write-gkm-{node_id}",
     )
 
-    if check_error(resp, "GroupKeyMap write"):
-        # Alternatief proberen: soms werkt een enkele entry zonder lijst-wrapper
-        print(f"  [?] Poging 2: GroupKeyMap als enkelvoudige dict...")
-        resp2 = await send_command(
-            ws,
-            "write_attribute",
-            {
-                "node_id":        node_id,
-                "attribute_path": "0/63/3",
-                "value":          new_entry,
-            },
-            message_id=f"write-gkm2-{node_id}",
-        )
-        if check_error(resp2, "GroupKeyMap write (poging 2)"):
-            return False
+    if not check_error(resp, "GroupKeyMap write (pad 0/63/3/0)"):
+        print(f"  [OK] GroupKeyMap geschreven via 0/63/3/0")
+        return True
 
-    print(f"  [OK] GroupKeyMap geschreven (group_id=0x{group_id:04X} → keyset {keyset_id})")
-    return True
+    # Poging 2: schrijf de volledige lijst als top-level attribuut
+    # (werkt op sommige versies van python-matter-server)
+    print(f"  [?] Poging 2: volledige lijst via 0/63/3...")
+    resp2 = await send_command(
+        ws,
+        "write_attribute",
+        {
+            "node_id":        node_id,
+            "attribute_path": "0/63/3",
+            "value":          [new_entry],
+        },
+        message_id=f"write-gkm2-{node_id}",
+    )
+
+    if not check_error(resp2, "GroupKeyMap write (pad 0/63/3)"):
+        print(f"  [OK] GroupKeyMap geschreven via 0/63/3")
+        return True
+
+    # Beide paden mislukten — log en ga door zodat AddGroup ook wordt geprobeerd
+    print(f"  [!] GroupKeyMap schrijven mislukt op beide paden.")
+    print(f"      Dit is een bekende beperking van de WebSocket API.")
+    print(f"      AddGroup zal waarschijnlijk ook mislukken (status 135).")
+    return False
 
 
 # ---------------------------------------------------------------------------
