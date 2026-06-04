@@ -1,4 +1,34 @@
 #!/usr/bin/env python3
+"""
+=============================================================================
+HOWTO: DIT SCRIPT EXTERN UITVOEREN VANAF EEN ANDERE MACHINE
+=============================================================================
+
+1. VOORBEREIDING OP DE EXTERNE MACHINE:
+   Zorg ervoor dat Python 3 op de externe machine is geïnstalleerd.
+   Installeer de benodigde 'websockets' bibliotheek via de terminal/opdrachtprompt:
+   
+   pip install websockets
+
+2. CONTROLEER NETWERK & FIREWALL:
+   - Dit script stuurt opdrachten naar de Matter Server op IP: 192.168.178.2
+   - Zorg ervoor dat poort 5580 op de doelmachine open staat en bereikbaar is
+     binnen je lokale netwerk (LAN).
+
+3. HET SCRIPT OPSLAAN EN UITVOEREN:
+   Sla deze code op als 'remote_groups.py' op de externe machine.
+   
+   Voer het script uit via de terminal:
+   python3 remote_groups.py --nodes 32 33 34 35 --group-id 0x0001
+
+   Optionele parameters die je kunt meegeven:
+   --group-name "MijnGroep"  (Standaard: "Kantoor")
+   --keyset-id 42            (Standaard: 42)
+   --epoch-key "HEX_STRING"  (Als je een specifieke 16-byte sleutel wilt forceren)
+
+=============================================================================
+"""
+
 import argparse
 import asyncio
 import json
@@ -78,7 +108,6 @@ async def run_logic(args):
             # Stap 1: KeySetWrite
             # -----------------------------------------------------------------------
             try:
-                # We roepen de server-side device command API aan via de WebSocket
                 await client.send_command("device_command", {
                     "node_id": node_id,
                     "endpoint_id": 0,
@@ -103,7 +132,6 @@ async def run_logic(args):
             # Stap 2: GroupKeyMap
             # -----------------------------------------------------------------------
             try:
-                # Schrijf het groepsattribuut naar endpoint 0
                 await client.send_command("write_attribute", {
                     "node_id": node_id,
                     "attribute_path": f"0/63/0", # 63 = GroupKeyManagement, 0 = GroupKeyMap attribute
@@ -123,7 +151,6 @@ async def run_logic(args):
             # Stap 3: AddGroup
             # -----------------------------------------------------------------------
             try:
-                # We proberen de standaard camelCase parameters voor het AddGroup command op endpoint 1
                 await client.send_command("device_command", {
                     "node_id": node_id,
                     "endpoint_id": 1,
@@ -141,7 +168,6 @@ async def run_logic(args):
                     print(f"  [OK] Node al lid (DUPLICATE)")
                     ok3 = True
                 else:
-                    # Mocht jouw specifieke containerversie 'groupID' met hoofdletters eisen, probeer variant B
                     try:
                         await client.send_command("device_command", {
                             "node_id": node_id,
