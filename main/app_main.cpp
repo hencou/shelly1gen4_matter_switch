@@ -22,7 +22,6 @@ extern "C" {
 }
 
 #include "matter_device.h"
-#include <credentials/GroupDataProviderImpl.h>
 
 static const char *TAG = "app";
 
@@ -105,27 +104,26 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(matter_start());
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done, calling button_driver_init");
 
-// =========================================================================
-    // MULTICAST FIX: Bind GroupId 0x0001 to the default KeySetId
+    // =========================================================================
+    // MULTICAST BINDING WORKAROUND: Explicit structure mapping
     // =========================================================================
     ESP_LOGI(TAG, "Configuring local Matter Group Key Mapping...");
     chip::Credentials::GroupDataProvider *provider = chip::Credentials::GetGroupDataProvider();
     if (provider != nullptr) {
-        // Fabric index 1 is the default primary fabric (Home Assistant)
-        chip::FabricIndex fabricIdx = 1; 
+        chip::FabricIndex fabricIdx = 1; // Primary active commissioning fabric
         
-        // Map Group 0x0001 to KeySet 0x0001 (default epoch keyset)
         chip::Credentials::GroupDataProvider::GroupKey mapping;
-        mapping.mGroupId = 0x0001;
-        mapping.mKeySetId = 0x0001;
+        mapping.groupId = 0x0001;   // Verified member name (no 'm' prefix)
+        mapping.keysetId = 0x0001;  // Verified member name (no 'm' prefix)
         
+        // Zero-index write to inject the mapping straight into the provider runtime
         if (provider->SetGroupKeyAt(fabricIdx, 0, mapping) == CHIP_NO_ERROR) {
-            ESP_LOGI(TAG, "Group 0x0001 successfully mapped to KeySet 0x0001");
+            ESP_LOGI(TAG, "Group 0x0001 bound to KeySet 0x0001 successfully");
         } else {
-            ESP_LOGE(TAG, "FAILED to write group key mapping to provider");
+            ESP_LOGE(TAG, "Failed to inject group key mapping entry");
         }
     } else {
-        ESP_LOGE(TAG, "ERROR: Group Data Provider is null");
+        ESP_LOGE(TAG, "Critical: Group Data Provider instance is null");
     }
     // =========================================================================
     
