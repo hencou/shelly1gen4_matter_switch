@@ -1,0 +1,12 @@
+# Local secrets (WiFi credentials, OTA URL, etc.)
+main/secrets.h
+
+# Build output
+build/
+managed_components/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
