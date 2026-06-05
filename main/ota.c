@@ -13,6 +13,13 @@
 
 #include "ota.h"
 #include "app_config.h"
+
+/* Optional compile-time WiFi defaults from local secrets.h (not in git).
+ * If the file exists, DEFAULT_WIFI_SSID/PASS are pre-loaded into NVS
+ * on first OTA boot so you don't need the web form. */
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
 #include "button.h"
 #include "status_led.h"
 
@@ -813,6 +820,26 @@ void ota_handle_pending(void)
     bool have_creds = ota_load_credentials(ssid, sizeof(ssid),
                                            pass, sizeof(pass),
                                            url,  sizeof(url));
+
+#ifdef DEFAULT_WIFI_SSID
+    /* Auto-save compile-time defaults on first boot (when NVS is empty) */
+    if (!have_creds) {
+        ESP_LOGI(TAG, "No saved WiFi creds — using compile-time defaults");
+#ifndef DEFAULT_WIFI_PASS
+#define DEFAULT_WIFI_PASS ""
+#endif
+#ifndef DEFAULT_OTA_URL
+#define DEFAULT_OTA_URL   ""
+#endif
+        ota_save_credentials(DEFAULT_WIFI_SSID,
+                             DEFAULT_WIFI_PASS,
+                             DEFAULT_OTA_URL);
+        strncpy(ssid, DEFAULT_WIFI_SSID, sizeof(ssid) - 1);
+        strncpy(pass, DEFAULT_WIFI_PASS, sizeof(pass) - 1);
+        strncpy(url,  DEFAULT_OTA_URL,   sizeof(url) - 1);
+        have_creds = strlen(ssid) > 0;
+    }
+#endif
     if (have_creds) {
         ESP_LOGI(TAG, "trying STA OTA -> ssid=%s url=%s", ssid, url);
         if (wifi_init_sta(ssid, pass) == ESP_OK) {
