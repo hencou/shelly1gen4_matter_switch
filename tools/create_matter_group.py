@@ -158,8 +158,25 @@ async def run_logic(args):
         # group commands.  Without this, the lamp decrypts the message but
         # silently rejects it because no ACL grants Operate privilege for
         # the group's authMode.
+        #
+        # IMPORTANT: python-matter-server returns ACL entries with integer
+        # TLV tag keys ("1","2","3","4","254") but write_attribute expects
+        # string field names ("privilege","authMode","subjects","targets").
+        # We must normalise all entries to string keys before writing back.
         print("\n" + "-"*50)
         print("[STEP 3] Adding Group ACL entry on lamps...")
+
+        # TLV tag → field-name mapping for AccessControlEntryStruct
+        ACL_TAG_MAP = {"1": "privilege", "2": "authMode", "3": "subjects",
+                       "4": "targets", "254": "fabricIndex"}
+
+        def normalise_acl_entry(entry):
+            """Convert an ACL entry from TLV integer keys to string keys."""
+            out = {}
+            for k, v in entry.items():
+                name = ACL_TAG_MAP.get(str(k), str(k))
+                out[name] = v
+            return out
 
         for node_id in args.nodes:
             print(f"  --> ACL on Lamp (Node {node_id})...")
@@ -175,6 +192,15 @@ async def run_logic(args):
                 if not isinstance(acl_list, list):
                     acl_list = [acl_list] if acl_list else []
 
+                # Normalise all entries to string field names
+                acl_list = [normalise_acl_entry(e) for e in acl_list]
+                print(f"    Current ACL ({len(acl_list)} entries):")
+                for i, e in enumerate(acl_list):
+                    priv = e.get("privilege", "?")
+                    auth = e.get("authMode", "?")
+                    subj = e.get("subjects", [])
+                    print(f"      #{i+1}: privilege={priv} authMode={auth} subjects={subj}")
+
                 # Check if a group ACL entry for our group already exists
                 group_acl_exists = False
                 for entry in acl_list:
@@ -186,17 +212,27 @@ async def run_logic(args):
                 if group_acl_exists:
                     print(f"    [OK] Group ACL already present")
                 else:
-                    # Append group ACL: Operate privilege, Group authMode
-                    acl_list.append({
+                    # Drop fabricIndex from all entries — the server auto-fills it
+                    for entry in acl_list:
+                        entry.pop("fabricIndex", None)
+
+                    # IMPORTANT: the admin entry (Administer/CASE) MUST come first
+                    # so the commissioner does not lose access mid-write.
+                    # Re-sort: Administer entries first, then the rest.
+                    admin_entries = [e for e in acl_list if e.get("privilege") == 5]
+                    other_entries = [e for e in acl_list if e.get("privilege") != 5]
+
+                    # Build new list: admin first, then others, then group ACL
+                    new_acl = admin_entries + other_entries + [{
                         "privilege": 3,   # Operate
                         "authMode": 3,    # Group
                         "subjects": [args.group_id],
                         "targets": None,  # All endpoints/clusters
-                    })
+                    }]
                     await client.send_command("write_attribute", {
                         "node_id": node_id,
                         "attribute_path": "0/31/0",
-                        "value": acl_list
+                        "value": new_acl
                     })
                     print(f"    [OK] Group ACL added (Operate privilege for group 0x{args.group_id:04X})")
             except Exception as e:
