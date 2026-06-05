@@ -159,24 +159,27 @@ async def run_logic(args):
         # silently rejects it because no ACL grants Operate privilege for
         # the group's authMode.
         #
-        # IMPORTANT: python-matter-server returns ACL entries with integer
-        # TLV tag keys ("1","2","3","4","254") but write_attribute expects
-        # string field names ("privilege","authMode","subjects","targets").
-        # We must normalise all entries to string keys before writing back.
+        # IMPORTANT: python-matter-server uses integer TLV tag keys for
+        # AccessControlEntryStruct fields:
+        #   "1" = privilege, "2" = authMode, "3" = subjects,
+        #   "4" = targets,  "254" = fabricIndex
+        # Both read_attribute and write_attribute use this format.
+        # Do NOT use string field names ("privilege", "authMode", etc.)
+        # — they get silently zeroed out by the device.
         print("\n" + "-"*50)
         print("[STEP 3] Adding Group ACL entry on lamps...")
 
-        # TLV tag → field-name mapping for AccessControlEntryStruct
-        ACL_TAG_MAP = {"1": "privilege", "2": "authMode", "3": "subjects",
-                       "4": "targets", "254": "fabricIndex"}
+        # TLV tag names for logging
+        ACL_FIELD = {"1": "privilege", "2": "authMode", "3": "subjects",
+                     "4": "targets", "254": "fabricIndex"}
 
-        def normalise_acl_entry(entry):
-            """Convert an ACL entry from TLV integer keys to string keys."""
-            out = {}
-            for k, v in entry.items():
-                name = ACL_TAG_MAP.get(str(k), str(k))
-                out[name] = v
-            return out
+        def acl_get(entry, field_name):
+            """Get ACL field by name, looking up the TLV tag."""
+            tag = {v: k for k, v in ACL_FIELD.items()}.get(field_name)
+            if tag and tag in entry:
+                return entry[tag]
+            # Fallback: try string key directly (some server versions)
+            return entry.get(field_name)
 
         for node_id in args.nodes:
             print(f"  --> ACL on Lamp (Node {node_id})...")
@@ -192,49 +195,89 @@ async def run_logic(args):
                 if not isinstance(acl_list, list):
                     acl_list = [acl_list] if acl_list else []
 
-                # Normalise all entries to string field names
-                acl_list = [normalise_acl_entry(e) for e in acl_list]
+                # Dump raw ACL data for debugging
+                print(f"    Raw ACL data: {json.dumps(acl_list, indent=2)}")
                 print(f"    Current ACL ({len(acl_list)} entries):")
                 for i, e in enumerate(acl_list):
-                    priv = e.get("privilege", "?")
-                    auth = e.get("authMode", "?")
-                    subj = e.get("subjects", [])
+                    priv = acl_get(e, "privilege")
+                    auth = acl_get(e, "authMode")
+                    subj = acl_get(e, "subjects")
                     print(f"      #{i+1}: privilege={priv} authMode={auth} subjects={subj}")
 
-                # Check if a group ACL entry for our group already exists
+                # Check if a group ACL entry (authMode=3) already exists
                 group_acl_exists = False
                 for entry in acl_list:
-                    if (entry.get("authMode") == 3 and
-                        args.group_id in (entry.get("subjects") or [])):
+                    auth = acl_get(entry, "authMode")
+                    subj = acl_get(entry, "subjects") or []
+                    if auth == 3 and args.group_id in subj:
                         group_acl_exists = True
                         break
 
                 if group_acl_exists:
                     print(f"    [OK] Group ACL already present")
                 else:
-                    # Drop fabricIndex from all entries — the server auto-fills it
+                    # Keep existing entries in their ORIGINAL format (integer
+                    # TLV keys) — do NOT convert to string field names.
+                    # Only strip fabricIndex ("254") — the server auto-fills it.
+                    clean = []
                     for entry in acl_list:
-                        entry.pop("fabricIndex", None)
+                        e = {k: v for k, v in entry.items() if str(k) != "254"}
+                        # Skip broken entries (privilege=0 or missing)
+                        priv = acl_get({"x": None, **entry}, "privilege")
+                        if priv is not None and priv > 0:
+                            clean.append(e)
+                        else:
+                            print(f"    [!] Dropping broken entry: {e}")
 
-                    # IMPORTANT: the admin entry (Administer/CASE) MUST come first
-                    # so the commissioner does not lose access mid-write.
-                    # Re-sort: Administer entries first, then the rest.
-                    admin_entries = [e for e in acl_list if e.get("privilege") == 5]
-                    other_entries = [e for e in acl_list if e.get("privilege") != 5]
+                    # New group ACL entry — use integer TLV tag keys
+                    group_acl = {
+                        "1": 3,                    # privilege = Operate
+                        "2": 3,                    # authMode = Group
+                        "3": [args.group_id],      # subjects = [group_id]
+                        "4": None,                 # targets = all
+                    }
 
-                    # Build new list: admin first, then others, then group ACL
-                    new_acl = admin_entries + other_entries + [{
-                        "privilege": 3,   # Operate
-                        "authMode": 3,    # Group
-                        "subjects": [args.group_id],
-                        "targets": None,  # All endpoints/clusters
-                    }]
+                    # Admin entries (privilege=5) must come first
+                    admin = [e for e in clean if acl_get(e, "privilege") == 5]
+                    other = [e for e in clean if acl_get(e, "privilege") != 5]
+                    new_acl = admin + other + [group_acl]
+
+                    print(f"    Writing ACL ({len(new_acl)} entries):")
+                    for i, e in enumerate(new_acl):
+                        print(f"      #{i+1}: {json.dumps(e)}")
+
                     await client.send_command("write_attribute", {
                         "node_id": node_id,
                         "attribute_path": "0/31/0",
                         "value": new_acl
                     })
-                    print(f"    [OK] Group ACL added (Operate privilege for group 0x{args.group_id:04X})")
+
+                    # Verify: read back and check
+                    verify = await client.send_command("read_attribute", {
+                        "node_id": node_id,
+                        "attribute_path": "0/31/0"
+                    })
+                    vkey = list(verify.keys())[0] if isinstance(verify, dict) else None
+                    vlist = verify[vkey] if vkey else verify
+                    if not isinstance(vlist, list):
+                        vlist = [vlist] if vlist else []
+                    print(f"    Verify ACL ({len(vlist)} entries):")
+                    for i, e in enumerate(vlist):
+                        print(f"      #{i+1}: {json.dumps(e)}")
+                    # Check group entry is present and correct
+                    found = False
+                    for e in vlist:
+                        if acl_get(e, "authMode") == 3:
+                            p = acl_get(e, "privilege")
+                            if p == 3:
+                                found = True
+                            else:
+                                print(f"    [!] WARNING: Group entry has privilege={p}, expected 3")
+                    if found:
+                        print(f"    [OK] Group ACL verified (Operate privilege for group 0x{args.group_id:04X})")
+                    else:
+                        print(f"    [!] WARNING: Group ACL NOT found after write!")
+
             except Exception as e:
                 print(f"    [!] ACL setup failed: {e}")
 
