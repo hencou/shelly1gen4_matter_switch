@@ -259,202 +259,8 @@ static uint8_t ota_ow_read_byte(void)
     return v;
 }
 
-static esp_err_t sensor_get(httpd_req_t *req)
-{
-    static char buf[3072];
-    int pos = 0;
-
-    uart_driver_delete(UART_NUM_0);
-
-    gpio_config_t tx_cfg = {
-        .pin_bit_mask = (1ULL << OTA_OW_TX),
-        .mode         = GPIO_MODE_OUTPUT,
-    };
-    gpio_config(&tx_cfg);
-    ota_ow_tx_high();
-
-    gpio_reset_pin(OTA_OW_RX);
-    gpio_config_t rx_cfg = {
-        .pin_bit_mask = (1ULL << OTA_OW_RX),
-        .mode         = GPIO_MODE_INPUT,
-    };
-    gpio_config(&rx_cfg);
-
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<!DOCTYPE html><html><head><meta charset=utf-8>"
-        "<meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<meta http-equiv=refresh content=3>"
-        "<title>DS18B20 Test</title>"
-        "<style>body{font-family:monospace;max-width:520px;margin:2em auto;padding:1em}"
-        "h2{font-family:sans-serif}.ok{color:green}.err{color:red}"
-        ".warn{color:orange}.row{margin:.5em 0}a{color:#0066cc}</style></head><body>"
-        "<h2>&#127777; DS18B20 Sensor Test</h2>"
-        "<p style='color:#555;font-size:.9em'>Page refreshes automatically every 3s.</p>");
-
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Step 1: Reset pulse (TX=GPIO%d, RX=GPIO%d)</b> &mdash; ", OTA_OW_TX, OTA_OW_RX);
-    bool present = ota_ow_reset();
-    if (!present) {
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "<span class=err>&#10007; No presence pulse &mdash; sensor not found on bus</span></div>"
-            "<div class=row><span class=warn>Check wiring: VCC=3V3, TX=GPIO%d, RX=GPIO%d, GND=GND</span></div>"
-            "<p><a href=/>&#8592; Back</a></p></body></html>", OTA_OW_TX, OTA_OW_RX);
-        httpd_resp_set_type(req, "text/html");
-        httpd_resp_send(req, buf, pos);
-        return ESP_OK;
-    }
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<span class=ok>&#10003; Presence pulse received &mdash; sensor found</span></div>");
-
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Step 2: Convert T (0xCC 0x44)</b> &mdash; ");
-    ota_ow_write_byte(0xCC);
-    ota_ow_write_byte(0x44);
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<span class=ok>&#10003; Command sent</span></div>");
-
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send_chunk(req, buf, pos);
-    pos = 0;
-    vTaskDelay(pdMS_TO_TICKS(820));
-
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Step 3: Reset for ReadScratchpad</b> &mdash; ");
-    present = ota_ow_reset();
-    if (!present) {
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "<span class=err>&#10007; No presence pulse after conversion</span></div>"
-            "<p><a href=/>&#8592; Back</a></p></body></html>");
-        httpd_resp_send_chunk(req, buf, pos);
-        httpd_resp_send_chunk(req, NULL, 0);
-        return ESP_OK;
-    }
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<span class=ok>&#10003; Presence pulse OK</span></div>");
-
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Step 4: ReadScratchpad (0xCC 0xBE)</b><br>");
-    ota_ow_write_byte(0xCC);
-    ota_ow_write_byte(0xBE);
-
-    uint8_t sc[9];
-    for (int i = 0; i < 9; i++) sc[i] = ota_ow_read_byte();
-
-    const char *labels[9] = {"Temp LSB","Temp MSB","TH register","TL register",
-                              "Config register","Reserved","Reserved","Reserved","CRC"};
-    for (int i = 0; i < 9; i++) {
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "Byte[%d] = 0x%02X &mdash; %s<br>", i, sc[i], labels[i]);
-    }
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "</div>");
-
-    int16_t raw   = (int16_t)((sc[1] << 8) | sc[0]);
-    int16_t centi = (int16_t)(((int32_t)raw * 100) / 16);
-    int deg  = centi / 100;
-    int frac = centi < 0 ? -(centi % 100) : (centi % 100);
-    if (frac < 0) frac = -frac;
-    uint8_t res   = 9 + ((sc[4] >> 5) & 0x03);
-    bool sane = (raw != 0x0550) && (centi > -5500) && (centi < 12500);
-
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<div class=row><b>Step 5: Temperature</b><br>"
-        "raw=0x%04X (%d) &rarr; %d.%02d&deg;C &mdash; ",
-        (uint16_t)raw, raw, deg, frac);
-
-    if (raw == 0x0550) {
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "<span class=warn>&#9888; Power-on value 85&deg;C &mdash; conversion failed?</span>");
-    } else if (!sane) {
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "<span class=err>&#10007; Illogical value &mdash; check wiring</span>");
-    } else {
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "<span class=ok>&#10003; Valid reading: <b>%d.%02d&deg;C</b></span>", deg, frac);
-    }
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "</div><div class=row><b>Resolution:</b> %d bit</div>"
-        "<p><a href=/>&#8592; Back to OTA page</a></p></body></html>", res);
-
-    httpd_resp_send_chunk(req, buf, pos);
-    httpd_resp_send_chunk(req, NULL, 0);
-    return ESP_OK;
-}
-
-/* ---------- GPIO17 (Analog IN / occupancy) diagnostic ---------- */
-
 #include "esp_private/periph_ctrl.h"
 #include "soc/periph_defs.h"
-
-static esp_err_t gpio17_diag_get(httpd_req_t *req)
-{
-    static char buf[2048];
-    int pos = 0;
-
-    /* ---- UART0 teardown (same as sensors_init) ---- */
-    uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
-    uart_driver_delete(UART_NUM_0);
-    periph_module_disable(PERIPH_UART0_MODULE);
-    gpio_reset_pin(PIN_LD2410_INPUT);
-
-    gpio_config_t cfg = {
-        .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
-        .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type    = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&cfg);
-
-    /* ---- Duty cycle measurement: sample over 100 ms ---- */
-    int high = 0, total = 0;
-    for (int us = 0; us < 100000; us += 100) {
-        if (gpio_get_level(PIN_LD2410_INPUT)) high++;
-        total++;
-        esp_rom_delay_us(100);
-    }
-    int duty = (high * 100) / total;
-    int occ  = (duty >= 25);
-
-    /* ---- Build HTML ---- */
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<!DOCTYPE html><html><head><meta charset=utf-8>"
-        "<meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<meta http-equiv=refresh content=2>"
-        "<title>GPIO17 Diagnostic</title>"
-        "<style>body{font-family:monospace;max-width:560px;margin:2em auto;padding:1em}"
-        "h2{font-family:sans-serif}"
-        ".hi{color:red;font-weight:bold}.lo{color:green;font-weight:bold}"
-        "table{border-collapse:collapse;margin:.5em 0}"
-        "td,th{border:1px solid #ccc;padding:4px 10px;text-align:left}"
-        "</style></head><body>"
-        "<h2>&#128270; GPIO17 (Analog IN) Diagnostic</h2>"
-        "<p>Auto-refreshes every 2 s.  Duty cycle sampled over 100 ms (1000 reads).</p>");
-
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<h3>Duty cycle: <span class=%s>%d%%</span></h3>"
-        "<h3>Occupancy: <span class=%s>%s</span></h3>",
-        occ ? "hi" : "lo", duty,
-        occ ? "hi" : "lo", occ ? "OCCUPIED" : "CLEAR");
-
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<table>"
-        "<tr><th>Parameter</th><th>Value</th></tr>"
-        "<tr><td>GPIO</td><td>%d</td></tr>"
-        "<tr><td>Samples</td><td>%d (HIGH: %d)</td></tr>"
-        "<tr><td>Duty cycle</td><td>%d%%</td></tr>"
-        "<tr><td>Threshold</td><td>25%% (\u2248 2.5 V)</td></tr>"
-        "<tr><td>Result</td><td>%s</td></tr>"
-        "</table>",
-        PIN_LD2410_INPUT, total, high, duty,
-        occ ? "occupied" : "clear");
-
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-        "<p><a href=/>&#8592; Back to OTA</a></p></body></html>");
-
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, buf, pos);
-    return ESP_OK;
-}
 
 /* ---------- Management dashboard HTML page ---------- */
 
@@ -523,8 +329,8 @@ static const char MGMT_HTML[] =
 /* ── Tab 1: Hardware ── */
 "<div class=pane id=p1>"
 "<h3>Hardware Status</h3>"
-"<p class=info>Live sensor readings. <button class='btn btn-blue' onclick=loadHW()>"
-"Refresh</button></p>"
+"<p class=info>Live sensor readings (auto-refresh every 5 s). "
+"<button class='btn btn-blue' onclick=loadHW()>Refresh now</button></p>"
 "<table><tr><th>Sensor</th><th>Value</th></tr>"
 "<tr><td>Temperature (DS18B20)</td><td class=hw-val id=hw-temp>-</td></tr>"
 "<tr><td>Digital IN (GPIO18)</td><td class=hw-val id=hw-dig>-</td></tr>"
@@ -551,7 +357,7 @@ static const char MGMT_HTML[] =
 "function showTab(n){"
 "  document.querySelectorAll('.tab').forEach(function(t,i){t.className=i==n?'tab act':'tab'});"
 "  document.querySelectorAll('.pane').forEach(function(p,i){p.className=i==n?'pane act':'pane'});"
-"  if(n==1)loadHW();"
+"  if(n==1){loadHW();startHWTimer()}else{stopHWTimer()}"
 "}"
 
 /* Load saved settings on page load */
@@ -638,7 +444,8 @@ static const char MGMT_HTML[] =
 "  xhr.send(f);"
 "}"
 
-/* Hardware readout */
+/* Hardware readout + auto-refresh */
+"var hwTimer=null;"
 "function loadHW(){"
 "  document.getElementById('hw-msg').innerHTML='Loading...';"
 "  var x=new XMLHttpRequest();"
@@ -655,6 +462,8 @@ static const char MGMT_HTML[] =
 "  x.onerror=function(){document.getElementById('hw-msg').innerHTML='<span class=err>Connection error</span>'};"
 "  x.open('GET','/api/hardware');x.send();"
 "}"
+"function startHWTimer(){if(!hwTimer)hwTimer=setInterval(loadHW,5000)}"
+"function stopHWTimer(){if(hwTimer){clearInterval(hwTimer);hwTimer=null}}"
 
 /* Backup */
 "function doBackup(){window.location='/api/backup'}"
@@ -1009,14 +818,12 @@ static void start_httpd(void)
     hc.recv_wait_timeout  = 30;   /* seconds waiting for data */
     hc.send_wait_timeout  = 10;
     hc.max_open_sockets   = 3;
-    hc.max_uri_handlers   = 12;
+    hc.max_uri_handlers   = 10;
     ESP_ERROR_CHECK(httpd_start(&srv, &hc));
 
     httpd_uri_t get_root          = { "/",                  HTTP_GET,  form_get,              NULL };
     httpd_uri_t post_upload       = { "/upload",            HTTP_POST, upload_post,           NULL };
     httpd_uri_t post_ota          = { "/ota",               HTTP_POST, ota_post,              NULL };
-    httpd_uri_t get_sensor        = { "/sensor",            HTTP_GET,  sensor_get,            NULL };
-    httpd_uri_t get_gpio17        = { "/gpio17",            HTTP_GET,  gpio17_diag_get,       NULL };
     httpd_uri_t get_settings      = { "/api/settings",      HTTP_GET,  api_settings_get,      NULL };
     httpd_uri_t get_hardware      = { "/api/hardware",      HTTP_GET,  api_hardware_get,      NULL };
     httpd_uri_t post_restart      = { "/api/restart",       HTTP_POST, api_restart_post,      NULL };
@@ -1027,8 +834,6 @@ static void start_httpd(void)
     httpd_register_uri_handler(srv, &get_root);
     httpd_register_uri_handler(srv, &post_upload);
     httpd_register_uri_handler(srv, &post_ota);
-    httpd_register_uri_handler(srv, &get_sensor);
-    httpd_register_uri_handler(srv, &get_gpio17);
     httpd_register_uri_handler(srv, &get_settings);
     httpd_register_uri_handler(srv, &get_hardware);
     httpd_register_uri_handler(srv, &post_restart);
