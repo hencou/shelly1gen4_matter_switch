@@ -456,59 +456,153 @@ static esp_err_t gpio17_diag_get(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ---------- SoftAP HTML page ---------- */
+/* ---------- Management dashboard HTML page ---------- */
 
-/*
- * Upload page:
- * - Top: direct .bin upload via fetch() -> /upload (no WiFi creds needed)
- * - Bottom: optional WiFi+URL entry for STA fetch on next boot
- */
-static const char FORM_HTML[] =
+static const char MGMT_HTML[] =
 "<!DOCTYPE html><html><head><meta charset=utf-8>"
 "<meta name=viewport content='width=device-width,initial-scale=1'>"
-"<title>Shelly OTA</title>"
+"<title>Shelly Management</title>"
 "<style>"
-"body{font-family:sans-serif;max-width:480px;margin:2em auto;padding:1em}"
-"h2{margin-bottom:.2em}h3{margin-top:1.5em;border-top:1px solid #ccc;padding-top:1em}"
-"input{width:100%;box-sizing:border-box;padding:.5em;margin:.3em 0 .8em}"
-"label{font-weight:bold;display:block}"
-".btn{padding:.6em 1.4em;background:#0066cc;color:#fff;border:0;"
-"     cursor:pointer;font-size:1em;border-radius:3px}"
+"*{box-sizing:border-box}body{font-family:sans-serif;max-width:560px;margin:0 auto;padding:1em}"
+"h2{margin-bottom:.3em}"
+".tabs{display:flex;border-bottom:2px solid #0066cc;margin:1em 0 0}"
+".tab{padding:.6em 1.2em;cursor:pointer;border:1px solid #ccc;border-bottom:none;"
+"  margin-right:2px;border-radius:6px 6px 0 0;background:#f5f5f5;font-size:.95em}"
+".tab.act{background:#0066cc;color:#fff;border-color:#0066cc}"
+".pane{display:none;padding:1em 0}.pane.act{display:block}"
+"input,select{width:100%;padding:.5em;margin:.3em 0 .8em;border:1px solid #ccc;border-radius:3px}"
+"label{font-weight:bold;display:block;margin-top:.3em}"
+".btn{padding:.55em 1.2em;color:#fff;border:0;cursor:pointer;font-size:.95em;border-radius:3px;margin:.3em .3em .3em 0}"
+".btn-blue{background:#0066cc}.btn-green{background:#28a745}"
+".btn-red{background:#dc3545}.btn-gray{background:#6c757d}"
 ".btn:disabled{background:#999;cursor:default}"
 "#bar-wrap{display:none;margin:.8em 0;background:#eee;border-radius:4px;height:22px}"
 "#bar{height:22px;background:#0066cc;border-radius:4px;width:0;transition:width .2s}"
 "#bar-lbl{text-align:center;margin-top:.2em;font-size:.9em}"
-"#status{font-weight:bold;margin-top:.6em}"
-".ok{color:green}.err{color:red}"
+".msg{font-weight:bold;margin-top:.6em}.ok{color:green}.err{color:red}"
+"table{border-collapse:collapse;width:100%;margin:.5em 0}"
+"td,th{border:1px solid #ddd;padding:6px 10px;text-align:left}"
+"th{background:#f0f0f0}.hw-val{font-family:monospace;font-size:1.1em}"
+".info{font-size:.85em;color:#555;margin-bottom:.8em}"
 "</style></head><body>"
 
-"<h2>&#128268; Shelly1Gen4 &mdash; OTA Update</h2>"
-"<p><a href=/sensor>&#127777; DS18B20 sensor test</a>"
-" &nbsp;|&nbsp; <a href=/gpio17>&#128270; GPIO17 diagnostic</a></p>"
+"<h2>Shelly1Gen4 Management</h2>"
 
-/* ── Section 1: direct upload ── */
-"<h3>Upload firmware</h3>"
+/* ── Tab bar ── */
+"<div class=tabs>"
+"<div class='tab act' onclick=showTab(0)>WiFi &amp; OTA</div>"
+"<div class=tab onclick=showTab(1)>Hardware</div>"
+"<div class=tab onclick=showTab(2)>Backup</div>"
+"</div>"
+
+/* ── Tab 0: WiFi & OTA ── */
+"<div class='pane act' id=p0>"
+"<h3>WiFi Settings</h3>"
+"<p class=info>Credentials are stored in flash. On next OTA boot the device "
+"connects to your WiFi automatically.</p>"
+"<label>WiFi SSID</label><input id=ssid>"
+"<label>WiFi Password</label><input id=pass type=password>"
+"<label>Firmware URL (optional)</label>"
+"<input id=url placeholder='http://server/shelly1gen4.bin'>"
+"<div style='margin:1em 0'>"
+"<button class='btn btn-green' onclick=doSaveRestart()>Save &amp; Restart</button>"
+"<button class='btn btn-gray' onclick=doRestart()>Restart without saving</button>"
+"<button class='btn btn-red' onclick=doFactory()>Factory Reset</button>"
+"</div>"
+"<div id=wifi-msg class=msg></div>"
+
+"<h3>Upload Firmware</h3>"
 "<label for=binfile>Select .bin file</label>"
 "<input type=file id=binfile accept='.bin'>"
-"<button class=btn id=flashbtn onclick=doUpload()>&#9889; Flash Firmware</button>"
+"<button class='btn btn-blue' id=flashbtn onclick=doUpload()>Flash Firmware</button>"
 "<div id=bar-wrap><div id=bar></div></div>"
 "<div id=bar-lbl></div>"
-"<div id=status></div>"
+"<div id=flash-msg class=msg></div>"
+"</div>"
 
-/* ── Section 2: WiFi + URL for STA boot ── */
-"<h3>Save WiFi (optional)</h3>"
-"<p style='font-size:.9em;color:#555'>Save WiFi credentials so on the next OTA trigger "
-"the device connects to your network. The web interface will be reachable on the "
-"router-assigned IP. If a firmware URL is set, it will also try auto-fetch.</p>"
-"<form method=POST action=/ota>"
-"<label>WiFi SSID</label><input name=ssid>"
-"<label>WiFi Password</label><input name=pass type=password>"
-"<label>Firmware URL (.bin, optional)</label>"
-"<input name=url placeholder='http://homeassistant.local:8123/local/shelly1gen4.bin'>"
-"<button class=btn type=submit>Save &amp; Restart</button>"
-"</form>"
+/* ── Tab 1: Hardware ── */
+"<div class=pane id=p1>"
+"<h3>Hardware Status</h3>"
+"<p class=info>Live sensor readings. <button class='btn btn-blue' onclick=loadHW()>"
+"Refresh</button></p>"
+"<table><tr><th>Sensor</th><th>Value</th></tr>"
+"<tr><td>Temperature (DS18B20)</td><td class=hw-val id=hw-temp>-</td></tr>"
+"<tr><td>Digital IN (GPIO18)</td><td class=hw-val id=hw-dig>-</td></tr>"
+"<tr><td>Analog IN (GPIO17)</td><td class=hw-val id=hw-ana>-</td></tr>"
+"<tr><td>Pushbutton (GPIO10)</td><td class=hw-val id=hw-btn>-</td></tr>"
+"</table>"
+"<div id=hw-msg class=msg></div>"
+"</div>"
+
+/* ── Tab 2: Backup / Restore ── */
+"<div class=pane id=p2>"
+"<h3>Backup &amp; Restore</h3>"
+"<p class=info>Download all saved settings as a backup file, or restore "
+"from a previously saved backup.</p>"
+"<button class='btn btn-blue' onclick=doBackup()>Download Backup</button>"
+"<h3>Restore from file</h3>"
+"<input type=file id=restfile accept='.json'>"
+"<button class='btn btn-green' onclick=doRestore()>Restore Backup</button>"
+"<div id=bk-msg class=msg></div>"
+"</div>"
 
 "<script>"
+/* Tab switching */
+"function showTab(n){"
+"  document.querySelectorAll('.tab').forEach(function(t,i){t.className=i==n?'tab act':'tab'});"
+"  document.querySelectorAll('.pane').forEach(function(p,i){p.className=i==n?'pane act':'pane'});"
+"  if(n==1)loadHW();"
+"}"
+
+/* Load saved settings on page load */
+"function loadSettings(){"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){"
+"    if(x.status==200){"
+"      var d=JSON.parse(x.responseText);"
+"      document.getElementById('ssid').value=d.ssid||'';"
+"      document.getElementById('pass').value=d.pass||'';"
+"      document.getElementById('url').value=d.url||'';"
+"    }"
+"  };"
+"  x.open('GET','/api/settings');x.send();"
+"}"
+"loadSettings();"
+
+/* WiFi save & restart */
+"function doSaveRestart(){"
+"  var b='ssid='+encodeURIComponent(document.getElementById('ssid').value)"
+"    +'&pass='+encodeURIComponent(document.getElementById('pass').value)"
+"    +'&url='+encodeURIComponent(document.getElementById('url').value);"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){document.getElementById('wifi-msg').innerHTML="
+"    '<span class=ok>Saved! Restarting...</span>'};"
+"  x.onerror=function(){document.getElementById('wifi-msg').innerHTML="
+"    '<span class=ok>Saved! Restarting...</span>'};"
+"  x.open('POST','/ota');x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');"
+"  x.send(b);"
+"}"
+
+/* Restart without saving */
+"function doRestart(){"
+"  if(!confirm('Restart device without saving?'))return;"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){document.getElementById('wifi-msg').innerHTML="
+"    '<span class=ok>Restarting...</span>'};"
+"  x.open('POST','/api/restart');x.send();"
+"}"
+
+/* Factory reset */
+"function doFactory(){"
+"  if(!confirm('WARNING: This erases ALL settings and Matter pairing data. Continue?'))return;"
+"  if(!confirm('Are you really sure? This cannot be undone!'))return;"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){document.getElementById('wifi-msg').innerHTML="
+"    '<span class=ok>Factory reset done. Restarting...</span>'};"
+"  x.open('POST','/api/factory-reset');x.send();"
+"}"
+
+/* Firmware upload */
 "function doUpload(){"
 "  var f=document.getElementById('binfile').files[0];"
 "  if(!f){alert('Select a .bin file first');return;}"
@@ -516,11 +610,8 @@ static const char FORM_HTML[] =
 "  var wrap=document.getElementById('bar-wrap');"
 "  var bar=document.getElementById('bar');"
 "  var lbl=document.getElementById('bar-lbl');"
-"  var st=document.getElementById('status');"
-"  btn.disabled=true;"
-"  wrap.style.display='block';"
-"  st.textContent='';"
-"  st.className='';"
+"  var st=document.getElementById('flash-msg');"
+"  btn.disabled=true;wrap.style.display='block';st.textContent='';st.className='msg';"
 "  var xhr=new XMLHttpRequest();"
 "  xhr.upload.onprogress=function(e){"
 "    if(e.lengthComputable){"
@@ -533,23 +624,59 @@ static const char FORM_HTML[] =
 "  xhr.onload=function(){"
 "    if(xhr.status===200){"
 "      bar.style.width='100%';"
-"      lbl.textContent='Upload complete — device restarting...';"
-"      st.textContent='\\u2705 Flashed! Wait 10 seconds and reconnect.';"
-"      st.className='ok';"
-"    } else {"
-"      st.textContent='\\u274C Error: '+xhr.responseText;"
-"      st.className='err';"
+"      lbl.textContent='Upload complete';"
+"      st.innerHTML='<span class=ok>Flashed! Restarting...</span>';"
+"    }else{"
+"      st.innerHTML='<span class=err>Error: '+xhr.responseText+'</span>';"
 "      btn.disabled=false;"
 "    }"
 "  };"
 "  xhr.onerror=function(){"
-"    st.textContent='\\u274C Connection lost during upload.';"
-"    st.className='err';"
-"    btn.disabled=false;"
-"  };"
+"    st.innerHTML='<span class=err>Connection lost</span>';btn.disabled=false;};"
 "  xhr.open('POST','/upload');"
 "  xhr.setRequestHeader('Content-Type','application/octet-stream');"
 "  xhr.send(f);"
+"}"
+
+/* Hardware readout */
+"function loadHW(){"
+"  document.getElementById('hw-msg').innerHTML='Loading...';"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){"
+"    if(x.status==200){"
+"      var d=JSON.parse(x.responseText);"
+"      document.getElementById('hw-temp').textContent=d.temperature||'N/A';"
+"      document.getElementById('hw-dig').textContent=d.digital_in||'N/A';"
+"      document.getElementById('hw-ana').textContent=d.analog_in||'N/A';"
+"      document.getElementById('hw-btn').textContent=d.pushbutton||'N/A';"
+"      document.getElementById('hw-msg').textContent='';"
+"    }else{document.getElementById('hw-msg').innerHTML='<span class=err>Read failed</span>'}"
+"  };"
+"  x.onerror=function(){document.getElementById('hw-msg').innerHTML='<span class=err>Connection error</span>'};"
+"  x.open('GET','/api/hardware');x.send();"
+"}"
+
+/* Backup */
+"function doBackup(){window.location='/api/backup'}"
+
+/* Restore */
+"function doRestore(){"
+"  var f=document.getElementById('restfile').files[0];"
+"  if(!f){alert('Select a backup file first');return;}"
+"  var r=new FileReader();"
+"  r.onload=function(){"
+"    var x=new XMLHttpRequest();"
+"    x.onload=function(){"
+"      if(x.status==200){document.getElementById('bk-msg').innerHTML="
+"        '<span class=ok>Restored! Restarting...</span>'}"
+"      else{document.getElementById('bk-msg').innerHTML="
+"        '<span class=err>Error: '+x.responseText+'</span>'}"
+"    };"
+"    x.open('POST','/api/restore');"
+"    x.setRequestHeader('Content-Type','application/json');"
+"    x.send(r.result);"
+"  };"
+"  r.readAsText(f);"
 "}"
 "</script></body></html>";
 
@@ -557,7 +684,186 @@ static const char FORM_HTML[] =
 
 static esp_err_t form_get(httpd_req_t *req)
 {
-    return httpd_resp_send(req, FORM_HTML, HTTPD_RESP_USE_STRLEN);
+    return httpd_resp_send(req, MGMT_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
+/* /api/settings — return current NVS WiFi creds as JSON */
+static esp_err_t api_settings_get(httpd_req_t *req)
+{
+    char ssid[33] = {0}, pass[65] = {0}, url[256] = {0};
+    ota_load_credentials(ssid, sizeof(ssid), pass, sizeof(pass),
+                         url, sizeof(url));
+    static char json[512];
+    snprintf(json, sizeof(json),
+        "{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\"}",
+        ssid, pass, url);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+}
+
+/* /api/hardware — read sensors and return JSON */
+static esp_err_t api_hardware_get(httpd_req_t *req)
+{
+    static char json[512];
+    int pos = 0;
+
+    /* Temperature — DS18B20 via 1-Wire */
+    char temp_str[32] = "sensor not found";
+    {
+        uart_driver_delete(UART_NUM_0);
+        gpio_config_t tx_cfg = {
+            .pin_bit_mask = (1ULL << OTA_OW_TX),
+            .mode         = GPIO_MODE_OUTPUT,
+        };
+        gpio_config(&tx_cfg);
+        ota_ow_tx_high();
+        gpio_reset_pin(OTA_OW_RX);
+        gpio_config_t rx_cfg = {
+            .pin_bit_mask = (1ULL << OTA_OW_RX),
+            .mode         = GPIO_MODE_INPUT,
+        };
+        gpio_config(&rx_cfg);
+
+        if (ota_ow_reset()) {
+            ota_ow_write_byte(0xCC);
+            ota_ow_write_byte(0x44);
+            vTaskDelay(pdMS_TO_TICKS(820));
+            if (ota_ow_reset()) {
+                ota_ow_write_byte(0xCC);
+                ota_ow_write_byte(0xBE);
+                uint8_t sc[9];
+                for (int i = 0; i < 9; i++) sc[i] = ota_ow_read_byte();
+                int16_t raw = (int16_t)((sc[1] << 8) | sc[0]);
+                int16_t centi = (int16_t)(((int32_t)raw * 100) / 16);
+                int deg  = centi / 100;
+                int frac = centi < 0 ? -(centi % 100) : (centi % 100);
+                if (frac < 0) frac = -frac;
+                if (raw != 0x0550 && centi > -5500 && centi < 12500) {
+                    snprintf(temp_str, sizeof(temp_str), "%d.%02d C", deg, frac);
+                } else if (raw == 0x0550) {
+                    snprintf(temp_str, sizeof(temp_str), "85.00 C (power-on default)");
+                } else {
+                    snprintf(temp_str, sizeof(temp_str), "error (%d.%02d C)", deg, frac);
+                }
+            }
+        }
+    }
+
+    /* Analog IN — GPIO17 duty cycle */
+    char ana_str[32];
+    {
+        uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+        uart_driver_delete(UART_NUM_0);
+        periph_module_disable(PERIPH_UART0_MODULE);
+        gpio_reset_pin(PIN_LD2410_INPUT);
+        gpio_config_t cfg = {
+            .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
+            .mode         = GPIO_MODE_INPUT,
+            .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        };
+        gpio_config(&cfg);
+        int high = 0, total = 0;
+        for (int us = 0; us < 100000; us += 100) {
+            if (gpio_get_level(PIN_LD2410_INPUT)) high++;
+            total++;
+            esp_rom_delay_us(100);
+        }
+        int duty = (high * 100) / total;
+        snprintf(ana_str, sizeof(ana_str), "%d%% duty (%s)",
+                 duty, duty >= 25 ? "occupied" : "clear");
+    }
+
+    /* Digital IN — GPIO18 (TTP223 touch) */
+    int dig_level = gpio_get_level(PIN_TOUCH_INPUT);
+
+    /* Pushbutton — GPIO10 */
+    int btn_level = gpio_get_level(PIN_SWITCH_INPUT);
+    int btn_active = BENCH_MODE ? !btn_level : btn_level;
+
+    pos = snprintf(json, sizeof(json),
+        "{\"temperature\":\"%s\","
+        "\"digital_in\":\"%s (GPIO%d=%d)\","
+        "\"analog_in\":\"%s\","
+        "\"pushbutton\":\"%s (GPIO%d=%d)\"}",
+        temp_str,
+        dig_level ? "HIGH" : "LOW", PIN_TOUCH_INPUT, dig_level,
+        ana_str,
+        btn_active ? "PRESSED" : "RELEASED", PIN_SWITCH_INPUT, btn_level);
+
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json, pos);
+}
+
+/* /api/restart — reboot without saving */
+static esp_err_t api_restart_post(httpd_req_t *req)
+{
+    httpd_resp_sendstr(req, "OK");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
+/* /api/factory-reset — erase NVS and reboot */
+static esp_err_t api_factory_reset_post(httpd_req_t *req)
+{
+    nvs_flash_erase();
+    httpd_resp_sendstr(req, "OK");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
+/* /api/backup — export NVS settings as JSON download */
+static esp_err_t api_backup_get(httpd_req_t *req)
+{
+    char ssid[33] = {0}, pass[65] = {0}, url[256] = {0};
+    ota_load_credentials(ssid, sizeof(ssid), pass, sizeof(pass),
+                         url, sizeof(url));
+
+    static char json[512];
+    snprintf(json, sizeof(json),
+        "{\"version\":1,"
+        "\"ota\":{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\"}}",
+        ssid, pass, url);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Content-Disposition",
+                       "attachment; filename=\"shelly1gen4_backup.json\"");
+    return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+}
+
+/* /api/restore — import JSON backup and reboot */
+static esp_err_t api_restore_post(httpd_req_t *req)
+{
+    char body[512] = {0};
+    int len = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (len <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "empty body");
+        return ESP_FAIL;
+    }
+
+    /* Simple JSON extraction (no external parser needed) */
+    char ssid[33] = {0}, pass[65] = {0}, url_buf[256] = {0};
+
+    /* Extract values between quotes after key names */
+    const char *p;
+    p = strstr(body, "\"ssid\":\"");
+    if (p) { p += 8; const char *e = strchr(p, '"'); if (e) { size_t n = e-p; if (n > 32) n = 32; memcpy(ssid, p, n); } }
+    p = strstr(body, "\"pass\":\"");
+    if (p) { p += 8; const char *e = strchr(p, '"'); if (e) { size_t n = e-p; if (n > 64) n = 64; memcpy(pass, p, n); } }
+    p = strstr(body, "\"url\":\"");
+    if (p) { p += 7; const char *e = strchr(p, '"'); if (e) { size_t n = e-p; if (n > 255) n = 255; memcpy(url_buf, p, n); } }
+
+    if (!ssid[0]) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no ssid in backup");
+        return ESP_FAIL;
+    }
+
+    ota_save_credentials(ssid, pass, url_buf);
+    httpd_resp_sendstr(req, "OK");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
 }
 
 /* /upload — receives raw .bin, writes directly to OTA partition */
@@ -703,19 +1009,32 @@ static void start_httpd(void)
     hc.recv_wait_timeout  = 30;   /* seconds waiting for data */
     hc.send_wait_timeout  = 10;
     hc.max_open_sockets   = 3;
+    hc.max_uri_handlers   = 12;
     ESP_ERROR_CHECK(httpd_start(&srv, &hc));
 
-    httpd_uri_t get_root    = { "/",       HTTP_GET,  form_get,        NULL };
-    httpd_uri_t post_upload = { "/upload", HTTP_POST, upload_post,     NULL };
-    httpd_uri_t post_ota    = { "/ota",    HTTP_POST, ota_post,        NULL };
-    httpd_uri_t get_sensor  = { "/sensor", HTTP_GET,  sensor_get,      NULL };
-    httpd_uri_t get_gpio17  = { "/gpio17", HTTP_GET,  gpio17_diag_get, NULL };
+    httpd_uri_t get_root          = { "/",                  HTTP_GET,  form_get,              NULL };
+    httpd_uri_t post_upload       = { "/upload",            HTTP_POST, upload_post,           NULL };
+    httpd_uri_t post_ota          = { "/ota",               HTTP_POST, ota_post,              NULL };
+    httpd_uri_t get_sensor        = { "/sensor",            HTTP_GET,  sensor_get,            NULL };
+    httpd_uri_t get_gpio17        = { "/gpio17",            HTTP_GET,  gpio17_diag_get,       NULL };
+    httpd_uri_t get_settings      = { "/api/settings",      HTTP_GET,  api_settings_get,      NULL };
+    httpd_uri_t get_hardware      = { "/api/hardware",      HTTP_GET,  api_hardware_get,      NULL };
+    httpd_uri_t post_restart      = { "/api/restart",       HTTP_POST, api_restart_post,      NULL };
+    httpd_uri_t post_factory      = { "/api/factory-reset", HTTP_POST, api_factory_reset_post,NULL };
+    httpd_uri_t get_backup        = { "/api/backup",        HTTP_GET,  api_backup_get,        NULL };
+    httpd_uri_t post_restore      = { "/api/restore",       HTTP_POST, api_restore_post,      NULL };
 
     httpd_register_uri_handler(srv, &get_root);
     httpd_register_uri_handler(srv, &post_upload);
     httpd_register_uri_handler(srv, &post_ota);
     httpd_register_uri_handler(srv, &get_sensor);
     httpd_register_uri_handler(srv, &get_gpio17);
+    httpd_register_uri_handler(srv, &get_settings);
+    httpd_register_uri_handler(srv, &get_hardware);
+    httpd_register_uri_handler(srv, &post_restart);
+    httpd_register_uri_handler(srv, &post_factory);
+    httpd_register_uri_handler(srv, &get_backup);
+    httpd_register_uri_handler(srv, &post_restore);
 }
 
 static void wait_for_upload_or_timeout(void)
