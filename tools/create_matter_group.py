@@ -313,17 +313,17 @@ async def run_logic(args):
         print("\n" + "-"*50)
         print("[STEP 5] Writing binding table to the Switch...")
 
-        binding_entry = {
-            "group": args.group_id,
-            "cluster": 6,           # OnOff cluster
-        }
+        bindings = [
+            {"group": args.group_id, "cluster": 6},    # OnOff
+            {"group": args.group_id, "cluster": 8},    # LevelControl (dimming)
+        ]
 
         # Try set_node_binding first (purpose-built API)
         try:
             result = await client.send_command("set_node_binding", {
                 "node_id": args.switch,
                 "endpoint": args.switch_endpoint,
-                "bindings": [binding_entry]
+                "bindings": bindings
             })
             print(f"    [OK] Binding written via set_node_binding!")
             print(f"    Result: {result}")
@@ -333,7 +333,7 @@ async def run_logic(args):
                 result = await client.send_command("write_attribute", {
                     "node_id": args.switch,
                     "attribute_path": f"{args.switch_endpoint}/30/0",
-                    "value": [binding_entry]
+                    "value": bindings
                 })
                 print(f"    [OK] Binding written via write_attribute!")
                 print(f"    Result: {result}")
