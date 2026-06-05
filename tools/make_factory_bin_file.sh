@@ -2,8 +2,8 @@
 # Build a single merged flash image for ESPConnect / web-based flashing.
 #
 # Usage:
-#   ./tools/make-merged.sh                # produces shelly1gen4_matter_switch_merged.bin in project root
-#   WIN_DOWNLOADS=/mnt/c/Users/Henk/Downloads ./tools/make-merged.sh
+#   ./tools/make-merged.sh                # produces shelly1gen4_matter_switch_factory.bin in project root
+#   WIN_DOWNLOADS=/mnt/c/Users/user/Downloads ./tools/make_factory_bin_file.sh
 #                                         # also copies the merged bin to your Windows Downloads
 #
 # Prereqs:
@@ -14,7 +14,7 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build"
-OUT="${PROJECT_DIR}/shelly1gen4_matter_switch_merged.bin"
+OUT="${PROJECT_DIR}/shelly1gen4_matter_switch_factory.bin"
 
 REQUIRED=(
     "${BUILD_DIR}/bootloader/bootloader.bin"
