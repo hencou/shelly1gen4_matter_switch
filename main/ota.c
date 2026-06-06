@@ -56,6 +56,10 @@ static const char *TAG = "ota";
 #define NVS_KEY_SSID        "ssid"
 #define NVS_KEY_PASS        "pass"
 #define NVS_KEY_URL         "url"
+#define NVS_KEY_BENCH       "bench"
+
+/* Runtime bench mode — initialised from NVS in bench_mode_init(). */
+int g_bench_mode = BENCH_MODE;
 
 #define WIFI_CONNECTED_BIT  BIT0
 #define WIFI_FAIL_BIT       BIT1
@@ -108,6 +112,33 @@ static bool ota_load_credentials(char *ssid, size_t ssidlen,
     }
     nvs_close(h);
     return ok;
+}
+
+void bench_mode_init(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        uint8_t v = 0xff;
+        if (nvs_get_u8(h, NVS_KEY_BENCH, &v) == ESP_OK) {
+            g_bench_mode = (v != 0) ? 1 : 0;
+        }
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "bench_mode = %d (compile-time default = %d)",
+             g_bench_mode, BENCH_MODE);
+}
+
+static esp_err_t bench_mode_save(int on)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    nvs_set_u8(h, NVS_KEY_BENCH, on ? 1 : 0);
+    nvs_commit(h);
+    nvs_close(h);
+    g_bench_mode = on ? 1 : 0;
+    ESP_LOGI(TAG, "bench_mode saved: %d", g_bench_mode);
+    return ESP_OK;
 }
 
 static bool ota_pending_read_and_clear(void)
@@ -346,7 +377,12 @@ static const char MGMT_HTML[] =
 "<tr><td>Free heap</td><td class=hw-val id=hw-heap>-</td></tr>"
 "<tr><td>Chip temperature</td><td class=hw-val id=hw-ctemp>-</td></tr>"
 "<tr><td>Reset reason</td><td class=hw-val id=hw-rst>-</td></tr>"
-"<tr><td>Bench mode</td><td class=hw-val id=hw-bench>-</td></tr>"
+"<tr><td>Bench mode<br><span style='font-size:.8em;color:#666'>"
+"ON = GPIO10 pull-up, sensor tasks skipped (UART0 stays active).<br>"
+"OFF = production (230V optocoupler, DS18B20 + occupancy running).</span></td>"
+"<td class=hw-val id=hw-bench>-<br>"
+"<button class='btn btn-gray' id=bench-btn onclick=toggleBench() style='margin-top:.4em'>Toggle</button>"
+"</td></tr>"
 "</table>"
 
 "<h4>Inputs</h4>"
@@ -481,7 +517,9 @@ static const char MGMT_HTML[] =
 "      setHW('hw-mac',d.mac);setHW('hw-wifi',d.wifi_mode);"
 "      setHW('hw-rssi',d.wifi_rssi);setHW('hw-up',d.uptime);"
 "      setHW('hw-heap',d.free_heap);setHW('hw-ctemp',d.chip_temp);"
-"      setHW('hw-rst',d.reset_reason);setHW('hw-bench',d.bench_mode);"
+"      setHW('hw-rst',d.reset_reason);"
+"      var be=document.getElementById('hw-bench');"
+"      if(be){be.childNodes[0].textContent=d.bench_mode||'N/A';}"
 "      setHW('hw-btn',d.pushbutton);setHW('hw-pcb',d.pcb_button);"
 "      setHW('hw-dig',d.digital_in);setHW('hw-ana',d.analog_in);"
 "      setHW('hw-temp',d.temperature);"
@@ -493,6 +531,19 @@ static const char MGMT_HTML[] =
 "}"
 "function startHWTimer(){if(!hwTimer)hwTimer=setInterval(loadHW,5000)}"
 "function stopHWTimer(){if(hwTimer){clearInterval(hwTimer);hwTimer=null}}"
+"function toggleBench(){"
+"  if(!confirm('Toggle bench mode? Device will restart.'))return;"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){"
+"    if(x.status==200){document.getElementById('hw-msg').innerHTML="
+"      '<span class=ok>Bench mode changed. Restarting...</span>'}"
+"    else{document.getElementById('hw-msg').innerHTML="
+"      '<span class=err>Failed to toggle bench mode</span>'}"
+"  };"
+"  x.onerror=function(){document.getElementById('hw-msg').innerHTML="
+"    '<span class=err>Connection error</span>'};"
+"  x.open('POST','/api/bench-mode');x.send();"
+"}"
 
 /* Backup */
 "function doBackup(){window.location='/api/backup'}"
@@ -621,7 +672,7 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
 
     /* Pushbutton — GPIO10 */
     int btn_level = gpio_get_level(PIN_SWITCH_INPUT);
-    int btn_active = BENCH_MODE ? !btn_level : btn_level;
+    int btn_active = g_bench_mode ? !btn_level : btn_level;
 
     /* PCB button — GPIO4 (always active-low with internal pull-up) */
     int pcb_level = gpio_get_level(4);
@@ -724,7 +775,7 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         (unsigned long)heap,
         ctemp_str,
         rst,
-        BENCH_MODE ? "ON — sensor tasks disabled, GPIO9/16/17 free for UART0" : "OFF (production)",
+        g_bench_mode ? "ON" : "OFF",
         btn_active ? "PRESSED" : "RELEASED", PIN_SWITCH_INPUT, btn_level,
         pcb_active ? "PRESSED" : "RELEASED", pcb_level,
         dig_level ? "HIGH" : "LOW", PIN_TOUCH_INPUT, dig_level,
@@ -733,6 +784,17 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, pos);
+}
+
+/* /api/bench-mode — toggle bench mode, save to NVS and reboot */
+static esp_err_t api_bench_mode_post(httpd_req_t *req)
+{
+    int new_val = g_bench_mode ? 0 : 1;
+    bench_mode_save(new_val);
+    httpd_resp_sendstr(req, "OK");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
 }
 
 /* /api/restart — reboot without saving */
@@ -958,6 +1020,7 @@ static void start_httpd(void)
     httpd_uri_t post_ota          = { "/ota",               HTTP_POST, ota_post,              NULL };
     httpd_uri_t get_settings      = { "/api/settings",      HTTP_GET,  api_settings_get,      NULL };
     httpd_uri_t get_hardware      = { "/api/hardware",      HTTP_GET,  api_hardware_get,      NULL };
+    httpd_uri_t post_bench        = { "/api/bench-mode",    HTTP_POST, api_bench_mode_post,   NULL };
     httpd_uri_t post_restart      = { "/api/restart",       HTTP_POST, api_restart_post,      NULL };
     httpd_uri_t post_factory      = { "/api/factory-reset", HTTP_POST, api_factory_reset_post,NULL };
     httpd_uri_t get_backup        = { "/api/backup",        HTTP_GET,  api_backup_get,        NULL };
@@ -968,6 +1031,7 @@ static void start_httpd(void)
     httpd_register_uri_handler(srv, &post_ota);
     httpd_register_uri_handler(srv, &get_settings);
     httpd_register_uri_handler(srv, &get_hardware);
+    httpd_register_uri_handler(srv, &post_bench);
     httpd_register_uri_handler(srv, &post_restart);
     httpd_register_uri_handler(srv, &post_factory);
     httpd_register_uri_handler(srv, &get_backup);

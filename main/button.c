@@ -181,7 +181,7 @@ void button_driver_init(button_cb_t cb)
      * active-low in BENCH_MODE (internal pull-up, button to GND). */
     s_state[INPUT_PUSHBUTTON].gpio       = PIN_SWITCH_INPUT;
     s_state[INPUT_PUSHBUTTON].enabled    = true;
-    s_state[INPUT_PUSHBUTTON].active_low = (BENCH_MODE != 0);
+    s_state[INPUT_PUSHBUTTON].active_low = (g_bench_mode != 0);
 
     /* INPUT_TOUCH: GPIO18 Add-on digital input terminal.
      * Connecting to GND = pressed -> active-low.
@@ -199,18 +199,13 @@ void button_driver_init(button_cb_t cb)
     /* ---------- GPIO-config ---------- */
 
     ESP_LOGI(TAG, "BD-STEP-1: gpio_config pushbutton GPIO%d bench=%d (active_low=%d)",
-             PIN_SWITCH_INPUT, BENCH_MODE, s_state[INPUT_PUSHBUTTON].active_low);
+             PIN_SWITCH_INPUT, g_bench_mode, s_state[INPUT_PUSHBUTTON].active_low);
 
     gpio_config_t pushbutton_cfg = {
         .pin_bit_mask = (1ULL << PIN_SWITCH_INPUT),
         .mode         = GPIO_MODE_INPUT,
-#if BENCH_MODE
-        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_up_en   = g_bench_mode ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-#else
-        .pull_up_en   = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-#endif
         .intr_type    = GPIO_INTR_ANYEDGE,
     };
     gpio_config(&pushbutton_cfg);

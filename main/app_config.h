@@ -14,18 +14,25 @@ extern "C" {
  * without DS18B20/LD2410 on the Add-on) GPIO10, GPIO9, GPIO16 and GPIO17 float.
  * GPIO10-ANYEDGE → ISR storm; GPIO16/17 are also the UART0 TX/RX pins on the
  * ESP32-C6 — if sensors.c reconfigures them, serial output dies.
- * BENCH_MODE=1:
+ * Bench mode ON:
  *   - GPIO10 gets internal pull-up (idle state high = released)
  *   - sensors_init() skips temp_task and occ_task (keeps GPIO9/16/17 free)
- * BENCH_MODE=0 (production): original paths, external pull on GPIO10
+ * Bench mode OFF (production): original paths, external pull on GPIO10
  * driven by 230V optocoupler is then correct.
  *
+ * BENCH_MODE compile-time default (0=production, 1=bench). Can be
+ * overridden at runtime via the Management web page (stored in NVS).
  * Build: idf.py build -DBENCH_MODE=1  (or change this default)
- * NB: in production (230V + Add-on) this MUST be 0!
  */
 #ifndef BENCH_MODE
 #define BENCH_MODE 0
 #endif
+
+/* Runtime bench mode flag — set by bench_mode_init() from NVS (with
+ * BENCH_MODE compile-time default as fallback). Use this instead of
+ * the BENCH_MODE macro in runtime code paths. */
+extern int g_bench_mode;
+void bench_mode_init(void);
 
 /* Add-on inputs — always active. */
 #define PIN_TOUCH_INPUT     CONFIG_PIN_TOUCH_INPUT      /* TTP223 capacitive touch (GPIO18) */
