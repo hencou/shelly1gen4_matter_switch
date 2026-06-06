@@ -10,8 +10,9 @@ HOWTO: MATTER MULTICAST GROUP & BINDING SETUP (CUSTOM FIRMWARE)
 
 2. USAGE:
    Run this script from your laptop. It installs a shared group encryption
-   key on all nodes, adds lamps to the multicast group, writes the
-   GroupKeyMap, and sets the binding table on the switch (Endpoint 1).
+   key on all nodes, writes the GroupKeyMap (required before AddGroup),
+   adds lamps to the multicast group, and sets the binding table on the
+   switch (Endpoint 1).
 
    python3 tools/create_matter_cluster_group.py --nodes 32 33 --switch 38 39 --group-id 0x0001
 
@@ -191,10 +192,65 @@ async def run_logic(args):
                 print(f"    [!] KeySetWrite failed: {e}")
 
         # =======================================================================
-        # STEP 2: ADD LAMPS TO THE MULTICAST GROUP
+        # STEP 2: WRITE GROUPKEYMAP ON ALL NODES
         # =======================================================================
+        # Maps the group ID to our KeySet so the SDK can find the encryption
+        # key.  MUST be done BEFORE AddGroup — the Matter spec requires a
+        # GroupKeyMap entry to exist before a node can join a group.
         print("\n" + "-"*50)
-        print("[STEP 2] Adding lamps to multicast group...")
+        print(f"[STEP 2] Writing GroupKeyMap (group -> keyset {GROUP_KEYSET_ID})...")
+
+        group_key_entry = {
+            "groupId": args.group_id,
+            "groupKeySetID": GROUP_KEYSET_ID,
+        }
+
+        for node_id in all_nodes:
+            label = f"Switch (Node {node_id})" if node_id in args.switch else f"Lamp (Node {node_id})"
+            print(f"  --> GroupKeyMap on {label}...")
+            try:
+                await client.send_command("write_attribute", {
+                    "node_id": node_id,
+                    "attribute_path": "0/63/0",
+                    "value": [group_key_entry]
+                })
+                print(f"    [OK] GroupKeyMap written")
+            except Exception as e:
+                print(f"    [!] GroupKeyMap failed: {e}")
+
+        # Verify GroupKeyMap on lamps
+        print("\n    Verifying GroupKeyMap on lamps...")
+        for node_id in args.nodes:
+            try:
+                result = await client.send_command("read_attribute", {
+                    "node_id": node_id,
+                    "attribute_path": "0/63/0"
+                })
+                print(f"    Lamp {node_id} GroupKeyMap: {json.dumps(result, indent=6)}")
+            except Exception as e:
+                print(f"    [!] Lamp {node_id} GroupKeyMap read failed: {e}")
+
+        # Verify KeySet on lamps
+        print("\n    Verifying KeySet on lamps...")
+        for node_id in args.nodes:
+            try:
+                result = await client.send_command("device_command", {
+                    "node_id": node_id,
+                    "endpoint_id": 0,
+                    "cluster_id": 63,
+                    "command_name": "KeySetRead",
+                    "payload": {"groupKeySetID": GROUP_KEYSET_ID}
+                })
+                print(f"    Lamp {node_id} KeySet {GROUP_KEYSET_ID}: {result}")
+            except Exception as e:
+                print(f"    [!] Lamp {node_id} KeySet read failed: {e}")
+
+        # =======================================================================
+        # STEP 3: ADD LAMPS TO THE MULTICAST GROUP
+        # =======================================================================
+        # Now that GroupKeyMap is in place, AddGroup can succeed.
+        print("\n" + "-"*50)
+        print("[STEP 3] Adding lamps to multicast group...")
         for node_id in args.nodes:
             print(f"  --> Configure Lamp (Node {node_id})...")
             ep = lamp_endpoints[node_id]
@@ -230,7 +286,7 @@ async def run_logic(args):
                 print(f"    [!] ViewGroup verify failed: {e}")
 
         # =======================================================================
-        # STEP 3: ADD GROUP ACL ON LAMPS
+        # STEP 4: ADD GROUP ACL ON LAMPS
         # =======================================================================
         # Matter Access Control requires an explicit ACL entry that allows
         # group commands.  Without this, the lamp decrypts the message but
@@ -245,7 +301,7 @@ async def run_logic(args):
         # Do NOT use string field names ("privilege", "authMode", etc.)
         # — they get silently zeroed out by the device.
         print("\n" + "-"*50)
-        print("[STEP 3] Adding Group ACL entry on lamps...")
+        print("[STEP 4] Adding Group ACL entry on lamps...")
 
         # TLV tag names for logging
         ACL_FIELD = {"1": "privilege", "2": "authMode", "3": "subjects",
@@ -358,59 +414,6 @@ async def run_logic(args):
 
             except Exception as e:
                 print(f"    [!] ACL setup failed: {e}")
-
-        # =======================================================================
-        # STEP 4: WRITE GROUPKEYMAP ON ALL NODES
-        # =======================================================================
-        # Maps the group ID to our KeySet so the SDK can find the encryption key.
-        print("\n" + "-"*50)
-        print(f"[STEP 4] Writing GroupKeyMap (group -> keyset {GROUP_KEYSET_ID})...")
-
-        # GroupKeyMap: endpoint 0, cluster 63 (GroupKeyManagement), attribute 0
-        group_key_entry = {
-            "groupId": args.group_id,
-            "groupKeySetID": GROUP_KEYSET_ID,
-        }
-
-        for node_id in all_nodes:
-            label = f"Switch (Node {node_id})" if node_id in args.switch else f"Lamp (Node {node_id})"
-            print(f"  --> GroupKeyMap on {label}...")
-            try:
-                await client.send_command("write_attribute", {
-                    "node_id": node_id,
-                    "attribute_path": "0/63/0",
-                    "value": [group_key_entry]
-                })
-                print(f"    [OK] GroupKeyMap written")
-            except Exception as e:
-                print(f"    [!] GroupKeyMap failed: {e}")
-
-        # Verify GroupKeyMap on lamps
-        print("\n    Verifying GroupKeyMap on lamps...")
-        for node_id in args.nodes:
-            try:
-                result = await client.send_command("read_attribute", {
-                    "node_id": node_id,
-                    "attribute_path": "0/63/0"
-                })
-                print(f"    Lamp {node_id} GroupKeyMap: {json.dumps(result, indent=6)}")
-            except Exception as e:
-                print(f"    [!] Lamp {node_id} GroupKeyMap read failed: {e}")
-
-        # Verify KeySet on lamps (cluster 63, command KeySetRead)
-        print("\n    Verifying KeySet on lamps...")
-        for node_id in args.nodes:
-            try:
-                result = await client.send_command("device_command", {
-                    "node_id": node_id,
-                    "endpoint_id": 0,
-                    "cluster_id": 63,
-                    "command_name": "KeySetRead",
-                    "payload": {"groupKeySetID": GROUP_KEYSET_ID}
-                })
-                print(f"    Lamp {node_id} KeySet {GROUP_KEYSET_ID}: {result}")
-            except Exception as e:
-                print(f"    [!] Lamp {node_id} KeySet read failed: {e}")
 
         # =======================================================================
         # STEP 5: WRITE BINDING ON EACH SWITCH
