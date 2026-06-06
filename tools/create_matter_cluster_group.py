@@ -20,7 +20,7 @@ HOWTO: MATTER MULTICAST GROUP & BINDING SETUP (CUSTOM FIRMWARE)
    --switch           Node ID of the Shelly switch (e.g. 29)
    --group-id         The multicast Group ID (default: 0x0001)
    --switch-endpoint  The button endpoint on the switch (default: 1)
-   --group-name       Name of the group (default: "Kantoor")
+   --group-name       Name of the group (default: "Group")
    --server-ip        IP address of the HA Matter Server (default: 192.168.178.2)
    --server-port      Port of the HA Matter Server (default: 5580)
 
@@ -35,7 +35,7 @@ import sys
 import websockets
 
 DEFAULT_GROUP_ID   = 0x0001
-DEFAULT_GROUP_NAME = "Kantoor"
+DEFAULT_GROUP_NAME = "Group"
 
 SERVER_IP   = "192.168.178.2"
 SERVER_PORT = 5580
@@ -379,7 +379,7 @@ if __name__ == "__main__":
     ap.add_argument("--group-id", type=lambda x: int(x, 0), default=DEFAULT_GROUP_ID,
                     help="Multicast Group ID (default: 0x0001)")
     ap.add_argument("--group-name", default=DEFAULT_GROUP_NAME,
-                    help="Name of the group (default: Kantoor)")
+                    help="Name of the group (default: Group)")
     ap.add_argument("--switch-endpoint", type=int, default=1,
                     help="Endpoint on the switch (default: 1 = pushbutton/toggle)")
     ap.add_argument("--server-ip", default=SERVER_IP,
