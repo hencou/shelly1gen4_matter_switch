@@ -154,6 +154,17 @@ async def run_logic(args):
             except Exception as e:
                 print(f"    [!] AddGroup failed: {e}")
 
+            # Verify: read group table back (cluster 4, attribute 0 = GroupTable)
+            try:
+                result = await client.send_command("device_command", {
+                    "node_id": node_id, "endpoint_id": 1, "cluster_id": 4,
+                    "command_name": "ViewGroup",
+                    "payload": {"groupId": args.group_id}
+                })
+                print(f"    Verify ViewGroup: {result}")
+            except Exception as e:
+                print(f"    [!] ViewGroup verify failed: {e}")
+
         # =======================================================================
         # STEP 3: ADD GROUP ACL ON LAMPS
         # =======================================================================
@@ -309,6 +320,33 @@ async def run_logic(args):
                 print(f"    [OK] GroupKeyMap written")
             except Exception as e:
                 print(f"    [!] GroupKeyMap failed: {e}")
+
+        # Verify GroupKeyMap on lamps
+        print("\n    Verifying GroupKeyMap on lamps...")
+        for node_id in args.nodes:
+            try:
+                result = await client.send_command("read_attribute", {
+                    "node_id": node_id,
+                    "attribute_path": "0/63/0"
+                })
+                print(f"    Lamp {node_id} GroupKeyMap: {json.dumps(result, indent=6)}")
+            except Exception as e:
+                print(f"    [!] Lamp {node_id} GroupKeyMap read failed: {e}")
+
+        # Verify KeySet on lamps (cluster 63, command KeySetRead)
+        print("\n    Verifying KeySet on lamps...")
+        for node_id in args.nodes:
+            try:
+                result = await client.send_command("device_command", {
+                    "node_id": node_id,
+                    "endpoint_id": 0,
+                    "cluster_id": 63,
+                    "command_name": "KeySetRead",
+                    "payload": {"groupKeySetID": GROUP_KEYSET_ID}
+                })
+                print(f"    Lamp {node_id} KeySet {GROUP_KEYSET_ID}: {result}")
+            except Exception as e:
+                print(f"    [!] Lamp {node_id} KeySet read failed: {e}")
 
         # =======================================================================
         # STEP 5: WRITE BINDING ON EACH SWITCH
