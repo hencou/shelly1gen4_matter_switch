@@ -76,6 +76,38 @@ class MatterRemoteClient:
     async def close(self):
         if self.ws: await self.ws.close()
 
+async def find_lamp_endpoint(client, node_id):
+    """Find the endpoint with OnOff (6) + Groups (4) clusters on a lamp.
+
+    Reads the Descriptor cluster (29) ServerList attribute (3) on each
+    endpoint to find one that has both the OnOff and Groups server clusters.
+    Returns the endpoint number, or None if not found.
+    """
+    try:
+        # Read PartsList from root endpoint to discover all endpoints
+        result = await client.send_command("read_attribute", {
+            "node_id": node_id,
+            "attribute_path": "0/29/3"  # Descriptor.PartsList
+        })
+        parts_list = result.get("0/29/3", [])
+    except Exception:
+        parts_list = []
+
+    # Check each endpoint for OnOff (6) + Groups (4)
+    for ep in parts_list:
+        try:
+            result = await client.send_command("read_attribute", {
+                "node_id": node_id,
+                "attribute_path": f"{ep}/29/1"  # Descriptor.ServerList
+            })
+            server_list = result.get(f"{ep}/29/1", [])
+            if 6 in server_list and 4 in server_list:  # OnOff + Groups
+                return ep
+        except Exception:
+            continue
+    return None
+
+
 async def run_logic(args):
     client = MatterRemoteClient(args.server_ip, args.server_port)
     await client.connect()
@@ -91,6 +123,27 @@ async def run_logic(args):
     print("="*60 + "\n")
 
     try:
+        # =======================================================================
+        # STEP 0: DISCOVER LAMP ENDPOINTS
+        # =======================================================================
+        # Different lamps may have the OnOff/Groups clusters on different
+        # endpoints. Auto-detect unless --lamp-endpoint is given.
+        lamp_endpoints = {}  # node_id -> endpoint
+        if args.lamp_endpoint is not None:
+            for node_id in args.nodes:
+                lamp_endpoints[node_id] = args.lamp_endpoint
+            print(f"[STEP 0] Using lamp endpoint {args.lamp_endpoint} (manual override)")
+        else:
+            print("[STEP 0] Discovering lamp endpoints (OnOff + Groups clusters)...")
+            for node_id in args.nodes:
+                ep = await find_lamp_endpoint(client, node_id)
+                if ep is not None:
+                    lamp_endpoints[node_id] = ep
+                    print(f"  --> Lamp {node_id}: endpoint {ep}")
+                else:
+                    lamp_endpoints[node_id] = 1  # fallback
+                    print(f"  --> Lamp {node_id}: not found, using default endpoint 1")
+        print()
         # =======================================================================
         # STEP 1: INSTALL GROUP ENCRYPTION KEY ON ALL NODES (KeySetWrite)
         # =======================================================================
@@ -144,24 +197,35 @@ async def run_logic(args):
         print("[STEP 2] Adding lamps to multicast group...")
         for node_id in args.nodes:
             print(f"  --> Configure Lamp (Node {node_id})...")
+            ep = lamp_endpoints[node_id]
+            print(f"    (endpoint {ep})")
             try:
-                await client.send_command("device_command", {
-                    "node_id": node_id, "endpoint_id": 1, "cluster_id": 4,
+                result = await client.send_command("device_command", {
+                    "node_id": node_id, "endpoint_id": ep, "cluster_id": 4,
                     "command_name": "AddGroup",
                     "payload": {"groupId": args.group_id, "groupName": args.group_name}
                 })
-                print(f"    [OK] AddGroup successful")
+                status = result.get("status", "?") if isinstance(result, dict) else "?"
+                print(f"    AddGroup response: {result}")
+                if status == 0:
+                    print(f"    [OK] AddGroup successful")
+                else:
+                    print(f"    [!] AddGroup returned status {status}")
             except Exception as e:
                 print(f"    [!] AddGroup failed: {e}")
 
-            # Verify: read group table back (cluster 4, attribute 0 = GroupTable)
+            # Verify: read group table back
             try:
                 result = await client.send_command("device_command", {
-                    "node_id": node_id, "endpoint_id": 1, "cluster_id": 4,
+                    "node_id": node_id, "endpoint_id": ep, "cluster_id": 4,
                     "command_name": "ViewGroup",
                     "payload": {"groupId": args.group_id}
                 })
-                print(f"    Verify ViewGroup: {result}")
+                vg_status = result.get("status", "?") if isinstance(result, dict) else "?"
+                if vg_status == 0:
+                    print(f"    [OK] ViewGroup confirmed: {result}")
+                else:
+                    print(f"    [!] ViewGroup NOT_FOUND (status={vg_status}): {result}")
             except Exception as e:
                 print(f"    [!] ViewGroup verify failed: {e}")
 
@@ -428,6 +492,8 @@ if __name__ == "__main__":
                     help="Name of the group (default: Group)")
     ap.add_argument("--switch-endpoint", type=int, default=1,
                     help="Endpoint on the switch (default: 1 = pushbutton/toggle)")
+    ap.add_argument("--lamp-endpoint", type=int, default=None,
+                    help="Override endpoint on lamps (default: auto-detect)")
     ap.add_argument("--server-ip", default=SERVER_IP,
                     help=f"IP of the HA Matter Server (default: {SERVER_IP})")
     ap.add_argument("--server-port", type=int, default=SERVER_PORT,
