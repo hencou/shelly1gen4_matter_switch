@@ -42,6 +42,8 @@
 #include "esp_rom_sys.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "driver/temperature_sensor.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -289,6 +291,7 @@ static const char MGMT_HTML[] =
 "table{border-collapse:collapse;width:100%;margin:.5em 0}"
 "td,th{border:1px solid #ddd;padding:6px 10px;text-align:left}"
 "th{background:#f0f0f0}.hw-val{font-family:monospace;font-size:1.1em}"
+"h4{margin:1.2em 0 .3em;color:#333;border-bottom:1px solid #ddd;padding-bottom:.2em}"
 ".info{font-size:.85em;color:#555;margin-bottom:.8em}"
 "</style></head><body>"
 
@@ -329,13 +332,34 @@ static const char MGMT_HTML[] =
 /* ── Tab 1: Hardware ── */
 "<div class=pane id=p1>"
 "<h3>Hardware Status</h3>"
-"<p class=info>Live sensor readings (auto-refresh every 5 s). "
+"<p class=info>Live readings (auto-refresh every 5 s). "
 "<button class='btn btn-blue' onclick=loadHW()>Refresh now</button></p>"
-"<table><tr><th>Sensor</th><th>Value</th></tr>"
-"<tr><td>Temperature (DS18B20)</td><td class=hw-val id=hw-temp>-</td></tr>"
+
+"<h4>System</h4>"
+"<table><tr><th style='width:45%'>Item</th><th>Value</th></tr>"
+"<tr><td>Firmware</td><td class=hw-val id=hw-fw>-</td></tr>"
+"<tr><td>Chip</td><td class=hw-val id=hw-chip>-</td></tr>"
+"<tr><td>MAC address</td><td class=hw-val id=hw-mac>-</td></tr>"
+"<tr><td>WiFi mode</td><td class=hw-val id=hw-wifi>-</td></tr>"
+"<tr><td>WiFi RSSI</td><td class=hw-val id=hw-rssi>-</td></tr>"
+"<tr><td>Uptime</td><td class=hw-val id=hw-up>-</td></tr>"
+"<tr><td>Free heap</td><td class=hw-val id=hw-heap>-</td></tr>"
+"<tr><td>Chip temperature</td><td class=hw-val id=hw-ctemp>-</td></tr>"
+"<tr><td>Reset reason</td><td class=hw-val id=hw-rst>-</td></tr>"
+"<tr><td>Bench mode</td><td class=hw-val id=hw-bench>-</td></tr>"
+"</table>"
+
+"<h4>Inputs</h4>"
+"<table><tr><th style='width:45%'>Input</th><th>Value</th></tr>"
+"<tr><td>Pushbutton (GPIO10)</td><td class=hw-val id=hw-btn>-</td></tr>"
+"<tr><td>PCB button (GPIO4)</td><td class=hw-val id=hw-pcb>-</td></tr>"
 "<tr><td>Digital IN (GPIO18)</td><td class=hw-val id=hw-dig>-</td></tr>"
 "<tr><td>Analog IN (GPIO17)</td><td class=hw-val id=hw-ana>-</td></tr>"
-"<tr><td>Pushbutton (GPIO10)</td><td class=hw-val id=hw-btn>-</td></tr>"
+"</table>"
+
+"<h4>Sensors</h4>"
+"<table><tr><th style='width:45%'>Sensor</th><th>Value</th></tr>"
+"<tr><td>Temperature (DS18B20)</td><td class=hw-val id=hw-temp>-</td></tr>"
 "</table>"
 "<div id=hw-msg class=msg></div>"
 "</div>"
@@ -446,16 +470,21 @@ static const char MGMT_HTML[] =
 
 /* Hardware readout + auto-refresh */
 "var hwTimer=null;"
+"function setHW(id,v){var e=document.getElementById(id);if(e)e.textContent=v||'N/A'}"
 "function loadHW(){"
 "  document.getElementById('hw-msg').innerHTML='Loading...';"
 "  var x=new XMLHttpRequest();"
 "  x.onload=function(){"
 "    if(x.status==200){"
 "      var d=JSON.parse(x.responseText);"
-"      document.getElementById('hw-temp').textContent=d.temperature||'N/A';"
-"      document.getElementById('hw-dig').textContent=d.digital_in||'N/A';"
-"      document.getElementById('hw-ana').textContent=d.analog_in||'N/A';"
-"      document.getElementById('hw-btn').textContent=d.pushbutton||'N/A';"
+"      setHW('hw-fw',d.firmware);setHW('hw-chip',d.chip);"
+"      setHW('hw-mac',d.mac);setHW('hw-wifi',d.wifi_mode);"
+"      setHW('hw-rssi',d.wifi_rssi);setHW('hw-up',d.uptime);"
+"      setHW('hw-heap',d.free_heap);setHW('hw-ctemp',d.chip_temp);"
+"      setHW('hw-rst',d.reset_reason);setHW('hw-bench',d.bench_mode);"
+"      setHW('hw-btn',d.pushbutton);setHW('hw-pcb',d.pcb_button);"
+"      setHW('hw-dig',d.digital_in);setHW('hw-ana',d.analog_in);"
+"      setHW('hw-temp',d.temperature);"
 "      document.getElementById('hw-msg').textContent='';"
 "    }else{document.getElementById('hw-msg').innerHTML='<span class=err>Read failed</span>'}"
 "  };"
@@ -510,11 +539,122 @@ static esp_err_t api_settings_get(httpd_req_t *req)
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
 
-/* /api/hardware — read sensors and return JSON */
+/* reset reason to human-readable string */
+static const char *reset_reason_str(esp_reset_reason_t r)
+{
+    switch (r) {
+        case ESP_RST_POWERON:  return "Power-on";
+        case ESP_RST_SW:      return "Software";
+        case ESP_RST_PANIC:   return "Panic/exception";
+        case ESP_RST_INT_WDT: return "Interrupt watchdog";
+        case ESP_RST_TASK_WDT:return "Task watchdog";
+        case ESP_RST_WDT:     return "Other watchdog";
+        case ESP_RST_DEEPSLEEP:return "Deep sleep";
+        case ESP_RST_BROWNOUT:return "Brownout";
+        case ESP_RST_SDIO:    return "SDIO";
+        default:              return "Unknown";
+    }
+}
+
+/* /api/hardware — read sensors and system info, return JSON */
 static esp_err_t api_hardware_get(httpd_req_t *req)
 {
-    static char json[512];
+    static char json[1536];
     int pos = 0;
+
+    /* ── System info ── */
+
+    /* Firmware version */
+    const esp_app_desc_t *app = esp_app_get_description();
+
+    /* Chip info */
+    esp_chip_info_t ci;
+    esp_chip_info(&ci);
+
+    /* MAC address */
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+
+    /* WiFi mode + RSSI */
+    wifi_mode_t wmode = WIFI_MODE_NULL;
+    esp_wifi_get_mode(&wmode);
+    const char *wmode_str = (wmode == WIFI_MODE_STA) ? "STA" :
+                            (wmode == WIFI_MODE_AP)  ? "SoftAP" : "N/A";
+    char rssi_str[24] = "N/A (SoftAP)";
+    if (wmode == WIFI_MODE_STA) {
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            snprintf(rssi_str, sizeof(rssi_str), "%d dBm", ap.rssi);
+        }
+    }
+
+    /* Uptime */
+    int64_t up_us = esp_timer_get_time();
+    int up_s  = (int)(up_us / 1000000);
+    int up_h  = up_s / 3600;
+    int up_m  = (up_s % 3600) / 60;
+    int up_ss = up_s % 60;
+
+    /* Free heap */
+    uint32_t heap = esp_get_free_heap_size();
+
+    /* Internal chip temperature */
+    char ctemp_str[32] = "N/A";
+    {
+        temperature_sensor_handle_t tsens = NULL;
+        temperature_sensor_config_t tc = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
+        if (temperature_sensor_install(&tc, &tsens) == ESP_OK) {
+            temperature_sensor_enable(tsens);
+            float t;
+            if (temperature_sensor_get_celsius(tsens, &t) == ESP_OK) {
+                snprintf(ctemp_str, sizeof(ctemp_str), "%.1f C", t);
+            }
+            temperature_sensor_disable(tsens);
+            temperature_sensor_uninstall(tsens);
+        }
+    }
+
+    /* Reset reason */
+    const char *rst = reset_reason_str(esp_reset_reason());
+
+    /* ── Inputs ── */
+
+    /* Pushbutton — GPIO10 */
+    int btn_level = gpio_get_level(PIN_SWITCH_INPUT);
+    int btn_active = BENCH_MODE ? !btn_level : btn_level;
+
+    /* PCB button — GPIO4 (always active-low with internal pull-up) */
+    int pcb_level = gpio_get_level(4);
+    int pcb_active = !pcb_level;
+
+    /* Digital IN — GPIO18 (TTP223 touch) */
+    int dig_level = gpio_get_level(PIN_TOUCH_INPUT);
+
+    /* Analog IN — GPIO17 duty cycle */
+    char ana_str[32];
+    {
+        uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+        uart_driver_delete(UART_NUM_0);
+        periph_module_disable(PERIPH_UART0_MODULE);
+        gpio_reset_pin(PIN_LD2410_INPUT);
+        gpio_config_t cfg = {
+            .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
+            .mode         = GPIO_MODE_INPUT,
+            .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        };
+        gpio_config(&cfg);
+        int high = 0, total = 0;
+        for (int us = 0; us < 100000; us += 100) {
+            if (gpio_get_level(PIN_LD2410_INPUT)) high++;
+            total++;
+            esp_rom_delay_us(100);
+        }
+        int duty = (high * 100) / total;
+        snprintf(ana_str, sizeof(ana_str), "%d%% duty (%s)",
+                 duty, duty >= 25 ? "occupied" : "clear");
+    }
+
+    /* ── Sensors ── */
 
     /* Temperature — DS18B20 via 1-Wire */
     char temp_str[32] = "sensor not found";
@@ -558,46 +698,38 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         }
     }
 
-    /* Analog IN — GPIO17 duty cycle */
-    char ana_str[32];
-    {
-        uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
-        uart_driver_delete(UART_NUM_0);
-        periph_module_disable(PERIPH_UART0_MODULE);
-        gpio_reset_pin(PIN_LD2410_INPUT);
-        gpio_config_t cfg = {
-            .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
-            .mode         = GPIO_MODE_INPUT,
-            .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        };
-        gpio_config(&cfg);
-        int high = 0, total = 0;
-        for (int us = 0; us < 100000; us += 100) {
-            if (gpio_get_level(PIN_LD2410_INPUT)) high++;
-            total++;
-            esp_rom_delay_us(100);
-        }
-        int duty = (high * 100) / total;
-        snprintf(ana_str, sizeof(ana_str), "%d%% duty (%s)",
-                 duty, duty >= 25 ? "occupied" : "clear");
-    }
-
-    /* Digital IN — GPIO18 (TTP223 touch) */
-    int dig_level = gpio_get_level(PIN_TOUCH_INPUT);
-
-    /* Pushbutton — GPIO10 */
-    int btn_level = gpio_get_level(PIN_SWITCH_INPUT);
-    int btn_active = BENCH_MODE ? !btn_level : btn_level;
-
+    /* ── Build JSON response ── */
     pos = snprintf(json, sizeof(json),
-        "{\"temperature\":\"%s\","
+        "{\"firmware\":\"%s (%s %s)\","
+        "\"chip\":\"ESP32-C6 rev %d, %d core(s)\","
+        "\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\","
+        "\"wifi_mode\":\"%s\","
+        "\"wifi_rssi\":\"%s\","
+        "\"uptime\":\"%dh %02dm %02ds\","
+        "\"free_heap\":\"%lu bytes\","
+        "\"chip_temp\":\"%s\","
+        "\"reset_reason\":\"%s\","
+        "\"bench_mode\":\"%s\","
+        "\"pushbutton\":\"%s (GPIO%d=%d)\","
+        "\"pcb_button\":\"%s (GPIO4=%d)\","
         "\"digital_in\":\"%s (GPIO%d=%d)\","
         "\"analog_in\":\"%s\","
-        "\"pushbutton\":\"%s (GPIO%d=%d)\"}",
-        temp_str,
+        "\"temperature\":\"%s\"}",
+        app->version, app->date, app->time,
+        ci.revision, ci.cores,
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+        wmode_str,
+        rssi_str,
+        up_h, up_m, up_ss,
+        (unsigned long)heap,
+        ctemp_str,
+        rst,
+        BENCH_MODE ? "ON — sensor tasks disabled, GPIO9/16/17 free for UART0" : "OFF (production)",
+        btn_active ? "PRESSED" : "RELEASED", PIN_SWITCH_INPUT, btn_level,
+        pcb_active ? "PRESSED" : "RELEASED", pcb_level,
         dig_level ? "HIGH" : "LOW", PIN_TOUCH_INPUT, dig_level,
         ana_str,
-        btn_active ? "PRESSED" : "RELEASED", PIN_SWITCH_INPUT, btn_level);
+        temp_str);
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, pos);
