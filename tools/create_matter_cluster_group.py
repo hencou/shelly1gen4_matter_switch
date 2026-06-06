@@ -259,7 +259,7 @@ async def run_logic(args):
                 result = await client.send_command("device_command", {
                     "node_id": node_id, "endpoint_id": ep, "cluster_id": 4,
                     "command_name": "AddGroup",
-                    "payload": {"groupId": args.group_id, "groupName": args.group_name}
+                    "payload": {"groupID": args.group_id, "groupName": args.group_name}
                 })
                 status = result.get("status", "?") if isinstance(result, dict) else "?"
                 print(f"    AddGroup response: {result}")
@@ -275,7 +275,7 @@ async def run_logic(args):
                 result = await client.send_command("device_command", {
                     "node_id": node_id, "endpoint_id": ep, "cluster_id": 4,
                     "command_name": "ViewGroup",
-                    "payload": {"groupId": args.group_id}
+                    "payload": {"groupID": args.group_id}
                 })
                 vg_status = result.get("status", "?") if isinstance(result, dict) else "?"
                 if vg_status == 0:
