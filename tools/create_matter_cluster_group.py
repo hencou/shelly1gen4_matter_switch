@@ -13,13 +13,13 @@ HOWTO: MATTER MULTICAST GROUP & BINDING SETUP (CUSTOM FIRMWARE)
    key on all nodes, adds lamps to the multicast group, writes the
    GroupKeyMap, and sets the binding table on the switch (Endpoint 1).
 
-   python3 tools/create_matter_group.py --nodes 32 33 34 35 --switch 29 --group-id 0x0001
+   python3 tools/create_matter_cluster_group.py --nodes 32 33 --switch 38 39 --group-id 0x0001
 
 3. PARAMETERS:
-   --nodes            List of Node IDs of the target lamps (e.g. 32 33 34 35)
-   --switch           Node ID of the Shelly switch (e.g. 29)
+   --nodes            List of Node IDs of the target lamps (e.g. 32 33)
+   --switch           One or more Node IDs of the Shelly switches (e.g. 38 39)
    --group-id         The multicast Group ID (default: 0x0001)
-   --switch-endpoint  The button endpoint on the switch (default: 1)
+   --switch-endpoint  The button endpoint on each switch (default: 1)
    --group-name       Name of the group (default: "Group")
    --server-ip        IP address of the HA Matter Server (default: 192.168.178.2)
    --server-port      Port of the HA Matter Server (default: 5580)
@@ -84,7 +84,10 @@ async def run_logic(args):
     print(f"[*] START MATTER MULTICAST CONFIGURATION")
     print(f"[*] Group ID:    0x{args.group_id:04X} ({args.group_name})")
     print(f"[*] Target lamps: {args.nodes}")
-    print(f"[*] Switch:      Node {args.switch} (Endpoint {args.switch_endpoint})")
+    if len(args.switch) == 1:
+        print(f"[*] Switch:      Node {args.switch[0]} (Endpoint {args.switch_endpoint})")
+    else:
+        print(f"[*] Switches:    {args.switch} (Endpoint {args.switch_endpoint})")
     print("="*60 + "\n")
 
     try:
@@ -107,9 +110,9 @@ async def run_logic(args):
         print(f"    Key (hex):    {args.epoch_key}")
         print(f"    Key (base64): {epoch_key_b64}")
 
-        all_nodes = list(args.nodes) + [args.switch]
+        all_nodes = list(args.nodes) + list(args.switch)
         for node_id in all_nodes:
-            label = "Switch" if node_id == args.switch else f"Lamp (Node {node_id})"
+            label = f"Switch (Node {node_id})" if node_id in args.switch else f"Lamp (Node {node_id})"
             print(f"  --> KeySetWrite on {label}...")
             try:
                 await client.send_command("device_command", {
@@ -295,7 +298,7 @@ async def run_logic(args):
         }
 
         for node_id in all_nodes:
-            label = "Switch" if node_id == args.switch else f"Lamp (Node {node_id})"
+            label = f"Switch (Node {node_id})" if node_id in args.switch else f"Lamp (Node {node_id})"
             print(f"  --> GroupKeyMap on {label}...")
             try:
                 await client.send_command("write_attribute", {
@@ -308,61 +311,66 @@ async def run_logic(args):
                 print(f"    [!] GroupKeyMap failed: {e}")
 
         # =======================================================================
-        # STEP 5: WRITE BINDING ON THE SWITCH
+        # STEP 5: WRITE BINDING ON EACH SWITCH
         # =======================================================================
         print("\n" + "-"*50)
-        print("[STEP 5] Writing binding table to the Switch...")
+        print(f"[STEP 5] Writing binding table to {len(args.switch)} switch(es)...")
 
         bindings = [
             {"group": args.group_id, "cluster": 6},    # OnOff
             {"group": args.group_id, "cluster": 8},    # LevelControl (dimming)
         ]
 
-        # Try set_node_binding first (purpose-built API)
-        try:
-            result = await client.send_command("set_node_binding", {
-                "node_id": args.switch,
-                "endpoint": args.switch_endpoint,
-                "bindings": bindings
-            })
-            print(f"    [OK] Binding written via set_node_binding!")
-            print(f"    Result: {result}")
-        except Exception as e:
-            print(f"    [!] set_node_binding failed ({e}), trying write_attribute...")
+        for sw in args.switch:
+            print(f"  --> Binding on Switch (Node {sw}, Endpoint {args.switch_endpoint})...")
+            # Try set_node_binding first (purpose-built API)
             try:
-                result = await client.send_command("write_attribute", {
-                    "node_id": args.switch,
-                    "attribute_path": f"{args.switch_endpoint}/30/0",
-                    "value": bindings
+                result = await client.send_command("set_node_binding", {
+                    "node_id": sw,
+                    "endpoint": args.switch_endpoint,
+                    "bindings": bindings
                 })
-                print(f"    [OK] Binding written via write_attribute!")
+                print(f"    [OK] Binding written via set_node_binding!")
                 print(f"    Result: {result}")
-            except Exception as e2:
-                print(f"    [!] write_attribute also failed: {e2}")
+            except Exception as e:
+                print(f"    [!] set_node_binding failed ({e}), trying write_attribute...")
+                try:
+                    result = await client.send_command("write_attribute", {
+                        "node_id": sw,
+                        "attribute_path": f"{args.switch_endpoint}/30/0",
+                        "value": bindings
+                    })
+                    print(f"    [OK] Binding written via write_attribute!")
+                    print(f"    Result: {result}")
+                except Exception as e2:
+                    print(f"    [!] write_attribute also failed: {e2}")
 
         # =======================================================================
-        # STEP 6: VERIFICATION - READ BINDING BACK
+        # STEP 6: VERIFICATION - READ BINDING BACK FROM EACH SWITCH
         # =======================================================================
         print("\n" + "-"*50)
-        print("[STEP 6] Verification - reading binding back...")
-        try:
-            result = await client.send_command("read_attribute", {
-                "node_id": args.switch,
-                "attribute_path": f"{args.switch_endpoint}/30/0"
-            })
-            print(f"    Current binding table: {json.dumps(result, indent=2)}")
-        except Exception as e:
-            print(f"    [!] Could not read binding: {e}")
+        print(f"[STEP 6] Verification - reading binding back from {len(args.switch)} switch(es)...")
+        for sw in args.switch:
+            print(f"  --> Binding on Switch (Node {sw})...")
+            try:
+                result = await client.send_command("read_attribute", {
+                    "node_id": sw,
+                    "attribute_path": f"{args.switch_endpoint}/30/0"
+                })
+                print(f"    Current binding table: {json.dumps(result, indent=2)}")
+            except Exception as e:
+                print(f"    [!] Could not read binding: {e}")
 
         print("\n" + "="*60)
         print("[*] SCRIPT COMPLETE!")
         print("="*60)
-        print("\nTest the switch now — press the button briefly and check")
+        sw_word = "switches" if len(args.switch) > 1 else "switch"
+        print(f"\nTest the {sw_word} now — press the button briefly and check")
         print("whether all lamps in the group toggle simultaneously.")
         print("\nIf it does not work:")
         print("  1. Check the Shelly log for 'send_onoff_multicast' lines")
         print("  2. Look for OK (sent) vs FAILED (SDK error)")
-        print("  3. Do NOT restart the Shelly — bindings should work immediately")
+        print(f"  3. Do NOT restart the Shelly — bindings should work immediately")
 
     except Exception as general_error:
         print(f"\n[!] General error: {general_error}")
@@ -371,11 +379,11 @@ async def run_logic(args):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(
-        description="Configure Matter multicast group + binding for Shelly switch")
+        description="Configure Matter multicast group + binding for Shelly switch(es)")
     ap.add_argument("--nodes", type=int, nargs="+", required=True,
                     help="Node IDs of the target lamps")
-    ap.add_argument("--switch", type=int, required=True,
-                    help="Node ID of the Shelly switch")
+    ap.add_argument("--switch", type=int, nargs="+", required=True,
+                    help="Node ID(s) of the Shelly switch(es)")
     ap.add_argument("--group-id", type=lambda x: int(x, 0), default=DEFAULT_GROUP_ID,
                     help="Multicast Group ID (default: 0x0001)")
     ap.add_argument("--group-name", default=DEFAULT_GROUP_NAME,
