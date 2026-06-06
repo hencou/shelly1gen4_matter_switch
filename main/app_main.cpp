@@ -154,15 +154,9 @@ extern "C" void app_main(void)
                     ESP_LOGW(TAG, "GroupKeySet 1: fabric %u FAILED %" CHIP_ERROR_FORMAT, idx, err.Format());
                 }
 
-                // Map group 0x0001 → KeySet 1
-                GroupDataProvider::GroupKey mapping;
-                mapping.group_id  = 0x0001;
-                mapping.keyset_id = 1;
-                if (provider->SetGroupKeyAt(idx, 0, mapping) == CHIP_NO_ERROR) {
-                    ESP_LOGI(TAG, "GroupKeyMap: fabric %u -> group 0x0001 keyset 1", idx);
-                } else {
-                    ESP_LOGW(TAG, "GroupKeyMap: failed for fabric %u", idx);
-                }
+                // GroupKeyMap (group → KeySet mapping) is NOT written here.
+                // The setup script (create_matter_cluster_group.py) writes it
+                // for the correct group ID.  Persisted in NVS — survives reboot.
             }
         } else {
             ESP_LOGE(TAG, "GroupKeyMap: GroupDataProvider is null");
