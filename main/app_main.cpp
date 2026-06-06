@@ -92,6 +92,7 @@ extern "C" void on_occupancy(bool occupied)
 extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(nvs_flash_init());
+    bench_mode_init();
 
     status_led_init();
     status_led_set(STATUS_LED_FAST_BLINK);  /* boot/init in progress */

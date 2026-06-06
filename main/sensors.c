@@ -214,33 +214,33 @@ void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
     s_temp_cb = temp_cb;
     s_occ_cb  = occ_cb;
 
-#if BENCH_MODE
-    /* BENCH_MODE: skip sensor tasks so GPIO16 (U0TXD) and GPIO17 (U0RXD)
-     * remain available for UART0 serial debugging via J6 header.
-     * On the ESP32-C6, GPIO16/17 are the default UART0 pins; temp_task and
-     * occ_task reconfigure them as 1-Wire RX and GPIO input respectively,
-     * which kills serial output. GPIO9 (1-Wire TX) is also kept free. */
-    ESP_LOGW(TAG, "BENCH_MODE: sensor tasks skipped (GPIO9/16/17 kept free)");
-#else
-    /* GPIO16/17 are UART0 TX/RX by default on the ESP32-C6.
-     *
-     * The UART0 peripheral clock is enabled twice before we get here:
-     *   1) ESP-IDF console init at boot  (ref_count 0→1)
-     *   2) uart_driver_install below     (ref_count 1→2)
-     * uart_driver_delete only decrements once (2→1), so the clock stays
-     * on and the UART0 module keeps its internal pull-up active on GPIO17,
-     * making gpio_get_level() always return 1.
-     *
-     * Fix: after the driver teardown, call periph_module_disable() once
-     * more to drain the remaining ref_count from console init and truly
-     * shut off the UART0 clock. */
-    uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
-    uart_driver_delete(UART_NUM_0);
-    periph_module_disable(PERIPH_UART0_MODULE);
-    gpio_reset_pin(PIN_ONEWIRE_RX);    /* GPIO16 — 1-Wire RX / UART0 TX */
-    gpio_reset_pin(PIN_LD2410_INPUT);   /* GPIO17 — occupancy / UART0 RX */
+    if (g_bench_mode) {
+        /* Bench mode: skip sensor tasks so GPIO16 (U0TXD) and GPIO17 (U0RXD)
+         * remain available for UART0 serial debugging via J6 header.
+         * On the ESP32-C6, GPIO16/17 are the default UART0 pins; temp_task and
+         * occ_task reconfigure them as 1-Wire RX and GPIO input respectively,
+         * which kills serial output. GPIO9 (1-Wire TX) is also kept free. */
+        ESP_LOGW(TAG, "bench_mode ON: sensor tasks skipped (GPIO9/16/17 kept free)");
+    } else {
+        /* GPIO16/17 are UART0 TX/RX by default on the ESP32-C6.
+         *
+         * The UART0 peripheral clock is enabled twice before we get here:
+         *   1) ESP-IDF console init at boot  (ref_count 0→1)
+         *   2) uart_driver_install below     (ref_count 1→2)
+         * uart_driver_delete only decrements once (2→1), so the clock stays
+         * on and the UART0 module keeps its internal pull-up active on GPIO17,
+         * making gpio_get_level() always return 1.
+         *
+         * Fix: after the driver teardown, call periph_module_disable() once
+         * more to drain the remaining ref_count from console init and truly
+         * shut off the UART0 clock. */
+        uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+        uart_driver_delete(UART_NUM_0);
+        periph_module_disable(PERIPH_UART0_MODULE);
+        gpio_reset_pin(PIN_ONEWIRE_RX);    /* GPIO16 — 1-Wire RX / UART0 TX */
+        gpio_reset_pin(PIN_LD2410_INPUT);   /* GPIO17 — occupancy / UART0 RX */
 
-    xTaskCreate(temp_task, "temp_task", 3072, NULL, 5, NULL);
-    xTaskCreate(occ_task,  "occ_task",  2560, NULL, 6, NULL);
-#endif
+        xTaskCreate(temp_task, "temp_task", 3072, NULL, 5, NULL);
+        xTaskCreate(occ_task,  "occ_task",  2560, NULL, 6, NULL);
+    }
 }
