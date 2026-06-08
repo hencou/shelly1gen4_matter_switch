@@ -13,10 +13,9 @@
  * Polarity per input:
  *   - INPUT_PUSHBUTTON:    active-high (production 230V optocoupler);
  *                       active-low in BENCH_MODE (internal pull-up)
- *   - INPUT_TOUCH:      active-high (ISO7221A isolator inverts the signal:
- *                       terminal LOW → GPIO HIGH → pressed).
- *                       Internal pull-up keeps GPIO HIGH (idle = pressed? no:
- *                       pull-up only matters when nothing drives the pin).
+ *   - INPUT_TOUCH:      active-low (Add-on has built-in pull-up to 3V3;
+ *                       connecting to GND = pressed). No internal pull
+ *                       because it conflicts with the Add-on pull-up.
  *   - INPUT_DEVICE_BTN: always active-low (internal pull-up, button to GND)
  *
  * Driver uses ISR-to-queue with its own FreeRTOS task so that
@@ -190,7 +189,7 @@ void button_driver_init(button_cb_t cb)
      * isolator does not supply a pull-up on the ESP32 side of this line. */
     s_state[INPUT_TOUCH].gpio       = PIN_TOUCH_INPUT;
     s_state[INPUT_TOUCH].enabled    = true;
-    s_state[INPUT_TOUCH].active_low = false;  /* ISO7221A inverts: terminal LOW → GPIO HIGH */
+    s_state[INPUT_TOUCH].active_low = true;   /* was false, corrected */
 
     /* INPUT_DEVICE_BTN: GPIO4 onboard pair button, always active-low. */
     s_state[INPUT_DEVICE_BTN].gpio       = 4;
