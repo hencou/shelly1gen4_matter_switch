@@ -79,7 +79,7 @@ void bench_mode_init(void);
 typedef enum {
     INPUT_PUSHBUTTON = 0,    /* GPIO10 — System 55 pushbutton (active-high in production,
                            * active-low in BENCH_MODE with internal pull-up) */
-    INPUT_TOUCH,          /* Add-on digital input / TTP223 (active-high: ISO7221A inverts) */
+    INPUT_TOUCH,          /* TTP223 on Add-on digital input (always active-high) */
     INPUT_DEVICE_BTN,     /* GPIO4 — onboard pair button (always active-low, pull-up) */
     INPUT_COUNT
 } input_id_t;
