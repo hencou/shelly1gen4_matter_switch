@@ -6,9 +6,18 @@
  *
  * All 3 inputs have the same behavior (see on_button_event in app_main.cpp):
  *   SHORT_PRESS       -> Matter Toggle + relay tick
- *   LONG_PRESS_START  -> dim start
- *   LONG_PRESS_STOP   -> dim stop
+ *   DOUBLE_PRESS      -> ColorControl MoveToColorTemperature (2700K)
+ *   LONG_PRESS_START  -> dim start (LevelControl Move)
+ *   LONG_PRESS_STOP   -> dim stop (LevelControl Stop)
+ *   SHORT_LONG_START  -> color temp adjust (ColorControl MoveColorTemp)
+ *   SHORT_LONG_STOP   -> color temp stop (ColorControl StopMoveStep)
  *   6x click          -> MODE_TOGGLE (universal: Matter <-> OTA mode)
+ *
+ * Detection:
+ *   Single short press has a DOUBLE_CLICK_WINDOW_MS delay to distinguish
+ *   from double press. Long press (brightness) fires immediately on hold.
+ *   Short-long (color temp) = tap + hold: first tap sets pending_clicks,
+ *   second press held > LONG_PRESS_MS triggers SHORT_LONG_START.
  *
  * Polarity per input:
  *   - INPUT_PUSHBUTTON:    active-high (production 230V optocoupler);
@@ -62,6 +71,10 @@ typedef struct {
     bool    long_fired;
     int64_t click_hist[CLICK_HISTORY];
     uint8_t click_idx;
+    /* double-click / short-long detection */
+    int64_t pending_short_us;   /* timestamp of last short release (0 = none) */
+    uint8_t pending_clicks;     /* number of short presses awaiting dispatch */
+    bool    in_combo_long;      /* true when current hold follows a recent tap */
 } btn_state_t;
 
 static QueueHandle_t s_evt_q;
@@ -109,6 +122,9 @@ static void handle_edge(btn_isr_msg_t *m)
         s->pressed        = true;
         s->press_start_us = m->t_us;
         s->long_fired     = false;
+        /* If there are pending clicks (recent short press), this press
+         * could become a short-long combo (tap + hold). */
+        s->in_combo_long  = (s->pending_clicks > 0);
         if (s_cb) s_cb(m->id, BTN_EVT_CONTACT_CLOSED);
 
     } else if (!pressed_now && s->pressed) {
@@ -118,16 +134,32 @@ static void handle_edge(btn_isr_msg_t *m)
         if (s_cb) s_cb(m->id, BTN_EVT_CONTACT_OPEN);
 
         if (s->long_fired) {
-            if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_STOP);
+            /* Release after a long hold */
+            if (s->in_combo_long) {
+                if (s_cb) s_cb(m->id, BTN_EVT_SHORT_LONG_STOP);
+            } else {
+                if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_STOP);
+            }
+            s->pending_clicks = 0;
+            s->pending_short_us = 0;
+            s->in_combo_long = false;
 
         } else if (dur_ms >= LONG_PRESS_MS) {
-            /* edge case: long_fired not yet set but duration is >= threshold */
+            /* edge case: long_fired not yet set but duration >= threshold */
             s->long_fired = true;
-            if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_START);
-            if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_STOP);
+            if (s->in_combo_long) {
+                if (s_cb) s_cb(m->id, BTN_EVT_SHORT_LONG_START);
+                if (s_cb) s_cb(m->id, BTN_EVT_SHORT_LONG_STOP);
+            } else {
+                if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_START);
+                if (s_cb) s_cb(m->id, BTN_EVT_LONG_PRESS_STOP);
+            }
+            s->pending_clicks = 0;
+            s->pending_short_us = 0;
+            s->in_combo_long = false;
 
         } else if (dur_ms > 20) {
-            /* short press */
+            /* short press — check 6x mode toggle first (wider window) */
             s->click_hist[s->click_idx] = m->t_us;
             s->click_idx = (s->click_idx + 1) % CLICK_HISTORY;
 
@@ -140,10 +172,15 @@ static void handle_edge(btn_isr_msg_t *m)
 
             if (cnt >= MODE_TOGGLE_CLICKS) {
                 memset(s->click_hist, 0, sizeof(s->click_hist));
+                s->pending_clicks = 0;
+                s->pending_short_us = 0;
                 if (s_cb) s_cb(m->id, BTN_EVT_MODE_TOGGLE);
             } else {
-                if (s_cb) s_cb(m->id, BTN_EVT_SHORT_PRESS);
+                /* Defer dispatch — wait for possible double-click or short-long */
+                s->pending_clicks++;
+                s->pending_short_us = m->t_us;
             }
+            s->in_combo_long = false;
         }
     }
     /* otherwise: duplicate ISR on same edge or noise -> ignore */
@@ -157,7 +194,33 @@ static void check_long_press(int64_t now_us)
         int64_t dur_ms = (now_us - s->press_start_us) / 1000;
         if (dur_ms >= LONG_PRESS_MS) {
             s->long_fired = true;
-            if (s_cb) s_cb((input_id_t)i, BTN_EVT_LONG_PRESS_START);
+            if (s->in_combo_long) {
+                if (s_cb) s_cb((input_id_t)i, BTN_EVT_SHORT_LONG_START);
+            } else {
+                if (s_cb) s_cb((input_id_t)i, BTN_EVT_LONG_PRESS_START);
+            }
+        }
+    }
+}
+
+static void check_pending(int64_t now_us)
+{
+    for (int i = 0; i < INPUT_COUNT; i++) {
+        btn_state_t *s = &s_state[i];
+        if (!s->enabled || s->pending_clicks == 0 || s->pressed) continue;
+
+        int64_t elapsed_ms = (now_us - s->pending_short_us) / 1000;
+        if (elapsed_ms < DOUBLE_CLICK_WINDOW_MS) continue;
+
+        uint8_t cnt = s->pending_clicks;
+        s->pending_clicks = 0;
+        s->pending_short_us = 0;
+
+        if (cnt == 2) {
+            if (s_cb) s_cb((input_id_t)i, BTN_EVT_DOUBLE_PRESS);
+        } else {
+            /* 1 click, or 3-5 clicks (fallback to single toggle) */
+            if (s_cb) s_cb((input_id_t)i, BTN_EVT_SHORT_PRESS);
         }
     }
 }
@@ -169,7 +232,9 @@ static void btn_task(void *arg)
         if (xQueueReceive(s_evt_q, &msg, pdMS_TO_TICKS(50)) == pdTRUE) {
             handle_edge(&msg);
         }
-        check_long_press(esp_timer_get_time());
+        int64_t now = esp_timer_get_time();
+        check_long_press(now);
+        check_pending(now);
     }
 }
 

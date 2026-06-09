@@ -2,7 +2,8 @@
  * Matter device implementation for Shelly 1 Gen4 (ESP32-C6).
  *
  * 5 endpoints:
- *   EP1 = OnOff Light Switch  + OnOff client + LevelControl client + Binding — Toggle
+ *   EP1 = OnOff Light Switch  + OnOff client + LevelControl client
+ *          + ColorControl client + Binding — Toggle / Color Temp
  *   EP2 = OnOff Light Switch  + OnOff client + Binding — State-follow (On/Off)
  *   EP3 = Temperature Sensor  (server)
  *   EP4 = Occupancy Sensor    (server)
@@ -101,6 +102,9 @@ struct BindingCommandData
     /* level-control payload */
     uint8_t moveMode = 0; /* 0 = up, 1 = down */
     uint8_t rate     = 50;
+    /* color-temperature payload */
+    uint16_t colorTempMireds = 0;
+    uint16_t colorTempRate   = 0;
 };
 
 /* Typed lambda callbacks for InvokeCommandRequest (v1.4 API).
@@ -169,6 +173,43 @@ static void send_level_multicast(const BindingCommandData &d, const EmberBinding
     }
 }
 
+static void send_colorcontrol_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
+{
+    auto *em = &chip::Server::GetInstance().GetExchangeManager();
+    CHIP_ERROR err = CHIP_NO_ERROR;
+    if (d.commandId == ColorControl::Commands::MoveToColorTemperature::Id) {
+        ColorControl::Commands::MoveToColorTemperature::Type cmd;
+        cmd.colorTemperatureMireds = d.colorTempMireds;
+        cmd.transitionTime = 0;
+        cmd.optionsMask = 0;
+        cmd.optionsOverride = 0;
+        err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+    } else if (d.commandId == ColorControl::Commands::MoveColorTemperature::Id) {
+        ColorControl::Commands::MoveColorTemperature::Type cmd;
+        cmd.moveMode = (d.moveMode == 0)
+            ? ColorControl::HueMoveMode::kUp
+            : ColorControl::HueMoveMode::kDown;
+        cmd.rate = d.colorTempRate;
+        cmd.colorTemperatureMinimumMireds = 0;
+        cmd.colorTemperatureMaximumMireds = 0;
+        cmd.optionsMask = 0;
+        cmd.optionsOverride = 0;
+        err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+    } else if (d.commandId == ColorControl::Commands::StopMoveStep::Id) {
+        ColorControl::Commands::StopMoveStep::Type cmd;
+        cmd.optionsMask = 0;
+        cmd.optionsOverride = 0;
+        err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+    }
+    if (err != CHIP_NO_ERROR) {
+        ESP_LOGE(TAG, "send_colorcontrol_multicast FAILED: fabric=%u group=0x%04X err=%" CHIP_ERROR_FORMAT,
+                 b.fabricIndex, b.groupId, err.Format());
+    } else {
+        ESP_LOGI(TAG, "send_colorcontrol_multicast OK: fabric=%u group=0x%04X cmd=0x%lx",
+                 b.fabricIndex, b.groupId, (unsigned long)d.commandId);
+    }
+}
+
 /* ------------- Direct-send via FindOrEstablishSession ------------- */
 /*
  * Bypasses BindingManager::NotifyBoundClusterChanged() which in esp-matter
@@ -223,6 +264,34 @@ struct DirectSendCtx {
                 chip::Controller::InvokeCommandRequest(
                     &em, sh, b.remote, c, make_on_success(), make_on_error());
             }
+        } else if (d.clusterId == ColorControl::Id) {
+            if (d.commandId == ColorControl::Commands::MoveToColorTemperature::Id) {
+                ColorControl::Commands::MoveToColorTemperature::Type c;
+                c.colorTemperatureMireds = d.colorTempMireds;
+                c.transitionTime = 0;
+                c.optionsMask = 0;
+                c.optionsOverride = 0;
+                chip::Controller::InvokeCommandRequest(
+                    &em, sh, b.remote, c, make_on_success(), make_on_error());
+            } else if (d.commandId == ColorControl::Commands::MoveColorTemperature::Id) {
+                ColorControl::Commands::MoveColorTemperature::Type c;
+                c.moveMode = (d.moveMode == 0)
+                    ? ColorControl::HueMoveMode::kUp
+                    : ColorControl::HueMoveMode::kDown;
+                c.rate = d.colorTempRate;
+                c.colorTemperatureMinimumMireds = 0;
+                c.colorTemperatureMaximumMireds = 0;
+                c.optionsMask = 0;
+                c.optionsOverride = 0;
+                chip::Controller::InvokeCommandRequest(
+                    &em, sh, b.remote, c, make_on_success(), make_on_error());
+            } else if (d.commandId == ColorControl::Commands::StopMoveStep::Id) {
+                ColorControl::Commands::StopMoveStep::Type c;
+                c.optionsMask = 0;
+                c.optionsOverride = 0;
+                chip::Controller::InvokeCommandRequest(
+                    &em, sh, b.remote, c, make_on_success(), make_on_error());
+            }
         }
         chip::Platform::Delete(self);
     }
@@ -271,8 +340,9 @@ static void SwitchWorkerFunction(intptr_t context)
                 FindOrEstablishSession(peer, &ctx->connCb, &ctx->failCb);
             sent++;
         } else if (e.type == MATTER_MULTICAST_BINDING) {
-            if (d->clusterId == OnOff::Id)            send_onoff_multicast(*d, e);
-            else if (d->clusterId == LevelControl::Id) send_level_multicast(*d, e);
+            if (d->clusterId == OnOff::Id)              send_onoff_multicast(*d, e);
+            else if (d->clusterId == LevelControl::Id)  send_level_multicast(*d, e);
+            else if (d->clusterId == ColorControl::Id)  send_colorcontrol_multicast(*d, e);
             sent++;
         }
     }
@@ -336,6 +406,45 @@ extern "C" void matter_send_level_stop(uint16_t ep)
 {
     if (!ep) return;
     switch_send(ep, LevelControl::Id, LevelControl::Commands::Stop::Id);
+}
+
+extern "C" void matter_send_color_temp_set(uint16_t ep, uint16_t mireds)
+{
+    if (!ep) return;
+    ESP_LOGI(TAG, "color_temp_set ep=%u mireds=%u", ep, mireds);
+    BindingCommandData *d = chip::Platform::New<BindingCommandData>();
+    d->localEndpointId = ep;
+    d->clusterId       = ColorControl::Id;
+    d->commandId       = ColorControl::Commands::MoveToColorTemperature::Id;
+    d->colorTempMireds = mireds;
+    chip::DeviceLayer::PlatformMgr().ScheduleWork(
+        SwitchWorkerFunction, reinterpret_cast<intptr_t>(d));
+}
+
+extern "C" void matter_send_color_temp_move(uint16_t ep, bool warmer, uint16_t rate)
+{
+    if (!ep) return;
+    ESP_LOGI(TAG, "color_temp_move ep=%u warmer=%d rate=%u", ep, warmer, rate);
+    BindingCommandData *d = chip::Platform::New<BindingCommandData>();
+    d->localEndpointId = ep;
+    d->clusterId       = ColorControl::Id;
+    d->commandId       = ColorControl::Commands::MoveColorTemperature::Id;
+    d->moveMode        = warmer ? 0 : 1;  /* 0=Up(warmer/higher mireds), 1=Down(cooler) */
+    d->colorTempRate   = rate;
+    chip::DeviceLayer::PlatformMgr().ScheduleWork(
+        SwitchWorkerFunction, reinterpret_cast<intptr_t>(d));
+}
+
+extern "C" void matter_send_color_temp_stop(uint16_t ep)
+{
+    if (!ep) return;
+    ESP_LOGI(TAG, "color_temp_stop ep=%u", ep);
+    BindingCommandData *d = chip::Platform::New<BindingCommandData>();
+    d->localEndpointId = ep;
+    d->clusterId       = ColorControl::Id;
+    d->commandId       = ColorControl::Commands::StopMoveStep::Id;
+    chip::DeviceLayer::PlatformMgr().ScheduleWork(
+        SwitchWorkerFunction, reinterpret_cast<intptr_t>(d));
 }
 
 extern "C" void matter_update_temperature(int16_t centi_c)
@@ -431,12 +540,15 @@ extern "C" esp_err_t matter_start(void)
     node_t *node = node::create(&node_cfg, attribute_update_cb, identify_cb);
     if (!node) { ESP_LOGE(TAG, "node create failed"); return ESP_FAIL; }
 
-    /* EP1 — OnOff Light Switch + LevelControl client + Binding (Toggle) */
+    /* EP1 — OnOff Light Switch + LevelControl client + ColorControl client + Binding */
     on_off_switch::config_t sw_cfg;
     endpoint_t *ep_pushbutton = on_off_switch::create(node, &sw_cfg, ENDPOINT_FLAG_NONE, NULL);
     {
         level_control::config_t lvl_cfg;
         level_control::create(ep_pushbutton, &lvl_cfg,
+                              CLUSTER_FLAG_CLIENT, ESP_MATTER_NONE_FEATURE_ID);
+        color_control::config_t cc_cfg;
+        color_control::create(ep_pushbutton, &cc_cfg,
                               CLUSTER_FLAG_CLIENT, ESP_MATTER_NONE_FEATURE_ID);
         binding::config_t bind_cfg;
         binding::create(ep_pushbutton, &bind_cfg, CLUSTER_FLAG_SERVER);

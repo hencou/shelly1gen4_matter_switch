@@ -22,6 +22,11 @@ extern "C" {
  * - CONTACT_OPEN     fires on every release/open edge (state-following)
  *   These two events enable EP5 (state-follow switch): bind EP5 for a
  *   maintained switch (On/Off follows contact), bind EP1 for momentary (Toggle).
+ * - DOUBLE_PRESS     fires after 2 rapid short presses (within DOUBLE_CLICK_WINDOW_MS)
+ *                    Used for setting color temperature to default (2700K).
+ * - SHORT_LONG_START fires when a short press is followed by a long hold
+ *                    Used for continuous color temperature adjustment.
+ * - SHORT_LONG_STOP  fires on release after a SHORT_LONG_START
  */
 typedef enum {
     BTN_EVT_SHORT_PRESS = 0,
@@ -30,6 +35,9 @@ typedef enum {
     BTN_EVT_MODE_TOGGLE,
     BTN_EVT_CONTACT_CLOSED,
     BTN_EVT_CONTACT_OPEN,
+    BTN_EVT_DOUBLE_PRESS,
+    BTN_EVT_SHORT_LONG_START,
+    BTN_EVT_SHORT_LONG_STOP,
 } button_event_t;
 
 typedef void (*button_cb_t)(input_id_t input, button_event_t evt);
