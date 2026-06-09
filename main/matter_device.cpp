@@ -181,8 +181,6 @@ static void send_colorcontrol_multicast(const BindingCommandData &d, const Ember
         ColorControl::Commands::MoveToColorTemperature::Type cmd;
         cmd.colorTemperatureMireds = d.colorTempMireds;
         cmd.transitionTime = 0;
-        cmd.optionsMask = 0;
-        cmd.optionsOverride = 0;
         err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     } else if (d.commandId == ColorControl::Commands::MoveColorTemperature::Id) {
         ColorControl::Commands::MoveColorTemperature::Type cmd;
@@ -192,13 +190,9 @@ static void send_colorcontrol_multicast(const BindingCommandData &d, const Ember
         cmd.rate = d.colorTempRate;
         cmd.colorTemperatureMinimumMireds = 0;
         cmd.colorTemperatureMaximumMireds = 0;
-        cmd.optionsMask = 0;
-        cmd.optionsOverride = 0;
         err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     } else if (d.commandId == ColorControl::Commands::StopMoveStep::Id) {
         ColorControl::Commands::StopMoveStep::Type cmd;
-        cmd.optionsMask = 0;
-        cmd.optionsOverride = 0;
         err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     }
     if (err != CHIP_NO_ERROR) {
@@ -269,8 +263,6 @@ struct DirectSendCtx {
                 ColorControl::Commands::MoveToColorTemperature::Type c;
                 c.colorTemperatureMireds = d.colorTempMireds;
                 c.transitionTime = 0;
-                c.optionsMask = 0;
-                c.optionsOverride = 0;
                 chip::Controller::InvokeCommandRequest(
                     &em, sh, b.remote, c, make_on_success(), make_on_error());
             } else if (d.commandId == ColorControl::Commands::MoveColorTemperature::Id) {
@@ -281,14 +273,10 @@ struct DirectSendCtx {
                 c.rate = d.colorTempRate;
                 c.colorTemperatureMinimumMireds = 0;
                 c.colorTemperatureMaximumMireds = 0;
-                c.optionsMask = 0;
-                c.optionsOverride = 0;
                 chip::Controller::InvokeCommandRequest(
                     &em, sh, b.remote, c, make_on_success(), make_on_error());
             } else if (d.commandId == ColorControl::Commands::StopMoveStep::Id) {
                 ColorControl::Commands::StopMoveStep::Type c;
-                c.optionsMask = 0;
-                c.optionsOverride = 0;
                 chip::Controller::InvokeCommandRequest(
                     &em, sh, b.remote, c, make_on_success(), make_on_error());
             }
