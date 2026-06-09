@@ -59,6 +59,11 @@ void bench_mode_init(void);
  * a wall switch that accidentally stays pressed). */
 #define MODE_TOGGLE_CLICKS      6
 #define MODE_TOGGLE_WINDOW_MS   2500
+/* Double-click detection: after a short press release, wait this long
+ * for a second press before dispatching SHORT_PRESS. */
+#define DOUBLE_CLICK_WINDOW_MS  400
+/* Default color temperature (2700 K = ~370 mireds) sent on double-press. */
+#define DEFAULT_COLOR_TEMP_MIREDS  370
 
 /* Matter endpoints */
 #define EP_SWITCH_PUSHBUTTON   1
@@ -70,10 +75,13 @@ void bench_mode_init(void);
 /* Logical input source identifiers.
  * All 3 inputs have uniform behavior (see on_button_event in app_main.cpp):
  *   - SHORT_PRESS       -> Matter Toggle to EP1 bound devices (momentary)
- *   - CONTACT_CLOSED    -> Matter On to EP2 bound devices (state-follow)
- *   - CONTACT_OPEN      -> Matter Off to EP2 bound devices (state-follow)
+ *   - DOUBLE_PRESS      -> Matter ColorControl MoveToColorTemperature (2700K default)
  *   - LONG_PRESS_START  -> Matter LevelControl Move (dim up/down)
  *   - LONG_PRESS_STOP   -> Matter LevelControl Stop
+ *   - SHORT_LONG_START  -> Matter ColorControl MoveColorTemperature (warm/cool)
+ *   - SHORT_LONG_STOP   -> Matter ColorControl StopMoveStep
+ *   - CONTACT_CLOSED    -> Matter On to EP2 bound devices (state-follow)
+ *   - CONTACT_OPEN      -> Matter Off to EP2 bound devices (state-follow)
  *   - 6x click          -> mode toggle (Matter <-> OTA, universal)
  */
 typedef enum {

@@ -424,6 +424,7 @@ async def run_logic(args):
         bindings = [
             {"group": args.group_id, "cluster": 6},    # OnOff
             {"group": args.group_id, "cluster": 8},    # LevelControl (dimming)
+            {"group": args.group_id, "cluster": 768},  # ColorControl (0x0300)
         ]
 
         for sw in args.switch:

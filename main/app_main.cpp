@@ -34,6 +34,8 @@ static const char *TAG = "app";
 /* Alternate dim direction per long-press (1 shared state for all inputs
  * because they all use the same Matter endpoint / binding). */
 static bool s_dim_up = true;
+/* Alternate color-temperature direction per short-long gesture. */
+static bool s_ct_warmer = true;
 
 extern "C" void on_button_event(input_id_t id, button_event_t evt)
 {
@@ -50,6 +52,12 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
         status_led_blip();
         break;
 
+    case BTN_EVT_DOUBLE_PRESS:
+        matter_send_color_temp_set(ep, DEFAULT_COLOR_TEMP_MIREDS);
+        status_led_blip();
+        status_led_blip();
+        break;
+
     case BTN_EVT_LONG_PRESS_START:
         matter_send_level_move(ep, s_dim_up, 50);
         s_dim_up = !s_dim_up;
@@ -57,6 +65,15 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
 
     case BTN_EVT_LONG_PRESS_STOP:
         matter_send_level_stop(ep);
+        break;
+
+    case BTN_EVT_SHORT_LONG_START:
+        matter_send_color_temp_move(ep, s_ct_warmer, 50);
+        s_ct_warmer = !s_ct_warmer;
+        break;
+
+    case BTN_EVT_SHORT_LONG_STOP:
+        matter_send_color_temp_stop(ep);
         break;
 
     case BTN_EVT_MODE_TOGGLE:

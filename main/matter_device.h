@@ -24,6 +24,9 @@ void matter_send_onoff_on(uint16_t local_endpoint_id);
 void matter_send_onoff_off(uint16_t local_endpoint_id);
 void matter_send_level_move(uint16_t local_endpoint_id, bool up, uint8_t rate);
 void matter_send_level_stop(uint16_t local_endpoint_id);
+void matter_send_color_temp_set(uint16_t local_endpoint_id, uint16_t mireds);
+void matter_send_color_temp_move(uint16_t local_endpoint_id, bool warmer, uint16_t rate);
+void matter_send_color_temp_stop(uint16_t local_endpoint_id);
 
 /* Sensor attribute updates for Matter server clusters. */
 void matter_update_temperature(int16_t centi_c);
