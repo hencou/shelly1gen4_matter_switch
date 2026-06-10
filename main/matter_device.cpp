@@ -576,7 +576,17 @@ extern "C" esp_err_t matter_start(void)
     s_ep_relay = endpoint::get_id(ep_relay);
     ESP_LOGI(TAG, "EP%u = OnOff Light (relay)", s_ep_relay);
 
+    // Matter over Thread OTA requestor
+    endpoint_t *root = node::get_root_endpoint(node);
 
+    // OTA Software Update Requestor cluster (0x002A) — server kant
+    ota_requestor::config_t ota_cfg;
+    ota_requestor::create(root, &ota_cfg, CLUSTER_FLAG_SERVER);
+    
+    // OTA Software Update Provider cluster (0x0029) — client kant  
+    ota_provider::config_t prov_cfg;
+    ota_provider::create(root, &prov_cfg, CLUSTER_FLAG_CLIENT);
+    //
 
     /* OTA cluster requestor (optional: for Matter OTA via TBR — works alongside our WiFi OTA) */
     esp_matter_ota_requestor_init();
