@@ -45,7 +45,7 @@ extern "C" {
 #include <esp_matter_ota.h>
 
 #include <app/server/Server.h>
-#include <app/util/binding-table.h>
+#include <app/clusters/bindings/binding-table.h>
 #include <app/clusters/bindings/BindingManager.h>
 #include <app/OperationalSessionSetup.h>
 #include <app-common/zap-generated/cluster-objects.h>
