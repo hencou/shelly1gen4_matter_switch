@@ -51,12 +51,11 @@ void bench_mode_init(void);
 #define LONG_PRESS_MS       CONFIG_LONG_PRESS_MS
 #define OCC_DEBOUNCE_MS     CONFIG_OCC_DEBOUNCE_MS
 #define TEMP_REPORT_INT_S   CONFIG_TEMP_REPORT_INTERVAL_S
-/* 6x click = mode toggle (universal on all 3 inputs):
- *   - Matter mode + 6x  -> reboot to OTA mode (dedicated)
- *   - OTA mode    + 6x  -> factory reset (wipe nvs + chip_kvs) -> Matter mode
- * Tamper-proof: same gesture on same button for both directions.
- * Long press does NOT trigger factory reset (too risky with
- * a wall switch that accidentally stays pressed). */
+/* 6x click = WiFi enable (universal on all 3 inputs):
+ *   - Matter mode + 6x  -> enable WiFi alongside Thread (non-persistent)
+ *   - OTA mode    + 6x  -> ignored
+ * WiFi allows configuration via management dashboard while Thread
+ * stays active. WiFi is lost on reboot (only in RAM). */
 #define MODE_TOGGLE_CLICKS      6
 #define MODE_TOGGLE_WINDOW_MS   2500
 /* Double-click detection: after a short press release, wait this long
@@ -76,13 +75,13 @@ void bench_mode_init(void);
  * All 3 inputs have uniform behavior (see on_button_event in app_main.cpp):
  *   - SHORT_PRESS       -> Matter Toggle to EP1 bound devices (momentary)
  *   - DOUBLE_PRESS      -> Matter ColorControl MoveToColorTemperature (2700K default)
- *   - LONG_PRESS_START  -> Matter LevelControl Move (dim up/down)
+ *   - LONG_PRESS_START  -> Matter LevelControl MoveWithOnOff (dim, turns on lamp if off)
  *   - LONG_PRESS_STOP   -> Matter LevelControl Stop
  *   - SHORT_LONG_START  -> Matter ColorControl MoveColorTemperature (warm/cool)
  *   - SHORT_LONG_STOP   -> Matter ColorControl StopMoveStep
  *   - CONTACT_CLOSED    -> Matter On to EP2 bound devices (state-follow)
  *   - CONTACT_OPEN      -> Matter Off to EP2 bound devices (state-follow)
- *   - 6x click          -> mode toggle (Matter <-> OTA, universal)
+ *   - 6x click          -> enable WiFi alongside Thread (non-persistent)
  */
 typedef enum {
     INPUT_PUSHBUTTON = 0,    /* GPIO10 — System 55 pushbutton (active-high in production,

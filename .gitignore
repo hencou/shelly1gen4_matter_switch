@@ -10,3 +10,4 @@ managed_components/
 .idea/
 *.swp
 *.swo
+tools/__pycache__/

@@ -1116,12 +1116,137 @@ static void full_factory_reset(void)
 
 static void ota_mode_button_cb(input_id_t id, button_event_t evt)
 {
-    if (evt == BTN_EVT_MODE_TOGGLE) {
-        ESP_LOGW(TAG, "MODE_TOGGLE in OTA mode -> factory reset");
-        full_factory_reset();
-    } else {
-        ESP_LOGI(TAG, "OTA mode: input=%d evt=%d ignored", id, evt);
+    ESP_LOGI(TAG, "OTA mode: input=%d evt=%d ignored", id, evt);
+}
+
+/* ---------- Runtime WiFi enable (alongside Thread/Matter) ---------- */
+
+static void wifi_runtime_task(void *arg)
+{
+    (void)arg;
+    char ssid[33] = {0}, pass[65] = {0}, url[256] = {0};
+    bool have_creds = ota_load_credentials(ssid, sizeof(ssid),
+                                           pass, sizeof(pass),
+                                           url,  sizeof(url));
+
+#ifdef DEFAULT_WIFI_SSID
+    if (!have_creds) {
+#ifndef DEFAULT_WIFI_PASS
+#define DEFAULT_WIFI_PASS ""
+#endif
+        strncpy(ssid, DEFAULT_WIFI_SSID, sizeof(ssid) - 1);
+        strncpy(pass, DEFAULT_WIFI_PASS, sizeof(pass) - 1);
+        have_creds = strlen(ssid) > 0;
     }
+#endif
+
+    if (!have_creds) {
+        ESP_LOGW(TAG, "wifi_runtime: no credentials, starting AP mode");
+        goto start_ap;
+    }
+
+    /* Initialize netif + WiFi (safe if already done by Matter/Thread) */
+    esp_netif_init();  /* ignore ESP_ERR_INVALID_STATE if already init */
+    esp_event_loop_create_default();  /* ignore if already created */
+    esp_netif_create_default_wifi_sta();
+
+    {
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    }
+
+    s_wifi_evt = xEventGroupCreate();
+    s_retry = 0;
+
+    {
+        esp_event_handler_instance_t any_id, got_ip;
+        esp_event_handler_instance_register(
+            WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &any_id);
+        esp_event_handler_instance_register(
+            IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &got_ip);
+    }
+
+    {
+        wifi_config_t wcfg = { 0 };
+        strncpy((char*)wcfg.sta.ssid, ssid, sizeof(wcfg.sta.ssid));
+        strncpy((char*)wcfg.sta.password, pass, sizeof(wcfg.sta.password));
+        wcfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wcfg));
+        ESP_ERROR_CHECK(esp_wifi_start());
+    }
+
+    {
+        EventBits_t bits = xEventGroupWaitBits(
+            s_wifi_evt, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+            pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
+
+        if (bits & WIFI_CONNECTED_BIT) {
+            ESP_LOGW(TAG, "wifi_runtime: STA connected, starting management httpd");
+            start_httpd();
+            vTaskDelete(NULL);
+            return;
+        }
+    }
+
+    /* STA failed — wipe WiFi credentials and switch to AP mode */
+    ESP_LOGW(TAG, "wifi_runtime: STA connection FAILED, wiping WiFi credentials");
+    esp_wifi_stop();
+    esp_wifi_deinit();
+
+    {
+        nvs_handle_t h;
+        if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+            nvs_erase_key(h, NVS_KEY_SSID);
+            nvs_erase_key(h, NVS_KEY_PASS);
+            nvs_commit(h);
+            nvs_close(h);
+        }
+    }
+
+start_ap:
+    ESP_LOGW(TAG, "wifi_runtime: starting AP mode for manual configuration");
+
+    {
+        uint8_t mac[6];
+        esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+        char ap_ssid[32];
+        snprintf(ap_ssid, sizeof(ap_ssid), "shelly-cfg-%02X%02X%02X",
+                 mac[3], mac[4], mac[5]);
+
+        esp_netif_init();
+        esp_event_loop_create_default();
+        esp_netif_create_default_wifi_ap();
+
+        wifi_init_config_t wic = WIFI_INIT_CONFIG_DEFAULT();
+        ESP_ERROR_CHECK(esp_wifi_init(&wic));
+
+        wifi_config_t apc = {
+            .ap = {
+                .max_connection = 3,
+                .authmode = WIFI_AUTH_OPEN,
+                .channel = 6,
+            },
+        };
+        strncpy((char*)apc.ap.ssid, ap_ssid, sizeof(apc.ap.ssid));
+        apc.ap.ssid_len = strlen(ap_ssid);
+
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &apc));
+        ESP_ERROR_CHECK(esp_wifi_start());
+
+        start_httpd();
+
+        ESP_LOGW(TAG, "wifi_runtime: AP ready '%s', http://192.168.4.1/", ap_ssid);
+    }
+
+    vTaskDelete(NULL);
+}
+
+void ota_enable_wifi_runtime(void)
+{
+    ESP_LOGW(TAG, "Enabling WiFi alongside Thread (runtime, non-persistent)");
+    xTaskCreate(wifi_runtime_task, "wifi_rt", 4096, NULL, 5, NULL);
 }
 
 /* ---------- Public entrypoints ---------- */

@@ -8,19 +8,25 @@ extern "C" {
 #endif
 
 /**
- * OTA module for the Shelly 1 Gen4 custom firmware.
+ * OTA / WiFi module for the Shelly 1 Gen4 custom firmware.
  *
- * Flow:
- *   1) During normal operation: WiFi OFF, only Thread/Matter.
- *   2) User trigger: 6x clicks on pushbutton ->
- *      ota_request_at_next_boot() sets NVS flag + reboot.
- *   3) At boot: ota_handle_pending() inspects the flag.
+ * Two WiFi paths:
+ *
+ * A) Runtime WiFi enable (6x clicks in Matter mode):
+ *   - WiFi starts alongside Thread (both active, non-persistent).
+ *   - If STA connection succeeds: management dashboard reachable.
+ *   - If STA fails: WiFi credentials wiped, AP mode started.
+ *   - After reboot: WiFi is OFF again (only in RAM, not NVS flag).
+ *
+ * B) Dedicated OTA mode (via ota_request_at_next_boot):
+ *   1) NVS flag set + reboot.
+ *   2) At boot: ota_handle_pending() inspects the flag.
  *      - If saved WiFi creds exist -> direct STA OTA.
  *      - Otherwise -> SoftAP "shelly-ota-XXXXXX" with HTTP form on
  *        http://192.168.4.1/ to enter SSID/pass/URL once.
- *   4) 10-minute timeout: if no upload occurs, reboot back to Matter.
- *   5) On success: esp_restart() -> new firmware boots, Thread resumes.
- *   6) On failure: ESP-IDF rollback does not mark new app as valid;
+ *   3) 10-minute timeout: if no upload occurs, reboot back to Matter.
+ *   4) On success: esp_restart() -> new firmware boots, Thread resumes.
+ *   5) On failure: ESP-IDF rollback does not mark new app as valid;
  *      after 3rd failed boot it reverts to the previous slot.
  */
 
@@ -29,6 +35,10 @@ void ota_handle_pending(void);
 
 /* Set OTA flag in NVS and reboot the device. */
 void ota_request_at_next_boot(void);
+
+/* Enable WiFi alongside Thread at runtime (non-persistent, lost on reboot).
+ * If STA connection fails, WiFi credentials are wiped and AP mode is started. */
+void ota_enable_wifi_runtime(void);
 
 /* Save WiFi creds + URL in NVS (can also be done via web form). */
 esp_err_t ota_save_credentials(const char *ssid, const char *password,
