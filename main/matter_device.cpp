@@ -531,6 +531,9 @@ extern "C" esp_err_t matter_start(void)
 
     /* EP4 — Occupancy Sensor (LD2410 on GPIO17) */
     occupancy_sensor::config_t o_cfg;
+    /* Matter 1.5 requires at least one sensing feature flag */
+    o_cfg.occupancy_sensing.feature_flags =
+        cluster::occupancy_sensing::feature::other::get_id();
     endpoint_t *ep_occ = occupancy_sensor::create(node, &o_cfg, ENDPOINT_FLAG_NONE, NULL);
     s_ep_occ = endpoint::get_id(ep_occ);
     ESP_LOGI(TAG, "EP%u = Occupancy Sensor (LD2410)", s_ep_occ);
