@@ -33,69 +33,17 @@ extern "C" {
 
 static const char *TAG = "app";
 
-/* Alternate dim direction per long-press (1 shared state for all inputs
- * because they all use the same Matter endpoint / binding). */
-static bool s_dim_up = true;
-/* Alternate color-temperature direction per short-long gesture. */
-static bool s_ct_warmer = true;
-
 extern "C" void on_button_event(input_id_t id, button_event_t evt)
 {
-    /* EP1 = toggle (momentary pushbutton), EP2 = state-follow (maintained switch).
-     * All 3 inputs send to both endpoints; the user chooses via
-     * binding which endpoint controls their light/relay. */
-    uint16_t ep = matter_ep_pushbutton();
-    uint16_t ep_sf = matter_ep_state();
-    ESP_LOGI(TAG, "button id=%d evt=%d ep=%u ep_sf=%u", id, evt, ep, ep_sf);
+    ESP_LOGI(TAG, "button id=%d evt=%d", id, evt);
 
-    switch (evt) {
-    case BTN_EVT_SHORT_PRESS:
-        matter_send_onoff_toggle(ep);
-        status_led_blip();
-        break;
-
-    case BTN_EVT_DOUBLE_PRESS:
-        matter_send_color_temp_set(ep, DEFAULT_COLOR_TEMP_MIREDS);
-        status_led_blip();
-        status_led_blip();
-        break;
-
-    case BTN_EVT_LONG_PRESS_START:
-        matter_send_level_move(ep, s_dim_up, 50);
-        s_dim_up = !s_dim_up;
-        break;
-
-    case BTN_EVT_LONG_PRESS_STOP:
-        matter_send_level_stop(ep);
-        break;
-
-    case BTN_EVT_SHORT_LONG_START:
-        matter_send_color_temp_move(ep, s_ct_warmer, 50);
-        s_ct_warmer = !s_ct_warmer;
-        break;
-
-    case BTN_EVT_SHORT_LONG_STOP:
-        matter_send_color_temp_stop(ep);
-        break;
-
-    case BTN_EVT_MODE_TOGGLE:
-        /* 6x click in Matter mode: enable WiFi alongside Thread so the
-         * management dashboard is reachable for configuration. WiFi is
-         * non-persistent — after reboot only Thread remains active. */
+    if (evt == BTN_EVT_MODE_TOGGLE) {
         ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> enabling WiFi runtime", id);
         ota_enable_wifi_runtime();
-        break;
-
-    case BTN_EVT_CONTACT_CLOSED:
-        matter_send_onoff_on(ep_sf);
-        break;
-
-    case BTN_EVT_CONTACT_OPEN:
-        matter_send_onoff_off(ep_sf);
-        break;
+        return;
     }
 
-    /* Forward event to script engine for TRIGGER_BUTTON_EVENT scripts */
+    /* All button behavior is handled by Lua scripts */
     script_engine_button_event(id, evt);
 }
 
@@ -122,13 +70,15 @@ extern "C" void app_main(void)
 
     relay_init();
 
+    /* Load script slot types from NVS BEFORE matter_start —
+     * endpoints are created dynamically based on slot configuration. */
+    script_slot_type_t slot_types[SCRIPT_MAX_SLOTS];
+    script_engine_load_slot_types(slot_types, SCRIPT_MAX_SLOTS);
+
     /* Matter MUST start before button_driver_init / sensors_init:
      * those install GPIO ISRs and FreeRTOS tasks that immediately call
-     * Matter APIs via callbacks. If the Matter stack and endpoints are not
-     * yet initialized (s_ep_pushbutton = 0) switch_send() crashes. On the
-     * bench GPIO10 floats (no 230V AC = no external pull reference) ->
-     * ANYEDGE ISR fires immediately after arming -> race -> SW_CPU reset. */
-    ESP_ERROR_CHECK(matter_start());
+     * Matter APIs via callbacks. */
+    ESP_ERROR_CHECK(matter_start(slot_types, SCRIPT_MAX_SLOTS));
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done, calling button_driver_init");
 
     // =========================================================================
@@ -219,7 +169,12 @@ extern "C" void app_main(void)
      * Commissioned → normal operation:
      *   WiFi only via 6× press. */
     if (chip::Server::GetInstance().GetFabricTable().FabricCount() == 0) {
-        if (script_engine_active_slots() == 0) {
+        /* Check if any slots have configured types (using the pre-loaded array) */
+        bool has_slots = false;
+        for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
+            if (slot_types[i] != SLOT_TYPE_NONE) { has_slots = true; break; }
+        }
+        if (!has_slots) {
             ESP_LOGI(TAG, "Not commissioned, no scripts — WiFi setup mode (BLE off)");
             chip::DeviceLayer::ConnectivityMgr().SetBLEAdvertisingEnabled(false);
             ota_enable_wifi_runtime();

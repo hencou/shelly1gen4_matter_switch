@@ -52,10 +52,14 @@ typedef struct {
     char script[SCRIPT_MAX_SIZE]; /* Lua source code */
 } script_slot_config_t;
 
+/* Load only slot types from NVS (lightweight, call BEFORE matter_start).
+ * Fills types[0..max_slots-1] with SLOT_TYPE_NONE for unconfigured slots. */
+esp_err_t script_engine_load_slot_types(script_slot_type_t *types, uint8_t max_slots);
+
 /* Initialize the script engine (call after matter_start) */
 esp_err_t script_engine_init(void);
 
-/* Load all slot configs from NVS and create endpoints + start scripts */
+/* Load all slot configs from NVS and start scripts */
 esp_err_t script_engine_start(void);
 
 /* Get slot configuration (for web interface) */
