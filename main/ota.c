@@ -939,11 +939,14 @@ static esp_err_t api_restart_post(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* /api/factory-reset — erase NVS and reboot */
+/* /api/factory-reset — erase NVS + Matter data and reboot */
 static esp_err_t api_factory_reset_post(httpd_req_t *req)
 {
-    nvs_flash_erase();
     httpd_resp_sendstr(req, "OK");
+    ESP_LOGW(TAG, "Factory reset via web: wiping nvs + chip_kvs");
+    nvs_flash_erase_partition("chip_kvs");
+    nvs_flash_deinit();
+    nvs_flash_erase();
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
     return ESP_OK;
