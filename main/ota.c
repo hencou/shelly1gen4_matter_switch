@@ -795,69 +795,76 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
     /* Digital IN — GPIO18 (TTP223 touch) */
     int dig_level = gpio_get_level(PIN_TOUCH_INPUT);
 
-    /* Analog IN — GPIO17 duty cycle */
+    /* Analog IN — GPIO17 duty cycle
+     * In bench_mode GPIO9/16/17 are UART0 pins — do NOT reconfigure them
+     * or serial output dies. */
     char ana_str[32];
-    {
-        uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
-        uart_driver_delete(UART_NUM_0);
-        periph_module_disable(PERIPH_UART0_MODULE);
-        gpio_reset_pin(PIN_LD2410_INPUT);
-        gpio_config_t cfg = {
-            .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
-            .mode         = GPIO_MODE_INPUT,
-            .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        };
-        gpio_config(&cfg);
-        int high = 0, total = 0;
-        for (int us = 0; us < 100000; us += 100) {
-            if (gpio_get_level(PIN_LD2410_INPUT)) high++;
-            total++;
-            esp_rom_delay_us(100);
+    char temp_str[32] = "N/A (bench mode)";
+    if (g_bench_mode) {
+        snprintf(ana_str, sizeof(ana_str), "N/A (bench mode)");
+    } else {
+        {
+            uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+            uart_driver_delete(UART_NUM_0);
+            periph_module_disable(PERIPH_UART0_MODULE);
+            gpio_reset_pin(PIN_LD2410_INPUT);
+            gpio_config_t cfg = {
+                .pin_bit_mask = (1ULL << PIN_LD2410_INPUT),
+                .mode         = GPIO_MODE_INPUT,
+                .pull_down_en = GPIO_PULLDOWN_ENABLE,
+            };
+            gpio_config(&cfg);
+            int high = 0, total = 0;
+            for (int us = 0; us < 100000; us += 100) {
+                if (gpio_get_level(PIN_LD2410_INPUT)) high++;
+                total++;
+                esp_rom_delay_us(100);
+            }
+            int duty = (high * 100) / total;
+            snprintf(ana_str, sizeof(ana_str), "%d%% duty (%s)",
+                     duty, duty >= 25 ? "occupied" : "clear");
         }
-        int duty = (high * 100) / total;
-        snprintf(ana_str, sizeof(ana_str), "%d%% duty (%s)",
-                 duty, duty >= 25 ? "occupied" : "clear");
-    }
 
-    /* ── Sensors ── */
+        /* ── Sensors ── */
 
-    /* Temperature — DS18B20 via 1-Wire */
-    char temp_str[32] = "sensor not found";
-    {
-        uart_driver_delete(UART_NUM_0);
-        gpio_config_t tx_cfg = {
-            .pin_bit_mask = (1ULL << OTA_OW_TX),
-            .mode         = GPIO_MODE_OUTPUT,
-        };
-        gpio_config(&tx_cfg);
-        ota_ow_tx_high();
-        gpio_reset_pin(OTA_OW_RX);
-        gpio_config_t rx_cfg = {
-            .pin_bit_mask = (1ULL << OTA_OW_RX),
-            .mode         = GPIO_MODE_INPUT,
-        };
-        gpio_config(&rx_cfg);
+        /* Temperature — DS18B20 via 1-Wire */
+        strcpy(temp_str, "sensor not found");
+        {
+            uart_driver_delete(UART_NUM_0);
+            gpio_config_t tx_cfg = {
+                .pin_bit_mask = (1ULL << OTA_OW_TX),
+                .mode         = GPIO_MODE_OUTPUT,
+            };
+            gpio_config(&tx_cfg);
+            ota_ow_tx_high();
+            gpio_reset_pin(OTA_OW_RX);
+            gpio_config_t rx_cfg = {
+                .pin_bit_mask = (1ULL << OTA_OW_RX),
+                .mode         = GPIO_MODE_INPUT,
+            };
+            gpio_config(&rx_cfg);
 
-        if (ota_ow_reset()) {
-            ota_ow_write_byte(0xCC);
-            ota_ow_write_byte(0x44);
-            vTaskDelay(pdMS_TO_TICKS(820));
             if (ota_ow_reset()) {
                 ota_ow_write_byte(0xCC);
-                ota_ow_write_byte(0xBE);
-                uint8_t sc[9];
-                for (int i = 0; i < 9; i++) sc[i] = ota_ow_read_byte();
-                int16_t raw = (int16_t)((sc[1] << 8) | sc[0]);
-                int16_t centi = (int16_t)(((int32_t)raw * 100) / 16);
-                int deg  = centi / 100;
-                int frac = centi < 0 ? -(centi % 100) : (centi % 100);
-                if (frac < 0) frac = -frac;
-                if (raw != 0x0550 && centi > -5500 && centi < 12500) {
-                    snprintf(temp_str, sizeof(temp_str), "%d.%02d C", deg, frac);
-                } else if (raw == 0x0550) {
-                    snprintf(temp_str, sizeof(temp_str), "85.00 C (power-on default)");
-                } else {
-                    snprintf(temp_str, sizeof(temp_str), "error (%d.%02d C)", deg, frac);
+                ota_ow_write_byte(0x44);
+                vTaskDelay(pdMS_TO_TICKS(820));
+                if (ota_ow_reset()) {
+                    ota_ow_write_byte(0xCC);
+                    ota_ow_write_byte(0xBE);
+                    uint8_t sc[9];
+                    for (int i = 0; i < 9; i++) sc[i] = ota_ow_read_byte();
+                    int16_t raw = (int16_t)((sc[1] << 8) | sc[0]);
+                    int16_t centi = (int16_t)(((int32_t)raw * 100) / 16);
+                    int deg  = centi / 100;
+                    int frac = centi < 0 ? -(centi % 100) : (centi % 100);
+                    if (frac < 0) frac = -frac;
+                    if (raw != 0x0550 && centi > -5500 && centi < 12500) {
+                        snprintf(temp_str, sizeof(temp_str), "%d.%02d C", deg, frac);
+                    } else if (raw == 0x0550) {
+                        snprintf(temp_str, sizeof(temp_str), "85.00 C (power-on default)");
+                    } else {
+                        snprintf(temp_str, sizeof(temp_str), "error (%d.%02d C)", deg, frac);
+                    }
                 }
             }
         }
