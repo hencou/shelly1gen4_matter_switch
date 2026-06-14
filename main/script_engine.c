@@ -138,6 +138,28 @@ static esp_err_t slot_load(uint8_t slot, script_slot_config_t *cfg)
     return ESP_OK;
 }
 
+/* ---------- Lightweight NVS slot type loader (before matter_start) ---------- */
+
+esp_err_t script_engine_load_slot_types(script_slot_type_t *types, uint8_t max_slots)
+{
+    for (int i = 0; i < max_slots; i++)
+        types[i] = SLOT_TYPE_NONE;
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS_SCRIPT, NVS_READONLY, &h);
+    if (err != ESP_OK) return ESP_OK; /* no scripts namespace = all NONE */
+
+    for (int i = 0; i < max_slots; i++) {
+        char key[16];
+        slot_nvs_key(i, "type", key, sizeof(key));
+        uint8_t val = 0;
+        if (nvs_get_u8(h, key, &val) == ESP_OK)
+            types[i] = (script_slot_type_t)val;
+    }
+    nvs_close(h);
+    return ESP_OK;
+}
+
 /* ---------- Lua API: input ---------- */
 
 static int l_input_analog(lua_State *L)
@@ -507,22 +529,8 @@ esp_err_t script_engine_start(void)
     int active_count = 0;
     for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
         if (slot_load(i, &s_slots[i].cfg) == ESP_OK && s_slots[i].cfg.type != SLOT_TYPE_NONE) {
-            /* Assign endpoint ID based on type (use existing static endpoints) */
-            switch (s_slots[i].cfg.type) {
-                case SLOT_TYPE_ONOFF_TOGGLE:
-                case SLOT_TYPE_DIMMER:
-                    s_slots[i].endpoint_id = matter_ep_pushbutton();
-                    break;
-                case SLOT_TYPE_ONOFF_STATE:
-                    s_slots[i].endpoint_id = matter_ep_state();
-                    break;
-                case SLOT_TYPE_RELAY:
-                    s_slots[i].endpoint_id = matter_ep_relay();
-                    break;
-                default:
-                    s_slots[i].endpoint_id = matter_ep_pushbutton();
-                    break;
-            }
+            /* Get dynamically assigned endpoint ID from matter_device */
+            s_slots[i].endpoint_id = matter_get_slot_endpoint(i);
 
             s_slots[i].L = create_lua_state(i);
             if (s_slots[i].L && compile_and_load(&s_slots[i], i)) {

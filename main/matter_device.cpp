@@ -1,30 +1,20 @@
 /*
  * Matter device implementation for Shelly 1 Gen4 (ESP32-C6).
  *
- * 5 endpoints:
- *   EP1 = OnOff Light Switch  + OnOff client + LevelControl client
- *          + ColorControl client + Binding — Toggle / Color Temp
- *   EP2 = OnOff Light Switch  + OnOff client + Binding — State-follow (On/Off)
- *   EP3 = Temperature Sensor  (server)
- *   EP4 = Occupancy Sensor    (server)
- *   EP5 = OnOff Light          (server) — physical relay, controllable from HA
- *
- * EP1 vs EP2:
- *   EP1 sends Toggle on every short press — suitable for momentary buttons.
- *   EP2 sends On on contact close and Off on contact open —
- *   suitable for maintained/toggle switches. The user chooses via
- *   binding which endpoint controls their light/relay.
+ * Endpoints are created dynamically based on script slot configuration.
+ * Each script slot with a non-NONE type gets a corresponding Matter endpoint.
+ * Supported endpoint types:
+ *   ONOFF_TOGGLE  → OnOff Light Switch + LevelControl + ColorControl + Binding
+ *   ONOFF_STATE   → OnOff Light Switch + Binding (state-follow)
+ *   TEMPERATURE   → Temperature Sensor (server)
+ *   OCCUPANCY     → Occupancy Sensor (server)
+ *   RELAY         → OnOff Light (server, physical relay)
  *
  * Command emit to bound nodes/groups:
- *   - app_main.c calls matter_send_onoff_toggle/on/off(ep) /
- *     matter_send_level_move/stop(ep)
- *   - data is scheduled to the CHIP thread
+ *   - Scripts call endpoint.command("toggle") etc.
+ *   - Data is scheduled to the CHIP thread
  *   - SwitchWorkerFunction iterates the BindingTable and sends commands
  *     directly via FindOrEstablishSession + InvokeCommandRequest.
- *
- * NB: BindingManager::NotifyBoundClusterChanged() is NOT used.
- * We call FindOrEstablishSession + InvokeCommandRequest directly
- * from SwitchWorkerFunction for reliable command delivery.
  */
 
 #include "matter_device.h"
@@ -81,11 +71,10 @@ using namespace esp_matter::endpoint;
 using namespace chip;
 using namespace chip::app::Clusters;
 
-static uint16_t s_ep_pushbutton = 0;
-static uint16_t s_ep_state   = 0;
-static uint16_t s_ep_temp    = 0;
-static uint16_t s_ep_occ     = 0;
-static uint16_t s_ep_relay   = 0;
+/* Dynamic endpoint tracking — indexed by script slot */
+static uint16_t s_slot_endpoints[SCRIPT_MAX_SLOTS] = {0};
+static script_slot_type_t s_slot_types[SCRIPT_MAX_SLOTS] = {SLOT_TYPE_NONE};
+static uint8_t s_num_slots = 0;
 
 
 /* ---------------- Binding-mediated command emit ---------------- */
@@ -432,30 +421,39 @@ extern "C" void matter_send_color_temp_stop(uint16_t ep)
 
 extern "C" void matter_update_temperature(int16_t centi_c)
 {
-    if (!s_ep_temp) return;
     esp_matter_attr_val_t v = esp_matter_int16(centi_c);
-    attribute::update(s_ep_temp,
-        TemperatureMeasurement::Id,
-        TemperatureMeasurement::Attributes::MeasuredValue::Id, &v);
+    for (int i = 0; i < s_num_slots; i++) {
+        if (s_slot_types[i] == SLOT_TYPE_TEMPERATURE && s_slot_endpoints[i]) {
+            attribute::update(s_slot_endpoints[i],
+                TemperatureMeasurement::Id,
+                TemperatureMeasurement::Attributes::MeasuredValue::Id, &v);
+        }
+    }
 }
 
 extern "C" void matter_update_occupancy(bool occupied)
 {
-    if (!s_ep_occ) return;
     uint8_t b = occupied ? 1 : 0;
     esp_matter_attr_val_t v = esp_matter_bitmap8(b);
-    attribute::update(s_ep_occ,
-        OccupancySensing::Id,
-        OccupancySensing::Attributes::Occupancy::Id, &v);
+    for (int i = 0; i < s_num_slots; i++) {
+        if (s_slot_types[i] == SLOT_TYPE_OCCUPANCY && s_slot_endpoints[i]) {
+            attribute::update(s_slot_endpoints[i],
+                OccupancySensing::Id,
+                OccupancySensing::Attributes::Occupancy::Id, &v);
+        }
+    }
 }
 
 extern "C" void matter_update_relay_onoff(bool on)
 {
-    if (!s_ep_relay) return;
     esp_matter_attr_val_t v = esp_matter_bool(on);
-    attribute::update(s_ep_relay,
-        OnOff::Id,
-        OnOff::Attributes::OnOff::Id, &v);
+    for (int i = 0; i < s_num_slots; i++) {
+        if (s_slot_types[i] == SLOT_TYPE_RELAY && s_slot_endpoints[i]) {
+            attribute::update(s_slot_endpoints[i],
+                OnOff::Id,
+                OnOff::Attributes::OnOff::Id, &v);
+        }
+    }
 }
 
 extern "C" void matter_factory_reset(void)
@@ -464,9 +462,11 @@ extern "C" void matter_factory_reset(void)
     esp_matter::factory_reset();   /* wipes Matter NVS + reboot */
 }
 
-extern "C" uint16_t matter_ep_pushbutton(void) { return s_ep_pushbutton; }
-extern "C" uint16_t matter_ep_state(void)   { return s_ep_state; }
-extern "C" uint16_t matter_ep_relay(void)   { return s_ep_relay; }
+extern "C" uint16_t matter_get_slot_endpoint(uint8_t slot)
+{
+    if (slot >= s_num_slots) return 0;
+    return s_slot_endpoints[slot];
+}
 
 
 /* ---------------- Endpoint setup ---------------- */
@@ -486,10 +486,14 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
     if (cluster_id != OnOff::Id || attribute_id != OnOff::Attributes::OnOff::Id)
         return ESP_OK;
 
-    if (endpoint_id == s_ep_relay) {
-        relay_set(val->val.b);
-        ESP_LOGI(TAG, "EP%u OnOff -> relay %s", endpoint_id,
-                 val->val.b ? "ON" : "OFF");
+    /* Check if this endpoint is a relay slot */
+    for (int i = 0; i < s_num_slots; i++) {
+        if (s_slot_types[i] == SLOT_TYPE_RELAY && s_slot_endpoints[i] == endpoint_id) {
+            relay_set(val->val.b);
+            ESP_LOGI(TAG, "EP%u OnOff -> relay %s", endpoint_id,
+                     val->val.b ? "ON" : "OFF");
+            break;
+        }
     }
     return ESP_OK;
 }
@@ -498,70 +502,97 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
  * (client::binding_manager_init() called on kDnssdInitialized event).
  * No manual init needed here. */
 
-extern "C" esp_err_t matter_start(void)
+static endpoint_t *create_endpoint_for_type(node_t *node, script_slot_type_t type)
 {
-    /* Node */
+    switch (type) {
+    case SLOT_TYPE_ONOFF_TOGGLE:
+    case SLOT_TYPE_DIMMER: {
+        /* OnOff Light Switch + LevelControl + ColorControl + Binding */
+        on_off_light_switch::config_t cfg;
+        endpoint_t *ep = on_off_light_switch::create(node, &cfg, ENDPOINT_FLAG_NONE, NULL);
+        level_control::config_t lvl_cfg;
+        level_control::create(ep, &lvl_cfg, CLUSTER_FLAG_CLIENT);
+        color_control::config_t cc_cfg;
+        color_control::create(ep, &cc_cfg, CLUSTER_FLAG_CLIENT);
+        binding::config_t bind_cfg;
+        binding::create(ep, &bind_cfg, CLUSTER_FLAG_SERVER);
+        return ep;
+    }
+    case SLOT_TYPE_ONOFF_STATE: {
+        /* OnOff Light Switch + Binding (state-follow) */
+        on_off_light_switch::config_t cfg;
+        endpoint_t *ep = on_off_light_switch::create(node, &cfg, ENDPOINT_FLAG_NONE, NULL);
+        binding::config_t bind_cfg;
+        binding::create(ep, &bind_cfg, CLUSTER_FLAG_SERVER);
+        return ep;
+    }
+    case SLOT_TYPE_TEMPERATURE: {
+        temperature_sensor::config_t cfg;
+        return temperature_sensor::create(node, &cfg, ENDPOINT_FLAG_NONE, NULL);
+    }
+    case SLOT_TYPE_OCCUPANCY: {
+        occupancy_sensor::config_t cfg;
+        cfg.occupancy_sensing.feature_flags =
+            cluster::occupancy_sensing::feature::other::get_id();
+        return occupancy_sensor::create(node, &cfg, ENDPOINT_FLAG_NONE, NULL);
+    }
+    case SLOT_TYPE_RELAY: {
+        on_off_light::config_t cfg;
+        cfg.on_off.on_off = relay_get();
+        return on_off_light::create(node, &cfg, ENDPOINT_FLAG_NONE, NULL);
+    }
+    case SLOT_TYPE_ILLUMINANCE:
+    default:
+        return NULL;
+    }
+}
+
+static const char *slot_type_name(script_slot_type_t type)
+{
+    switch (type) {
+    case SLOT_TYPE_ONOFF_TOGGLE: return "OnOff Toggle+Dim+Color (client)";
+    case SLOT_TYPE_DIMMER:       return "OnOff Toggle+Dim+Color (client)";
+    case SLOT_TYPE_ONOFF_STATE:  return "OnOff State-Follow (client)";
+    case SLOT_TYPE_TEMPERATURE:  return "Temperature Sensor";
+    case SLOT_TYPE_OCCUPANCY:    return "Occupancy Sensor";
+    case SLOT_TYPE_RELAY:        return "OnOff Light (relay)";
+    case SLOT_TYPE_ILLUMINANCE:  return "Illuminance Sensor";
+    default:                     return "Unknown";
+    }
+}
+
+extern "C" esp_err_t matter_start(const script_slot_type_t *slot_types, uint8_t num_slots)
+{
+    /* Store slot types for later use by update functions */
+    s_num_slots = (num_slots > SCRIPT_MAX_SLOTS) ? SCRIPT_MAX_SLOTS : num_slots;
+    for (int i = 0; i < s_num_slots; i++) {
+        s_slot_types[i] = slot_types[i];
+        s_slot_endpoints[i] = 0;
+    }
+
+    /* Node (root) */
     node::config_t node_cfg;
     node_t *node = node::create(&node_cfg, attribute_update_cb, identify_cb);
     if (!node) { ESP_LOGE(TAG, "node create failed"); return ESP_FAIL; }
 
-    /* EP1 — OnOff Light Switch + LevelControl client + ColorControl client + Binding */
-    on_off_light_switch::config_t sw_cfg;
-    endpoint_t *ep_pushbutton = on_off_light_switch::create(node, &sw_cfg, ENDPOINT_FLAG_NONE, NULL);
-    {
-        level_control::config_t lvl_cfg;
-        level_control::create(ep_pushbutton, &lvl_cfg, CLUSTER_FLAG_CLIENT);
-        color_control::config_t cc_cfg;
-        color_control::create(ep_pushbutton, &cc_cfg, CLUSTER_FLAG_CLIENT);
-        binding::config_t bind_cfg;
-        binding::create(ep_pushbutton, &bind_cfg, CLUSTER_FLAG_SERVER);
+    /* Create endpoints dynamically based on slot configuration */
+    for (int i = 0; i < s_num_slots; i++) {
+        if (slot_types[i] == SLOT_TYPE_NONE) continue;
+
+        endpoint_t *ep = create_endpoint_for_type(node, slot_types[i]);
+        if (ep) {
+            s_slot_endpoints[i] = endpoint::get_id(ep);
+            ESP_LOGI(TAG, "Slot %d: EP%u = %s", i, s_slot_endpoints[i],
+                     slot_type_name(slot_types[i]));
+        } else {
+            ESP_LOGW(TAG, "Slot %d: failed to create endpoint for type %d", i, slot_types[i]);
+        }
     }
-    s_ep_pushbutton = endpoint::get_id(ep_pushbutton);
-    ESP_LOGI(TAG, "EP%u = OnOff Light Switch (pushbutton)", s_ep_pushbutton);
 
-    /* EP2 — OnOff Light Switch (state-follow) + Binding
-     * Same device type as EP1 but intended for maintained switches:
-     * sends On on contact close, Off on contact open.
-     * User binds EP2 (instead of EP1) for state-following behavior. */
-    on_off_light_switch::config_t sf_cfg;
-    endpoint_t *ep_state = on_off_light_switch::create(node, &sf_cfg, ENDPOINT_FLAG_NONE, NULL);
-    {
-        binding::config_t bind_cfg;
-        binding::create(ep_state, &bind_cfg, CLUSTER_FLAG_SERVER);
-    }
-    s_ep_state = endpoint::get_id(ep_state);
-    ESP_LOGI(TAG, "EP%u = OnOff Light Switch (state-follow)", s_ep_state);
-
-    /* EP3 — Temperature Sensor */
-    temperature_sensor::config_t t_cfg;
-    endpoint_t *ep_temp = temperature_sensor::create(node, &t_cfg, ENDPOINT_FLAG_NONE, NULL);
-    s_ep_temp = endpoint::get_id(ep_temp);
-    ESP_LOGI(TAG, "EP%u = Temperature Sensor", s_ep_temp);
-
-    /* EP4 — Occupancy Sensor (LD2410 on GPIO17) */
-    occupancy_sensor::config_t o_cfg;
-    /* Matter 1.5 requires at least one sensing feature flag */
-    o_cfg.occupancy_sensing.feature_flags =
-        cluster::occupancy_sensing::feature::other::get_id();
-    endpoint_t *ep_occ = occupancy_sensor::create(node, &o_cfg, ENDPOINT_FLAG_NONE, NULL);
-    s_ep_occ = endpoint::get_id(ep_occ);
-    ESP_LOGI(TAG, "EP%u = Occupancy Sensor (LD2410)", s_ep_occ);
-
-    /* EP5 — OnOff Light (relay on GPIO5, server — controllable from HA) */
-    on_off_light::config_t relay_cfg;
-    relay_cfg.on_off.on_off = relay_get();  /* restore NVS state */
-    endpoint_t *ep_relay = on_off_light::create(node, &relay_cfg, ENDPOINT_FLAG_NONE, NULL);
-    s_ep_relay = endpoint::get_id(ep_relay);
-    ESP_LOGI(TAG, "EP%u = OnOff Light (relay)", s_ep_relay);
-
-    /* OTA cluster requestor (optional: for Matter OTA via TBR — works alongside our WiFi OTA) */
+    /* OTA cluster requestor */
     esp_matter_ota_requestor_init();
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
-    /* Register the OpenThread platform config (radio/host/port) MUST
-     * happen before esp_matter::start() — otherwise assert s_platform_config
-     * in OpenthreadLauncher.cpp. Default macros come from
-     * esp_openthread.h and are correct for ESP32-C6 native 802.15.4. */
     esp_openthread_platform_config_t ot_cfg = {
         .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
         .host_config  = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
