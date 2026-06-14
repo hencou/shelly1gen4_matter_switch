@@ -420,9 +420,8 @@ static const char MGMT_HTML[] =
 "<label>Endpoint Type</label>"
 "<select id=sc-type>"
 "<option value=0>None (disabled)</option>"
-"<option value=1>OnOff Toggle (client)</option>"
+"<option value=1>OnOff Toggle + Dim + Color (client)</option>"
 "<option value=2>OnOff State-Follow (client)</option>"
-"<option value=3>Dimmer / LevelControl (client)</option>"
 "<option value=4>Occupancy Sensor</option>"
 "<option value=5>Illuminance Sensor</option>"
 "<option value=6>Temperature Sensor</option>"
@@ -450,6 +449,9 @@ static const char MGMT_HTML[] =
 "<button class='btn btn-gray' onclick=loadSlot()>Reload</button>"
 "</div>"
 "<div id=sc-msg class=msg></div>"
+"<hr style='margin:1.5em 0'>"
+"<button class='btn btn-red' onclick=doScriptReboot()>Reboot Device</button>"
+"<p class=info>Reboot to apply endpoint type changes.</p>"
 "</div>"
 
 /* ── Tab 3: Backup / Restore ── */
@@ -648,6 +650,13 @@ static const char MGMT_HTML[] =
 "    }"
 "  };"
 "  x.open('DELETE','/api/script?slot='+s);x.send();"
+"}"
+
+"function doScriptReboot(){"
+"  if(!confirm('Reboot device now?'))return;"
+"  var x=new XMLHttpRequest();"
+"  x.open('POST','/api/restart');x.send();"
+"  document.getElementById('sc-msg').innerHTML='<span class=ok>Rebooting...</span>';"
 "}"
 
 /* Backup */

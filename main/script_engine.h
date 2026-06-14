@@ -27,9 +27,9 @@ extern "C" {
 /* Endpoint types that can be created dynamically */
 typedef enum {
     SLOT_TYPE_NONE = 0,
-    SLOT_TYPE_ONOFF_TOGGLE,       /* OnOff Client — sends Toggle to bound devices */
+    SLOT_TYPE_ONOFF_TOGGLE,       /* OnOff + LevelControl + ColorControl Client */
     SLOT_TYPE_ONOFF_STATE,        /* OnOff Client — sends On/Off following input state */
-    SLOT_TYPE_DIMMER,             /* LevelControl Client — dimming via binding */
+    SLOT_TYPE_DIMMER,             /* (deprecated — use ONOFF_TOGGLE instead) */
     SLOT_TYPE_OCCUPANCY,          /* OccupancySensing Server — reports to HA */
     SLOT_TYPE_ILLUMINANCE,        /* IlluminanceMeasurement Server — reports to HA */
     SLOT_TYPE_TEMPERATURE,        /* TemperatureMeasurement Server — reports to HA */
