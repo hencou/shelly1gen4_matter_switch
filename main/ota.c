@@ -332,7 +332,8 @@ static const char MGMT_HTML[] =
 "<div class=tabs>"
 "<div class='tab act' onclick=showTab(0)>WiFi &amp; OTA</div>"
 "<div class=tab onclick=showTab(1)>Hardware</div>"
-"<div class=tab onclick=showTab(2)>Backup</div>"
+"<div class=tab onclick=showTab(2)>Scripts</div>"
+"<div class=tab onclick=showTab(3)>Backup</div>"
 "</div>"
 
 /* ── Tab 0: WiFi & OTA ── */
@@ -400,8 +401,59 @@ static const char MGMT_HTML[] =
 "<div id=hw-msg class=msg></div>"
 "</div>"
 
-/* ── Tab 2: Backup / Restore ── */
+/* ── Tab 2: Scripts ── */
 "<div class=pane id=p2>"
+"<h3>Endpoint Scripts</h3>"
+"<p class=info>Configure Matter endpoints via Lua scripts. Each slot is one endpoint. "
+"Changes require a reboot to recreate endpoints.</p>"
+
+"<label>Slot</label>"
+"<select id=sc-slot onchange=loadSlot()>"
+"<option value=0>Slot 0</option><option value=1>Slot 1</option>"
+"<option value=2>Slot 2</option><option value=3>Slot 3</option>"
+"<option value=4>Slot 4</option><option value=5>Slot 5</option>"
+"<option value=6>Slot 6</option><option value=7>Slot 7</option>"
+"</select>"
+
+"<label>Name</label><input id=sc-name placeholder='e.g. Pushbutton Toggle'>"
+
+"<label>Endpoint Type</label>"
+"<select id=sc-type>"
+"<option value=0>None (disabled)</option>"
+"<option value=1>OnOff Toggle (client)</option>"
+"<option value=2>OnOff State-Follow (client)</option>"
+"<option value=3>Dimmer / LevelControl (client)</option>"
+"<option value=4>Occupancy Sensor</option>"
+"<option value=5>Illuminance Sensor</option>"
+"<option value=6>Temperature Sensor</option>"
+"<option value=7>Relay (OnOff Light server)</option>"
+"</select>"
+
+"<label>Trigger</label>"
+"<select id=sc-trig>"
+"<option value=0>Periodic</option>"
+"<option value=1>On input change</option>"
+"<option value=2>On button event</option>"
+"</select>"
+
+"<label>Period (ms, for periodic trigger)</label>"
+"<input id=sc-period type=number value=500 min=50 max=60000>"
+
+"<label>Lua Script</label>"
+"<textarea id=sc-code style='width:100%;height:200px;font-family:monospace;font-size:.9em;"
+"  tab-size:2;white-space:pre;border:1px solid #ccc;border-radius:3px;padding:.5em'"
+"  placeholder='-- Write your Lua script here&#10;function run()&#10;  local evt = input.button_event()&#10;  if evt == \"short_press\" then&#10;    endpoint.command(\"toggle\")&#10;  end&#10;end'></textarea>"
+
+"<div style='margin:1em 0'>"
+"<button class='btn btn-green' onclick=saveSlot()>Save Slot</button>"
+"<button class='btn btn-red' onclick=clearSlot()>Clear Slot</button>"
+"<button class='btn btn-gray' onclick=loadSlot()>Reload</button>"
+"</div>"
+"<div id=sc-msg class=msg></div>"
+"</div>"
+
+/* ── Tab 3: Backup / Restore ── */
+"<div class=pane id=p3>"
 "<h3>Backup &amp; Restore</h3>"
 "<p class=info>Download all saved settings as a backup file, or restore "
 "from a previously saved backup.</p>"
@@ -418,6 +470,7 @@ static const char MGMT_HTML[] =
 "  document.querySelectorAll('.tab').forEach(function(t,i){t.className=i==n?'tab act':'tab'});"
 "  document.querySelectorAll('.pane').forEach(function(p,i){p.className=i==n?'pane act':'pane'});"
 "  if(n==1){loadHW();startHWTimer()}else{stopHWTimer()}"
+"  if(n==2){loadSlot()}"
 "}"
 
 /* Load saved settings on page load */
@@ -543,6 +596,58 @@ static const char MGMT_HTML[] =
 "  x.onerror=function(){document.getElementById('hw-msg').innerHTML="
 "    '<span class=err>Connection error</span>'};"
 "  x.open('POST','/api/bench-mode');x.send();"
+"}"
+
+/* Scripts */
+"function loadSlot(){"
+"  var s=document.getElementById('sc-slot').value;"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){"
+"    if(x.status==200){"
+"      var d=JSON.parse(x.responseText);"
+"      document.getElementById('sc-name').value=d.name||'';"
+"      document.getElementById('sc-type').value=d.type||0;"
+"      document.getElementById('sc-trig').value=d.trigger||0;"
+"      document.getElementById('sc-period').value=d.period_ms||500;"
+"      document.getElementById('sc-code').value=d.script||'';"
+"      document.getElementById('sc-msg').textContent='';"
+"    }else{document.getElementById('sc-msg').innerHTML='<span class=err>Load failed</span>'}"
+"  };"
+"  x.open('GET','/api/script?slot='+s);x.send();"
+"}"
+
+"function saveSlot(){"
+"  var d={slot:parseInt(document.getElementById('sc-slot').value),"
+"    name:document.getElementById('sc-name').value,"
+"    type:parseInt(document.getElementById('sc-type').value),"
+"    trigger:parseInt(document.getElementById('sc-trig').value),"
+"    period_ms:parseInt(document.getElementById('sc-period').value),"
+"    script:document.getElementById('sc-code').value};"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){"
+"    if(x.status==200){document.getElementById('sc-msg').innerHTML="
+"      '<span class=ok>Saved! Reboot to apply endpoint changes.</span>'}"
+"    else{document.getElementById('sc-msg').innerHTML="
+"      '<span class=err>Error: '+x.responseText+'</span>'}"
+"  };"
+"  x.open('POST','/api/script');"
+"  x.setRequestHeader('Content-Type','application/json');"
+"  x.send(JSON.stringify(d));"
+"}"
+
+"function clearSlot(){"
+"  if(!confirm('Clear this slot? Endpoint will be removed on reboot.'))return;"
+"  var s=document.getElementById('sc-slot').value;"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){"
+"    if(x.status==200){"
+"      document.getElementById('sc-name').value='';"
+"      document.getElementById('sc-type').value=0;"
+"      document.getElementById('sc-code').value='';"
+"      document.getElementById('sc-msg').innerHTML='<span class=ok>Slot cleared</span>';"
+"    }"
+"  };"
+"  x.open('DELETE','/api/script?slot='+s);x.send();"
 "}"
 
 /* Backup */
@@ -1000,6 +1105,160 @@ static esp_err_t ota_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---------- Script API handlers ---------- */
+
+#include "script_engine.h"
+
+/* GET /api/script?slot=N — return slot config as JSON */
+static esp_err_t api_script_get(httpd_req_t *req)
+{
+    char query[32] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing slot param");
+        return ESP_FAIL;
+    }
+    char val[4] = {0};
+    httpd_query_key_value(query, "slot", val, sizeof(val));
+    int slot = atoi(val);
+    if (slot < 0 || slot >= SCRIPT_MAX_SLOTS) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid slot");
+        return ESP_FAIL;
+    }
+
+    script_slot_config_t cfg;
+    script_slot_get((uint8_t)slot, &cfg);
+
+    /* Build JSON — need to escape script content */
+    static char json[3072];
+    int pos = 0;
+    pos += snprintf(json + pos, sizeof(json) - pos,
+        "{\"slot\":%d,\"type\":%d,\"trigger\":%d,\"period_ms\":%u,\"name\":\"",
+        slot, (int)cfg.type, (int)cfg.trigger, cfg.period_ms);
+
+    /* Escape name */
+    for (const char *p = cfg.name; *p && pos < (int)sizeof(json) - 10; p++) {
+        if (*p == '"' || *p == '\\') json[pos++] = '\\';
+        json[pos++] = *p;
+    }
+    pos += snprintf(json + pos, sizeof(json) - pos, "\",\"script\":\"");
+
+    /* Escape script */
+    for (const char *p = cfg.script; *p && pos < (int)sizeof(json) - 10; p++) {
+        if (*p == '"' || *p == '\\') { json[pos++] = '\\'; json[pos++] = *p; }
+        else if (*p == '\n') { json[pos++] = '\\'; json[pos++] = 'n'; }
+        else if (*p == '\r') { json[pos++] = '\\'; json[pos++] = 'r'; }
+        else if (*p == '\t') { json[pos++] = '\\'; json[pos++] = 't'; }
+        else json[pos++] = *p;
+    }
+    pos += snprintf(json + pos, sizeof(json) - pos, "\"}");
+
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json, pos);
+}
+
+/* POST /api/script — save slot config from JSON body */
+static esp_err_t api_script_post(httpd_req_t *req)
+{
+    static char body[3072];
+    int len = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (len <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "empty body");
+        return ESP_FAIL;
+    }
+    body[len] = '\0';
+
+    /* Minimal JSON parsing — extract fields */
+    script_slot_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    int slot = 0;
+
+    /* Parse slot */
+    char *p = strstr(body, "\"slot\":");
+    if (p) slot = atoi(p + 7);
+    if (slot < 0 || slot >= SCRIPT_MAX_SLOTS) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid slot");
+        return ESP_FAIL;
+    }
+
+    /* Parse type */
+    p = strstr(body, "\"type\":");
+    if (p) cfg.type = (script_slot_type_t)atoi(p + 7);
+
+    /* Parse trigger */
+    p = strstr(body, "\"trigger\":");
+    if (p) cfg.trigger = (script_trigger_t)atoi(p + 10);
+
+    /* Parse period_ms */
+    p = strstr(body, "\"period_ms\":");
+    if (p) cfg.period_ms = (uint16_t)atoi(p + 12);
+
+    /* Parse name (find "name":"...") */
+    p = strstr(body, "\"name\":\"");
+    if (p) {
+        p += 8;
+        int i = 0;
+        while (*p && *p != '"' && i < SCRIPT_NAME_LEN - 1) {
+            if (*p == '\\' && *(p+1)) { p++; }
+            cfg.name[i++] = *p++;
+        }
+        cfg.name[i] = '\0';
+    }
+
+    /* Parse script (find "script":"...") — handles escaped chars */
+    p = strstr(body, "\"script\":\"");
+    if (p) {
+        p += 10;
+        int i = 0;
+        while (*p && i < SCRIPT_MAX_SIZE - 1) {
+            if (*p == '\\') {
+                p++;
+                if (*p == 'n') cfg.script[i++] = '\n';
+                else if (*p == 'r') cfg.script[i++] = '\r';
+                else if (*p == 't') cfg.script[i++] = '\t';
+                else if (*p == '"') cfg.script[i++] = '"';
+                else if (*p == '\\') cfg.script[i++] = '\\';
+                else cfg.script[i++] = *p;
+                p++;
+            } else if (*p == '"') {
+                break;
+            } else {
+                cfg.script[i++] = *p++;
+            }
+        }
+        cfg.script[i] = '\0';
+    }
+
+    esp_err_t err = script_slot_set((uint8_t)slot, &cfg);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "save failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_sendstr(req, "OK");
+    return ESP_OK;
+}
+
+/* DELETE /api/script?slot=N — clear a slot */
+static esp_err_t api_script_delete(httpd_req_t *req)
+{
+    char query[32] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing slot param");
+        return ESP_FAIL;
+    }
+    char val[4] = {0};
+    httpd_query_key_value(query, "slot", val, sizeof(val));
+    int slot = atoi(val);
+    if (slot < 0 || slot >= SCRIPT_MAX_SLOTS) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid slot");
+        return ESP_FAIL;
+    }
+
+    script_slot_clear((uint8_t)slot);
+    httpd_resp_sendstr(req, "OK");
+    return ESP_OK;
+}
+
 /* ---------- HTTP server (shared by SoftAP and STA modes) ---------- */
 
 #define OTA_TIMEOUT_MS   (10 * 60 * 1000)   /* 10 minutes */
@@ -1012,19 +1271,22 @@ static void start_httpd(void)
     hc.recv_wait_timeout  = 30;   /* seconds waiting for data */
     hc.send_wait_timeout  = 10;
     hc.max_open_sockets   = 3;
-    hc.max_uri_handlers   = 10;
+    hc.max_uri_handlers   = 14;
     ESP_ERROR_CHECK(httpd_start(&srv, &hc));
 
-    httpd_uri_t get_root          = { "/",                  HTTP_GET,  form_get,              NULL };
-    httpd_uri_t post_upload       = { "/upload",            HTTP_POST, upload_post,           NULL };
-    httpd_uri_t post_ota          = { "/ota",               HTTP_POST, ota_post,              NULL };
-    httpd_uri_t get_settings      = { "/api/settings",      HTTP_GET,  api_settings_get,      NULL };
-    httpd_uri_t get_hardware      = { "/api/hardware",      HTTP_GET,  api_hardware_get,      NULL };
-    httpd_uri_t post_bench        = { "/api/bench-mode",    HTTP_POST, api_bench_mode_post,   NULL };
-    httpd_uri_t post_restart      = { "/api/restart",       HTTP_POST, api_restart_post,      NULL };
-    httpd_uri_t post_factory      = { "/api/factory-reset", HTTP_POST, api_factory_reset_post,NULL };
-    httpd_uri_t get_backup        = { "/api/backup",        HTTP_GET,  api_backup_get,        NULL };
-    httpd_uri_t post_restore      = { "/api/restore",       HTTP_POST, api_restore_post,      NULL };
+    httpd_uri_t get_root          = { "/",                  HTTP_GET,    form_get,              NULL };
+    httpd_uri_t post_upload       = { "/upload",            HTTP_POST,   upload_post,           NULL };
+    httpd_uri_t post_ota          = { "/ota",               HTTP_POST,   ota_post,              NULL };
+    httpd_uri_t get_settings      = { "/api/settings",      HTTP_GET,    api_settings_get,      NULL };
+    httpd_uri_t get_hardware      = { "/api/hardware",      HTTP_GET,    api_hardware_get,      NULL };
+    httpd_uri_t post_bench        = { "/api/bench-mode",    HTTP_POST,   api_bench_mode_post,   NULL };
+    httpd_uri_t post_restart      = { "/api/restart",       HTTP_POST,   api_restart_post,      NULL };
+    httpd_uri_t post_factory      = { "/api/factory-reset", HTTP_POST,   api_factory_reset_post,NULL };
+    httpd_uri_t get_backup        = { "/api/backup",        HTTP_GET,    api_backup_get,        NULL };
+    httpd_uri_t post_restore      = { "/api/restore",       HTTP_POST,   api_restore_post,      NULL };
+    httpd_uri_t get_script        = { "/api/script",        HTTP_GET,    api_script_get,        NULL };
+    httpd_uri_t post_script       = { "/api/script",        HTTP_POST,   api_script_post,       NULL };
+    httpd_uri_t del_script        = { "/api/script",        HTTP_DELETE, api_script_delete,     NULL };
 
     httpd_register_uri_handler(srv, &get_root);
     httpd_register_uri_handler(srv, &post_upload);
@@ -1036,6 +1298,9 @@ static void start_httpd(void)
     httpd_register_uri_handler(srv, &post_factory);
     httpd_register_uri_handler(srv, &get_backup);
     httpd_register_uri_handler(srv, &post_restore);
+    httpd_register_uri_handler(srv, &get_script);
+    httpd_register_uri_handler(srv, &post_script);
+    httpd_register_uri_handler(srv, &del_script);
 }
 
 static void wait_for_upload_or_timeout(void)

@@ -7,9 +7,11 @@ idf_component_register(
         "sensors.c"
         "ota.c"
         "status_led.c"
+        "script_engine.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES
         nvs_flash
+        lua
         driver
         esp_timer
         esp_wifi
@@ -30,6 +32,6 @@ target_compile_options(${COMPONENT_LIB} PRIVATE "-DCHIP_HAVE_CONFIG_H")
 
 # C-modules zonder C++ extensies
 set_source_files_properties(
-    button.c relay.c sensors.c ota.c status_led.c
+    button.c relay.c sensors.c ota.c status_led.c script_engine.c
     PROPERTIES COMPILE_FLAGS "-Wno-unused-parameter"
 )
