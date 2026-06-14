@@ -77,13 +77,11 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
         break;
 
     case BTN_EVT_MODE_TOGGLE:
-        /* In Matter mode (we are running here so = Matter active) 6x click
-         * means: switch to OTA mode. ota_request_at_next_boot() sets the NVS
-         * flag and reboots. On next boot ota_handle_pending() picks the OTA
-         * path. (In OTA mode this handler does NOT run; there is a separate
-         * counter in ota_handle_pending() that treats 6x click as factory reset.) */
-        ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> requesting OTA mode", id);
-        ota_request_at_next_boot();
+        /* 6x click in Matter mode: enable WiFi alongside Thread so the
+         * management dashboard is reachable for configuration. WiFi is
+         * non-persistent — after reboot only Thread remains active. */
+        ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> enabling WiFi runtime", id);
+        ota_enable_wifi_runtime();
         break;
 
     case BTN_EVT_CONTACT_CLOSED:

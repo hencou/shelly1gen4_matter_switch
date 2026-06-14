@@ -7,11 +7,11 @@
  * All 3 inputs have the same behavior (see on_button_event in app_main.cpp):
  *   SHORT_PRESS       -> Matter Toggle + relay tick
  *   DOUBLE_PRESS      -> ColorControl MoveToColorTemperature (2700K)
- *   LONG_PRESS_START  -> dim start (LevelControl Move)
+ *   LONG_PRESS_START  -> dim start (LevelControl MoveWithOnOff — turns on lamp if off)
  *   LONG_PRESS_STOP   -> dim stop (LevelControl Stop)
  *   SHORT_LONG_START  -> color temp adjust (ColorControl MoveColorTemp)
  *   SHORT_LONG_STOP   -> color temp stop (ColorControl StopMoveStep)
- *   6x click          -> MODE_TOGGLE (universal: Matter <-> OTA mode)
+ *   6x click          -> MODE_TOGGLE (enable WiFi alongside Thread)
  *
  * Detection:
  *   Single short press has a DOUBLE_CLICK_WINDOW_MS delay to distinguish

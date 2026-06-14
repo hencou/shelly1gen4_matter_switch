@@ -151,8 +151,8 @@ static void send_level_multicast(const BindingCommandData &d, const Binding::Tab
 {
     auto *em = &chip::Server::GetInstance().GetExchangeManager();
     CHIP_ERROR err = CHIP_NO_ERROR;
-    if (d.commandId == LevelControl::Commands::Move::Id) {
-        LevelControl::Commands::Move::Type cmd;
+    if (d.commandId == LevelControl::Commands::MoveWithOnOff::Id) {
+        LevelControl::Commands::MoveWithOnOff::Type cmd;
         cmd.moveMode = (d.moveMode == 0) ? LevelControl::MoveModeEnum::kUp
                                          : LevelControl::MoveModeEnum::kDown;
         cmd.rate.SetNonNull(d.rate);
@@ -241,8 +241,8 @@ struct DirectSendCtx {
                     &em, sh, b.remote, c, make_on_success(), make_on_error());
             }
         } else if (d.clusterId == LevelControl::Id) {
-            if (d.commandId == LevelControl::Commands::Move::Id) {
-                LevelControl::Commands::Move::Type c;
+            if (d.commandId == LevelControl::Commands::MoveWithOnOff::Id) {
+                LevelControl::Commands::MoveWithOnOff::Type c;
                 c.moveMode = (d.moveMode == 0) ? LevelControl::MoveModeEnum::kUp
                                                : LevelControl::MoveModeEnum::kDown;
                 c.rate.SetNonNull(d.rate);
@@ -381,7 +381,7 @@ extern "C" void matter_send_onoff_off(uint16_t ep)
 extern "C" void matter_send_level_move(uint16_t ep, bool up, uint8_t rate)
 {
     if (!ep) return;
-    switch_send(ep, LevelControl::Id, LevelControl::Commands::Move::Id,
+    switch_send(ep, LevelControl::Id, LevelControl::Commands::MoveWithOnOff::Id,
                 up ? 0 : 1, rate);
 }
 
