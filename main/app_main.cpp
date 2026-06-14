@@ -29,6 +29,7 @@ extern "C" {
 #include <lib/core/CHIPError.h>
 #include <lib/core/DataModelTypes.h>
 #include <lib/support/Span.h>
+#include <platform/ConnectivityManager.h>
 
 static const char *TAG = "app";
 
@@ -205,11 +206,26 @@ extern "C" void app_main(void)
     ota_mark_app_valid();
     ESP_LOGI(TAG, "BOOT-STEP: ota_mark_app_valid done");
 
-    /* Auto-enable WiFi when device is not yet commissioned so the
-     * management dashboard is immediately reachable for setup. */
+    /* Smart boot: decide between WiFi-setup mode and BLE-commissioning mode.
+     *
+     * Not commissioned + no scripts → WiFi setup mode:
+     *   User needs the management dashboard to configure endpoints/scripts.
+     *   Disable BLE advertising (radio conflict) and start WiFi.
+     *
+     * Not commissioned + scripts configured → BLE commissioning mode:
+     *   User has set up endpoints via the dashboard and rebooted.
+     *   Let BLE advertising run so the phone can discover and commission.
+     *
+     * Commissioned → normal operation:
+     *   WiFi only via 6× press. */
     if (chip::Server::GetInstance().GetFabricTable().FabricCount() == 0) {
-        ESP_LOGI(TAG, "Not commissioned — auto-enabling WiFi for setup");
-        ota_enable_wifi_runtime();
+        if (script_engine_active_slots() == 0) {
+            ESP_LOGI(TAG, "Not commissioned, no scripts — WiFi setup mode (BLE off)");
+            chip::DeviceLayer::ConnectivityMgr().SetBLEAdvertisingEnabled(false);
+            ota_enable_wifi_runtime();
+        } else {
+            ESP_LOGI(TAG, "Not commissioned, scripts configured — BLE commissioning mode");
+        }
     }
 
     ESP_LOGI(TAG, "Shelly 1 Gen4 Matter Switch running");
