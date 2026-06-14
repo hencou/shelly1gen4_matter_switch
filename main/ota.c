@@ -1268,6 +1268,7 @@ static void start_httpd(void)
 {
     httpd_handle_t srv = NULL;
     httpd_config_t hc = HTTPD_DEFAULT_CONFIG();
+    hc.stack_size         = 8192; /* Lua compile in script API needs more stack */
     hc.recv_wait_timeout  = 30;   /* seconds waiting for data */
     hc.send_wait_timeout  = 10;
     hc.max_open_sockets   = 3;
