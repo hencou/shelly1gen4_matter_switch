@@ -20,6 +20,7 @@ extern "C" {
 #include "sensors.h"
 #include "ota.h"
 #include "status_led.h"
+#include "script_engine.h"
 }
 
 #include "matter_device.h"
@@ -92,6 +93,9 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
         matter_send_onoff_off(ep_sf);
         break;
     }
+
+    /* Forward event to script engine for TRIGGER_BUTTON_EVENT scripts */
+    script_engine_button_event(id, evt);
 }
 
 extern "C" void on_temperature(int16_t centi_c)
@@ -179,6 +183,11 @@ extern "C" void app_main(void)
     }
     // =========================================================================
     
+    /* Script engine — must init after Matter (needs endpoints), before buttons */
+    script_engine_init();
+    script_engine_start();
+    ESP_LOGI(TAG, "BOOT-STEP: script_engine started");
+
     button_driver_init(on_button_event);
     ESP_LOGI(TAG, "BOOT-STEP: button_driver_init done, calling sensors_init");
 
