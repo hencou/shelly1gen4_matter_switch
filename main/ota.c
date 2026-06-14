@@ -690,12 +690,24 @@ static esp_err_t form_get(httpd_req_t *req)
     return httpd_resp_send(req, MGMT_HTML, HTTPD_RESP_USE_STRLEN);
 }
 
-/* /api/settings — return current NVS WiFi creds as JSON */
+/* /api/settings — return current NVS WiFi creds as JSON,
+ * falling back to compile-time defaults when NVS is empty. */
 static esp_err_t api_settings_get(httpd_req_t *req)
 {
     char ssid[33] = {0}, pass[65] = {0}, url[256] = {0};
-    ota_load_credentials(ssid, sizeof(ssid), pass, sizeof(pass),
-                         url, sizeof(url));
+    bool have = ota_load_credentials(ssid, sizeof(ssid), pass, sizeof(pass),
+                                     url, sizeof(url));
+#ifdef DEFAULT_WIFI_SSID
+    if (!have) {
+        strncpy(ssid, DEFAULT_WIFI_SSID, sizeof(ssid) - 1);
+#ifdef DEFAULT_WIFI_PASS
+        strncpy(pass, DEFAULT_WIFI_PASS, sizeof(pass) - 1);
+#endif
+#ifdef DEFAULT_OTA_URL
+        strncpy(url, DEFAULT_OTA_URL, sizeof(url) - 1);
+#endif
+    }
+#endif
     static char json[512];
     snprintf(json, sizeof(json),
         "{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\"}",
