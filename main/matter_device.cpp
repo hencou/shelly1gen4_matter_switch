@@ -23,10 +23,8 @@
  *     directly via FindOrEstablishSession + InvokeCommandRequest.
  *
  * NB: BindingManager::NotifyBoundClusterChanged() is NOT used.
- * In esp-matter v1.4 the internal PendingNotificationMap dispatch
- * sometimes does not call the handler despite an active CASE session.
- * We bypass this by calling FindOrEstablishSession + InvokeCommandRequest
- * directly from SwitchWorkerFunction.
+ * We call FindOrEstablishSession + InvokeCommandRequest directly
+ * from SwitchWorkerFunction for reliable command delivery.
  */
 
 #include "matter_device.h"
@@ -46,7 +44,6 @@ extern "C" {
 
 #include <app/server/Server.h>
 #include <app/clusters/bindings/binding-table.h>
-#include <app/clusters/bindings/BindingManager.h>
 #include <app/OperationalSessionSetup.h>
 #include <app-common/zap-generated/cluster-objects.h>
 #include <controller/InvokeInteraction.h>
@@ -107,9 +104,9 @@ struct BindingCommandData
     uint16_t colorTempRate   = 0;
 };
 
-/* Typed lambda callbacks for InvokeCommandRequest (v1.4 API).
+/* Typed lambda callbacks for InvokeCommandRequest.
  * - onSuccess receives the typed ResponseType (generic via auto&)
- * - onError receives only CHIP_ERROR (no more context pointer)
+ * - onError receives only CHIP_ERROR
  */
 static auto make_on_success() {
     return [](const chip::app::ConcreteCommandPath & path,
@@ -127,7 +124,7 @@ static auto make_on_error() {
 
 /* ------------- Multicast helpers (no CASE session needed) ------------- */
 
-static void send_onoff_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
+static void send_onoff_multicast(const BindingCommandData &d, const Binding::TableEntry &b)
 {
     auto *em = &chip::Server::GetInstance().GetExchangeManager();
     CHIP_ERROR err = CHIP_NO_ERROR;
@@ -150,7 +147,7 @@ static void send_onoff_multicast(const BindingCommandData &d, const EmberBinding
     }
 }
 
-static void send_level_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
+static void send_level_multicast(const BindingCommandData &d, const Binding::TableEntry &b)
 {
     auto *em = &chip::Server::GetInstance().GetExchangeManager();
     CHIP_ERROR err = CHIP_NO_ERROR;
@@ -173,7 +170,7 @@ static void send_level_multicast(const BindingCommandData &d, const EmberBinding
     }
 }
 
-static void send_colorcontrol_multicast(const BindingCommandData &d, const EmberBindingTableEntry &b)
+static void send_colorcontrol_multicast(const BindingCommandData &d, const Binding::TableEntry &b)
 {
     auto *em = &chip::Server::GetInstance().GetExchangeManager();
     CHIP_ERROR err = CHIP_NO_ERROR;
@@ -206,19 +203,17 @@ static void send_colorcontrol_multicast(const BindingCommandData &d, const Ember
 
 /* ------------- Direct-send via FindOrEstablishSession ------------- */
 /*
- * Bypasses BindingManager::NotifyBoundClusterChanged() which in esp-matter
- * v1.4 sometimes does not call the registered handler despite an active
- * CASE session. Instead we use FindOrEstablishSession directly, so that
+ * Uses FindOrEstablishSession directly for unicast commands, so that
  * in the OnDeviceConnected callback we immediately send the command
  * via InvokeCommandRequest.
  */
 struct DirectSendCtx {
     BindingCommandData cmd;
-    EmberBindingTableEntry entry;
+    Binding::TableEntry entry;
     chip::Callback::Callback<chip::OnDeviceConnected> connCb;
     chip::Callback::Callback<chip::OnDeviceConnectionFailure> failCb;
 
-    DirectSendCtx(const BindingCommandData &d, const EmberBindingTableEntry &e)
+    DirectSendCtx(const BindingCommandData &d, const Binding::TableEntry &e)
         : cmd(d), entry(e),
           connCb(OnConn, this), failCb(OnFail, this) {}
 
@@ -300,7 +295,7 @@ static void SwitchWorkerFunction(intptr_t context)
     uint32_t sent  = 0;
     uint32_t total = 0;
 
-    for (const auto & e : chip::BindingTable::GetInstance()) {
+    for (const auto & e : Binding::Table::GetInstance()) {
         total++;
         ESP_LOGI(TAG, "BindingTable[%lu]: type=%u local=%u remote=%u "
                  "nodeId=0x%llx group=%u cluster=0x%lx fabric=%u",
@@ -314,7 +309,7 @@ static void SwitchWorkerFunction(intptr_t context)
         if (e.local != d->localEndpointId) continue;
         if (e.clusterId.has_value() && e.clusterId.value() != d->clusterId) continue;
 
-        if (e.type == MATTER_UNICAST_BINDING) {
+        if (e.type == Binding::MATTER_UNICAST_BINDING) {
             auto *ctx = chip::Platform::New<DirectSendCtx>(*d, e);
             if (!ctx) {
                 ESP_LOGE(TAG, "SwitchWorker: OOM DirectSendCtx");
@@ -327,7 +322,7 @@ static void SwitchWorkerFunction(intptr_t context)
             chip::Server::GetInstance().GetCASESessionManager()->
                 FindOrEstablishSession(peer, &ctx->connCb, &ctx->failCb);
             sent++;
-        } else if (e.type == MATTER_MULTICAST_BINDING) {
+        } else if (e.type == Binding::MATTER_MULTICAST_BINDING) {
             if (d->clusterId == OnOff::Id)              send_onoff_multicast(*d, e);
             else if (d->clusterId == LevelControl::Id)  send_level_multicast(*d, e);
             else if (d->clusterId == ColorControl::Id)  send_colorcontrol_multicast(*d, e);
@@ -490,36 +485,9 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
     return ESP_OK;
 }
 
-/* Runs on the CHIP task via PlatformMgr().ScheduleWork().
- * BindingManager::Init() and the Register*Handler calls talk to
- * Server state (FabricTable / CASESessionMgr / PersistentStorage) and
- * MUST therefore run under the CHIP stack lock. From main_task this
- * is not the case -> 'Chip stack locking error ... unsafe/racy' -> chipDie.
- * Scheduling on the CHIP task resolves this deterministically. */
-static void init_binding_handler_internal(intptr_t /*arg*/)
-{
-    auto & mgr = chip::BindingManager::GetInstance();
-    chip::BindingManagerInitParams params;
-    params.mFabricTable        = &chip::Server::GetInstance().GetFabricTable();
-    params.mCASESessionManager = chip::Server::GetInstance().GetCASESessionManager();
-    params.mStorage            = &chip::Server::GetInstance().GetPersistentStorage();
-    CHIP_ERROR err = mgr.Init(params);
-    if (err != CHIP_NO_ERROR) {
-        ESP_LOGE(TAG, "BindingManager::Init failed: %" CHIP_ERROR_FORMAT, err.Format());
-        return;
-    }
-    /* Handler registration is not needed: we use DirectSendCtx
-     * in SwitchWorkerFunction instead of NotifyBoundClusterChanged.
-     * BindingManager::Init is still useful for loading the binding table
-     * from NVS and pre-establishing CASE sessions. */
-    ESP_LOGI(TAG, "BindingManager initialised on CHIP-task");
-}
-
-static esp_err_t init_binding_handler(void)
-{
-    chip::DeviceLayer::PlatformMgr().ScheduleWork(init_binding_handler_internal, 0);
-    return ESP_OK;
-}
+/* BindingManager is initialized automatically by esp_matter in v1.5
+ * (client::binding_manager_init() called on kDnssdInitialized event).
+ * No manual init needed here. */
 
 extern "C" esp_err_t matter_start(void)
 {
@@ -529,15 +497,13 @@ extern "C" esp_err_t matter_start(void)
     if (!node) { ESP_LOGE(TAG, "node create failed"); return ESP_FAIL; }
 
     /* EP1 — OnOff Light Switch + LevelControl client + ColorControl client + Binding */
-    on_off_switch::config_t sw_cfg;
-    endpoint_t *ep_pushbutton = on_off_switch::create(node, &sw_cfg, ENDPOINT_FLAG_NONE, NULL);
+    on_off_light_switch::config_t sw_cfg;
+    endpoint_t *ep_pushbutton = on_off_light_switch::create(node, &sw_cfg, ENDPOINT_FLAG_NONE, NULL);
     {
         level_control::config_t lvl_cfg;
-        level_control::create(ep_pushbutton, &lvl_cfg,
-                              CLUSTER_FLAG_CLIENT, ESP_MATTER_NONE_FEATURE_ID);
+        level_control::create(ep_pushbutton, &lvl_cfg, CLUSTER_FLAG_CLIENT);
         color_control::config_t cc_cfg;
-        color_control::create(ep_pushbutton, &cc_cfg,
-                              CLUSTER_FLAG_CLIENT, ESP_MATTER_NONE_FEATURE_ID);
+        color_control::create(ep_pushbutton, &cc_cfg, CLUSTER_FLAG_CLIENT);
         binding::config_t bind_cfg;
         binding::create(ep_pushbutton, &bind_cfg, CLUSTER_FLAG_SERVER);
     }
@@ -548,8 +514,8 @@ extern "C" esp_err_t matter_start(void)
      * Same device type as EP1 but intended for maintained switches:
      * sends On on contact close, Off on contact open.
      * User binds EP2 (instead of EP1) for state-following behavior. */
-    on_off_switch::config_t sf_cfg;
-    endpoint_t *ep_state = on_off_switch::create(node, &sf_cfg, ENDPOINT_FLAG_NONE, NULL);
+    on_off_light_switch::config_t sf_cfg;
+    endpoint_t *ep_state = on_off_light_switch::create(node, &sf_cfg, ENDPOINT_FLAG_NONE, NULL);
     {
         binding::config_t bind_cfg;
         binding::create(ep_state, &bind_cfg, CLUSTER_FLAG_SERVER);
@@ -595,9 +561,6 @@ extern "C" esp_err_t matter_start(void)
     /* Start the stack */
     esp_err_t err = esp_matter::start(NULL);
     if (err != ESP_OK) { ESP_LOGE(TAG, "esp_matter::start: %d", err); return err; }
-
-    /* Binding handler after server start so FabricTable + CASESessionManager are available */
-    init_binding_handler();
 
     return ESP_OK;
 }
