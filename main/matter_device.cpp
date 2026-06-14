@@ -449,6 +449,15 @@ extern "C" void matter_update_occupancy(bool occupied)
         OccupancySensing::Attributes::Occupancy::Id, &v);
 }
 
+extern "C" void matter_update_relay_onoff(bool on)
+{
+    if (!s_ep_relay) return;
+    esp_matter_attr_val_t v = esp_matter_bool(on);
+    attribute::update(s_ep_relay,
+        OnOff::Id,
+        OnOff::Attributes::OnOff::Id, &v);
+}
+
 extern "C" void matter_factory_reset(void)
 {
     ESP_LOGW(TAG, "factory reset requested");

@@ -32,6 +32,9 @@ void matter_send_color_temp_stop(uint16_t local_endpoint_id);
 void matter_update_temperature(int16_t centi_c);
 void matter_update_occupancy(bool occupied);
 
+/* Update relay OnOff attribute (report to HA). Called from script engine. */
+void matter_update_relay_onoff(bool on);
+
 /* Factory reset → wipes Matter NVS, leaves the fabric, reboot. */
 void matter_factory_reset(void);
 
