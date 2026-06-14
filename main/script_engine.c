@@ -16,6 +16,7 @@
 #include "app_config.h"
 #include "relay.h"
 #include "sensors.h"
+#include "matter_device.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -208,7 +209,7 @@ static int l_output_relay(lua_State *L)
     bool on = lua_toboolean(L, 1);
     s_relay_state = on;
     relay_set(on);
-    /* TODO: update Matter OnOff attribute on relay endpoint */
+    matter_update_relay_onoff(on);
     return 0;
 }
 
@@ -216,7 +217,7 @@ static int l_output_relay_toggle(lua_State *L)
 {
     s_relay_state = !s_relay_state;
     relay_set(s_relay_state);
-    /* TODO: update Matter OnOff attribute on relay endpoint */
+    matter_update_relay_onoff(s_relay_state);
     return 0;
 }
 
@@ -248,15 +249,15 @@ static int l_endpoint_set(lua_State *L)
     if (strcmp(attr, "occupied") == 0) {
         bool val = lua_toboolean(L, 2);
         ESP_LOGI(TAG, "slot %d: set occupied=%d", slot, val);
-        /* TODO: update OccupancySensing attribute via matter API */
+        matter_update_occupancy(val);
     } else if (strcmp(attr, "measured_value") == 0) {
         int val = (int)luaL_checkinteger(L, 2);
         ESP_LOGI(TAG, "slot %d: set measured_value=%d", slot, val);
-        /* TODO: update Illuminance/Temperature attribute */
+        matter_update_temperature((int16_t)val);
     } else if (strcmp(attr, "on_off") == 0) {
         bool val = lua_toboolean(L, 2);
         ESP_LOGI(TAG, "slot %d: set on_off=%d", slot, val);
-        /* TODO: update OnOff attribute */
+        matter_update_relay_onoff(val);
     } else {
         ESP_LOGW(TAG, "slot %d: unknown attr '%s'", slot, attr);
     }
@@ -275,11 +276,13 @@ static int l_endpoint_command(lua_State *L)
 
     if (strcmp(cmd, "toggle") == 0) {
         ESP_LOGI(TAG, "slot %d: command toggle ep=%u", slot, ep);
-        /* matter_send_onoff_toggle(ep) — called from C++ side */
+        matter_send_onoff_toggle(ep);
     } else if (strcmp(cmd, "on") == 0) {
         ESP_LOGI(TAG, "slot %d: command on ep=%u", slot, ep);
+        matter_send_onoff_on(ep);
     } else if (strcmp(cmd, "off") == 0) {
         ESP_LOGI(TAG, "slot %d: command off ep=%u", slot, ep);
+        matter_send_onoff_off(ep);
     } else if (strcmp(cmd, "move_with_onoff") == 0) {
         bool up = true;
         uint8_t rate = 50;
@@ -292,8 +295,10 @@ static int l_endpoint_command(lua_State *L)
             lua_pop(L, 1);
         }
         ESP_LOGI(TAG, "slot %d: command move_with_onoff up=%d rate=%u ep=%u", slot, up, rate, ep);
+        matter_send_level_move(ep, up, rate);
     } else if (strcmp(cmd, "stop") == 0) {
         ESP_LOGI(TAG, "slot %d: command stop ep=%u", slot, ep);
+        matter_send_level_stop(ep);
     } else if (strcmp(cmd, "color_temp_set") == 0) {
         uint16_t kelvin = 2700;
         if (lua_istable(L, 2)) {
@@ -303,6 +308,7 @@ static int l_endpoint_command(lua_State *L)
         }
         uint16_t mireds = (uint16_t)(1000000 / kelvin);
         ESP_LOGI(TAG, "slot %d: command color_temp_set kelvin=%u mireds=%u ep=%u", slot, kelvin, mireds, ep);
+        matter_send_color_temp_set(ep, mireds);
     } else if (strcmp(cmd, "color_temp_move") == 0) {
         bool warmer = true;
         uint16_t rate = 50;
@@ -315,8 +321,10 @@ static int l_endpoint_command(lua_State *L)
             lua_pop(L, 1);
         }
         ESP_LOGI(TAG, "slot %d: command color_temp_move warmer=%d rate=%u ep=%u", slot, warmer, rate, ep);
+        matter_send_color_temp_move(ep, warmer, rate);
     } else if (strcmp(cmd, "color_temp_stop") == 0) {
         ESP_LOGI(TAG, "slot %d: command color_temp_stop ep=%u", slot, ep);
+        matter_send_color_temp_stop(ep);
     } else {
         ESP_LOGW(TAG, "slot %d: unknown command '%s'", slot, cmd);
     }
@@ -499,12 +507,30 @@ esp_err_t script_engine_start(void)
     int active_count = 0;
     for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
         if (slot_load(i, &s_slots[i].cfg) == ESP_OK && s_slots[i].cfg.type != SLOT_TYPE_NONE) {
+            /* Assign endpoint ID based on type (use existing static endpoints) */
+            switch (s_slots[i].cfg.type) {
+                case SLOT_TYPE_ONOFF_TOGGLE:
+                case SLOT_TYPE_DIMMER:
+                    s_slots[i].endpoint_id = matter_ep_pushbutton();
+                    break;
+                case SLOT_TYPE_ONOFF_STATE:
+                    s_slots[i].endpoint_id = matter_ep_state();
+                    break;
+                case SLOT_TYPE_RELAY:
+                    s_slots[i].endpoint_id = matter_ep_relay();
+                    break;
+                default:
+                    s_slots[i].endpoint_id = matter_ep_pushbutton();
+                    break;
+            }
+
             s_slots[i].L = create_lua_state(i);
             if (s_slots[i].L && compile_and_load(&s_slots[i], i)) {
                 s_slots[i].active = true;
                 active_count++;
-                ESP_LOGI(TAG, "slot %d: '%s' type=%d trigger=%d active",
-                         i, s_slots[i].cfg.name, s_slots[i].cfg.type, s_slots[i].cfg.trigger);
+                ESP_LOGI(TAG, "slot %d: '%s' type=%d trigger=%d ep=%u active",
+                         i, s_slots[i].cfg.name, s_slots[i].cfg.type,
+                         s_slots[i].cfg.trigger, s_slots[i].endpoint_id);
             } else {
                 ESP_LOGW(TAG, "slot %d: failed to compile script", i);
             }
