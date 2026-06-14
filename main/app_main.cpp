@@ -205,5 +205,12 @@ extern "C" void app_main(void)
     ota_mark_app_valid();
     ESP_LOGI(TAG, "BOOT-STEP: ota_mark_app_valid done");
 
+    /* Auto-enable WiFi when device is not yet commissioned so the
+     * management dashboard is immediately reachable for setup. */
+    if (chip::Server::GetInstance().GetFabricTable().FabricCount() == 0) {
+        ESP_LOGI(TAG, "Not commissioned — auto-enabling WiFi for setup");
+        ota_enable_wifi_runtime();
+    }
+
     ESP_LOGI(TAG, "Shelly 1 Gen4 Matter Switch running");
 }
