@@ -1,12 +1,12 @@
 # Shelly 1 Gen4 (8 MB flash) — Matter dual-OTA layout.
-# Matter firmware is groter dan Zigbee (~1.6-1.8 MB) dus ota_0/ota_1 zijn 2 MB.
+# Matter + TBR firmware ~2.4 MB, so ota_0/ota_1 are 2.5 MB each.
 # Name,      Type, SubType,  Offset,    Size,     Flags
 nvs,         data, nvs,      0x9000,    0x6000,
 otadata,     data, ota,      0xf000,    0x2000,
 phy_init,    data, phy,      0x11000,   0x1000,
 nvs_keys,    data, nvs_keys, 0x12000,   0x1000,   encrypted,
-ota_0,       app,  ota_0,    0x20000,   0x250000,
-ota_1,       app,  ota_1,    0x270000,  0x250000,
-fctry,       data, nvs,      0x4c0000,  0x6000,
-chip_factory,data, nvs,      0x4c6000,  0x6000,
-chip_kvs,    data, nvs,      0x4cc000,  0x6000,
+ota_0,       app,  ota_0,    0x20000,   0x280000,
+ota_1,       app,  ota_1,    0x2a0000,  0x280000,
+fctry,       data, nvs,      0x520000,  0x6000,
+chip_factory,data, nvs,      0x526000,  0x6000,
+chip_kvs,    data, nvs,      0x52c000,  0x6000,
