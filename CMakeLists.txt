@@ -38,5 +38,5 @@ idf_build_set_property(COMPILE_OPTIONS "-I${CMAKE_SOURCE_DIR}/main" APPEND)
 # mdns as a dependency. Explicitly link mdns into openthread so the
 # linker resolves these symbols.
 idf_component_get_property(ot_lib openthread COMPONENT_LIB)
-idf_component_get_property(mdns_lib mdns COMPONENT_LIB)
+idf_component_get_property(mdns_lib espressif__mdns COMPONENT_LIB)
 target_link_libraries(${ot_lib} PUBLIC ${mdns_lib})
