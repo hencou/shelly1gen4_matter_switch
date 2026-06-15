@@ -121,37 +121,6 @@ static bool ota_load_credentials(char *ssid, size_t ssidlen,
     return ok;
 }
 
-void bench_mode_init(void)
-{
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-        uint8_t v = 0xff;
-        if (nvs_get_u8(h, NVS_KEY_BENCH, &v) == ESP_OK) {
-            g_bench_mode = (v != 0) ? 1 : 0;
-        }
-        nvs_close(h);
-    }
-    ESP_LOGI(TAG, "bench_mode = %d (compile-time default = %d)",
-             g_bench_mode, BENCH_MODE);
-
-    /* Also load WiFi persistent and TBR mode flags */
-    wifi_persistent_init();
-    tbr_mode_init();
-}
-
-static esp_err_t bench_mode_save(int on)
-{
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
-    if (err != ESP_OK) return err;
-    nvs_set_u8(h, NVS_KEY_BENCH, on ? 1 : 0);
-    nvs_commit(h);
-    nvs_close(h);
-    g_bench_mode = on ? 1 : 0;
-    ESP_LOGI(TAG, "bench_mode saved: %d", g_bench_mode);
-    return ESP_OK;
-}
-
 /* ---------- WiFi persistent + TBR mode NVS ---------- */
 
 static void wifi_persistent_init(void)
@@ -213,6 +182,39 @@ esp_err_t ota_tbr_mode_set(bool on)
     nvs_close(h);
     s_tbr_mode = on;
     ESP_LOGI(TAG, "tbr_mode saved: %d", on);
+    return ESP_OK;
+}
+
+/* ---------- Bench mode NVS ---------- */
+
+void bench_mode_init(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        uint8_t v = 0xff;
+        if (nvs_get_u8(h, NVS_KEY_BENCH, &v) == ESP_OK) {
+            g_bench_mode = (v != 0) ? 1 : 0;
+        }
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "bench_mode = %d (compile-time default = %d)",
+             g_bench_mode, BENCH_MODE);
+
+    /* Also load WiFi persistent and TBR mode flags */
+    wifi_persistent_init();
+    tbr_mode_init();
+}
+
+static esp_err_t bench_mode_save(int on)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    nvs_set_u8(h, NVS_KEY_BENCH, on ? 1 : 0);
+    nvs_commit(h);
+    nvs_close(h);
+    g_bench_mode = on ? 1 : 0;
+    ESP_LOGI(TAG, "bench_mode saved: %d", g_bench_mode);
     return ESP_OK;
 }
 
@@ -1681,21 +1683,6 @@ static void run_softap(void)
     ESP_LOGW(TAG, "SoftAP ready. Connect to '%s', open http://192.168.4.1/", ssid);
 
     wait_for_upload_or_timeout();  /* never returns (reboots) */
-}
-
-/* ---------- Factory reset ---------- */
-
-static void full_factory_reset(void)
-{
-    ESP_LOGW(TAG, "FULL factory reset: wiping nvs + chip_kvs partities");
-    esp_err_t err = nvs_flash_erase_partition("chip_kvs");
-    ESP_LOGW(TAG, "  chip_kvs erase -> %s", esp_err_to_name(err));
-    nvs_flash_deinit();
-    err = nvs_flash_erase();
-    ESP_LOGW(TAG, "  nvs erase -> %s", esp_err_to_name(err));
-    vTaskDelay(pdMS_TO_TICKS(500));
-    ESP_LOGW(TAG, "rebooting into clean Matter mode");
-    esp_restart();
 }
 
 /* ---------- Button callback during OTA mode ---------- */
