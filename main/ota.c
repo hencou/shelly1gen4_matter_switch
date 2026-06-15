@@ -1447,11 +1447,13 @@ static void wifi_runtime_task(void *arg)
     }
 #endif
 
-    /* Initialize netif + WiFi once */
+    /* Initialize netif + WiFi (guard against duplicate netif creation) */
     esp_netif_init();
     esp_event_loop_create_default();
-    esp_netif_create_default_wifi_sta();
-    esp_netif_create_default_wifi_ap();
+    if (!esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"))
+        esp_netif_create_default_wifi_sta();
+    if (!esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"))
+        esp_netif_create_default_wifi_ap();
 
     {
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -1528,8 +1530,15 @@ static void wifi_runtime_task(void *arg)
     vTaskDelete(NULL);
 }
 
+static bool s_wifi_runtime_started = false;
+
 void ota_enable_wifi_runtime(void)
 {
+    if (s_wifi_runtime_started) {
+        ESP_LOGW(TAG, "WiFi runtime already started, ignoring");
+        return;
+    }
+    s_wifi_runtime_started = true;
     ESP_LOGW(TAG, "Enabling WiFi alongside Thread (runtime, non-persistent)");
     xTaskCreate(wifi_runtime_task, "wifi_rt", 4096, NULL, 5, NULL);
 }

@@ -251,6 +251,7 @@ static int l_output_relay_state(lua_State *L)
 
 static const luaL_Reg output_lib[] = {
     {"relay",        l_output_relay},
+    {"relay_set",    l_output_relay},
     {"relay_toggle", l_output_relay_toggle},
     {"relay_state",  l_output_relay_state},
     {NULL, NULL}
