@@ -39,6 +39,7 @@ extern "C" {
 #include <controller/InvokeInteraction.h>
 #include <credentials/FabricTable.h>
 #include <platform/PlatformManager.h>
+#include <platform/ThreadStackManager.h>
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
 #include <platform/ESP32/OpenthreadLauncher.h>
@@ -454,6 +455,14 @@ extern "C" void matter_update_relay_onoff(bool on)
                 OnOff::Attributes::OnOff::Id, &v);
         }
     }
+}
+
+extern "C" void matter_disable_thread(void)
+{
+#if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+    ESP_LOGW(TAG, "Disabling Thread to free 2.4 GHz radio for WiFi");
+    chip::DeviceLayer::ThreadStackMgr().SetThreadEnabled(false);
+#endif
 }
 
 extern "C" void matter_factory_reset(void)

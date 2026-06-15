@@ -42,6 +42,9 @@ void matter_update_occupancy(bool occupied);
 /* Update relay OnOff attribute (report to HA). Called from script engine. */
 void matter_update_relay_onoff(bool on);
 
+/* Disable Thread radio so WiFi can use the 2.4 GHz radio exclusively. */
+void matter_disable_thread(void);
+
 /* Factory reset → wipes Matter NVS, leaves the fabric, reboot. */
 void matter_factory_reset(void);
 

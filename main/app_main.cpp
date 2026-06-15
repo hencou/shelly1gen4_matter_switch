@@ -38,7 +38,8 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
     ESP_LOGI(TAG, "button id=%d evt=%d", id, evt);
 
     if (evt == BTN_EVT_MODE_TOGGLE) {
-        ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> enabling WiFi runtime", id);
+        ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> disabling Thread, enabling WiFi", id);
+        matter_disable_thread();
         ota_enable_wifi_runtime();
         return;
     }
