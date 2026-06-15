@@ -72,7 +72,7 @@ See [SCRIPTS.md](SCRIPTS.md) for example scripts.
 After reboot with configured endpoints, the module enters **BLE commissioning mode**:
 
 1. Open Home Assistant → Settings → Devices & Services → Matter → "Add device"
-2. Enter setup code: **20202021** (default, configurable in `sdkconfig.defaults`)
+2. Enter setup code: **34970112332** (default, configurable in `sdkconfig.defaults`)
 3. HA Matter Server pairs via BLE, provisions Thread credentials
 4. After ~30-60s the device appears in HA with the configured endpoints
 
