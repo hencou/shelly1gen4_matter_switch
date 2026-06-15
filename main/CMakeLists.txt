@@ -25,7 +25,7 @@ idf_component_register(
         app_update
         bt
         openthread
-        mdns
+        espressif__mdns
         chip
         esp_matter
 )
