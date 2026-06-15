@@ -38,9 +38,16 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
     ESP_LOGI(TAG, "button id=%d evt=%d", id, evt);
 
     if (evt == BTN_EVT_MODE_TOGGLE) {
-        ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> disabling Thread, enabling WiFi", id);
-        matter_disable_thread();
-        ota_enable_wifi_runtime();
+        if (ota_wifi_persistent_get()) {
+            /* WiFi is already active — just open management dashboard.
+             * No need to disable Thread (coexistence handles both). */
+            ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> WiFi already persistent, opening dashboard", id);
+            ota_enable_wifi_runtime();
+        } else {
+            ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> disabling Thread, enabling WiFi", id);
+            matter_disable_thread();
+            ota_enable_wifi_runtime();
+        }
         return;
     }
 
@@ -76,11 +83,44 @@ extern "C" void app_main(void)
     script_slot_type_t slot_types[SCRIPT_MAX_SLOTS];
     script_engine_load_slot_types(slot_types, SCRIPT_MAX_SLOTS);
 
+    /* WiFi persistent mode: start WiFi early so it's available alongside Thread.
+     * When TBR is enabled, we also need:
+     *   1. The WiFi STA netif created BEFORE matter_start() (backbone for TBR)
+     *   2. esp_openthread_border_router_init() AFTER matter_start()
+     * We call ota_wifi_ensure_netifs() to synchronously create the netifs,
+     * then ota_enable_wifi_runtime() for the actual connection. */
+    if (ota_wifi_persistent_get()) {
+        ESP_LOGI(TAG, "BOOT-STEP: WiFi persistent ON — creating netifs early");
+        ota_wifi_ensure_netifs();
+
+        if (ota_tbr_mode_get()) {
+            esp_netif_t *sta = ota_get_wifi_sta_netif();
+            if (sta) {
+                matter_set_tbr_backbone(sta);
+                ESP_LOGI(TAG, "BOOT-STEP: TBR backbone netif set");
+            } else {
+                ESP_LOGW(TAG, "BOOT-STEP: TBR enabled but WiFi STA netif not ready");
+            }
+        }
+    }
+
     /* Matter MUST start before button_driver_init / sensors_init:
      * those install GPIO ISRs and FreeRTOS tasks that immediately call
      * Matter APIs via callbacks. */
     ESP_ERROR_CHECK(matter_start(slot_types, SCRIPT_MAX_SLOTS));
-    ESP_LOGI(TAG, "BOOT-STEP: matter_start() done, calling button_driver_init");
+    ESP_LOGI(TAG, "BOOT-STEP: matter_start() done");
+
+    /* Thread Border Router: init after Matter stack is running. */
+    if (ota_wifi_persistent_get() && ota_tbr_mode_get()) {
+        matter_tbr_init();
+        ESP_LOGI(TAG, "BOOT-STEP: Thread Border Router initialized");
+    }
+
+    /* Now start the actual WiFi connection (runs as background task) */
+    if (ota_wifi_persistent_get()) {
+        ota_enable_wifi_runtime();
+        ESP_LOGI(TAG, "BOOT-STEP: WiFi runtime started (persistent)");
+    }
 
     // =========================================================================
     // MULTICAST GROUP KEY — install KeySet 1 + GroupKeyMap

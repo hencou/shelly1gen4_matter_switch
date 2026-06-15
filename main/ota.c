@@ -58,9 +58,15 @@ static const char *TAG = "ota";
 #define NVS_KEY_PASS        "pass"
 #define NVS_KEY_URL         "url"
 #define NVS_KEY_BENCH       "bench"
+#define NVS_KEY_WIFI_PERS   "wifi_pers"
+#define NVS_KEY_TBR         "tbr"
 
 /* Runtime bench mode — initialised from NVS in bench_mode_init(). */
 int g_bench_mode = BENCH_MODE;
+
+/* Runtime flags — initialised from NVS early in boot. */
+static bool s_wifi_persistent = false;
+static bool s_tbr_mode = false;
 
 #define WIFI_CONNECTED_BIT  BIT0
 #define WIFI_FAIL_BIT       BIT1
@@ -127,6 +133,10 @@ void bench_mode_init(void)
     }
     ESP_LOGI(TAG, "bench_mode = %d (compile-time default = %d)",
              g_bench_mode, BENCH_MODE);
+
+    /* Also load WiFi persistent and TBR mode flags */
+    wifi_persistent_init();
+    tbr_mode_init();
 }
 
 static esp_err_t bench_mode_save(int on)
@@ -139,6 +149,70 @@ static esp_err_t bench_mode_save(int on)
     nvs_close(h);
     g_bench_mode = on ? 1 : 0;
     ESP_LOGI(TAG, "bench_mode saved: %d", g_bench_mode);
+    return ESP_OK;
+}
+
+/* ---------- WiFi persistent + TBR mode NVS ---------- */
+
+static void wifi_persistent_init(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        uint8_t v = 0;
+        if (nvs_get_u8(h, NVS_KEY_WIFI_PERS, &v) == ESP_OK) {
+            s_wifi_persistent = (v != 0);
+        }
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "wifi_persistent = %d", s_wifi_persistent);
+}
+
+bool ota_wifi_persistent_get(void)
+{
+    return s_wifi_persistent;
+}
+
+esp_err_t ota_wifi_persistent_set(bool on)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    nvs_set_u8(h, NVS_KEY_WIFI_PERS, on ? 1 : 0);
+    nvs_commit(h);
+    nvs_close(h);
+    s_wifi_persistent = on;
+    ESP_LOGI(TAG, "wifi_persistent saved: %d", on);
+    return ESP_OK;
+}
+
+static void tbr_mode_init(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        uint8_t v = 0;
+        if (nvs_get_u8(h, NVS_KEY_TBR, &v) == ESP_OK) {
+            s_tbr_mode = (v != 0);
+        }
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "tbr_mode = %d", s_tbr_mode);
+}
+
+bool ota_tbr_mode_get(void)
+{
+    return s_tbr_mode;
+}
+
+esp_err_t ota_tbr_mode_set(bool on)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    nvs_set_u8(h, NVS_KEY_TBR, on ? 1 : 0);
+    nvs_commit(h);
+    nvs_close(h);
+    s_tbr_mode = on;
+    ESP_LOGI(TAG, "tbr_mode saved: %d", on);
     return ESP_OK;
 }
 
@@ -385,6 +459,18 @@ static const char MGMT_HTML[] =
 "<td class=hw-val id=hw-bench>-<br>"
 "<button class='btn btn-gray' id=bench-btn onclick=toggleBench() style='margin-top:.4em'>Toggle</button>"
 "</td></tr>"
+"<tr><td>WiFi persistent<br><span style='font-size:.8em;color:#666'>"
+"ON = WiFi stays active after reboot (coexistence with Thread).<br>"
+"OFF = WiFi only via 6&times; press (default).</span></td>"
+"<td class=hw-val id=hw-wifip>-<br>"
+"<button class='btn btn-gray' id=wifip-btn onclick=toggleWifiP() style='margin-top:.4em'>Toggle</button>"
+"</td></tr>"
+"<tr><td>Thread Border Router<br><span style='font-size:.8em;color:#666'>"
+"ON = routes IPv6 between WiFi and Thread mesh (requires WiFi persistent ON).<br>"
+"OFF = normal Thread end-device (default).</span></td>"
+"<td class=hw-val id=hw-tbr>-<br>"
+"<button class='btn btn-gray' id=tbr-btn onclick=toggleTBR() style='margin-top:.4em'>Toggle</button>"
+"</td></tr>"
 "</table>"
 
 "<h4>Inputs</h4>"
@@ -576,6 +662,10 @@ static const char MGMT_HTML[] =
 "      setHW('hw-rst',d.reset_reason);"
 "      var be=document.getElementById('hw-bench');"
 "      if(be){be.childNodes[0].textContent=d.bench_mode||'N/A';}"
+"      var wp=document.getElementById('hw-wifip');"
+"      if(wp){wp.childNodes[0].textContent=d.wifi_persistent||'N/A';}"
+"      var tb=document.getElementById('hw-tbr');"
+"      if(tb){tb.childNodes[0].textContent=d.tbr_mode||'N/A';}"
 "      setHW('hw-btn',d.pushbutton);setHW('hw-pcb',d.pcb_button);"
 "      setHW('hw-dig',d.digital_in);setHW('hw-ana',d.analog_in);"
 "      setHW('hw-temp',d.temperature);"
@@ -599,6 +689,32 @@ static const char MGMT_HTML[] =
 "  x.onerror=function(){document.getElementById('hw-msg').innerHTML="
 "    '<span class=err>Connection error</span>'};"
 "  x.open('POST','/api/bench-mode');x.send();"
+"}"
+"function toggleWifiP(){"
+"  if(!confirm('Toggle WiFi persistent mode? Device will restart.'))return;"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){"
+"    if(x.status==200){document.getElementById('hw-msg').innerHTML="
+"      '<span class=ok>WiFi persistent mode changed. Restarting...</span>'}"
+"    else{document.getElementById('hw-msg').innerHTML="
+"      '<span class=err>Failed to toggle WiFi persistent</span>'}"
+"  };"
+"  x.onerror=function(){document.getElementById('hw-msg').innerHTML="
+"    '<span class=err>Connection error</span>'};"
+"  x.open('POST','/api/wifi-persistent');x.send();"
+"}"
+"function toggleTBR(){"
+"  if(!confirm('Toggle Thread Border Router mode? Device will restart.'))return;"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){"
+"    if(x.status==200){document.getElementById('hw-msg').innerHTML="
+"      '<span class=ok>TBR mode changed. Restarting...</span>'}"
+"    else{document.getElementById('hw-msg').innerHTML="
+"      '<span class=err>Failed to toggle TBR mode</span>'}"
+"  };"
+"  x.onerror=function(){document.getElementById('hw-msg').innerHTML="
+"    '<span class=err>Connection error</span>'};"
+"  x.open('POST','/api/tbr-mode');x.send();"
 "}"
 
 /* Scripts */
@@ -895,6 +1011,8 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         "\"chip_temp\":\"%s\","
         "\"reset_reason\":\"%s\","
         "\"bench_mode\":\"%s\","
+        "\"wifi_persistent\":\"%s\","
+        "\"tbr_mode\":\"%s\","
         "\"pushbutton\":\"%s (GPIO%d=%d)\","
         "\"pcb_button\":\"%s (GPIO4=%d)\","
         "\"digital_in\":\"%s (GPIO%d=%d)\","
@@ -910,6 +1028,8 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         ctemp_str,
         rst,
         g_bench_mode ? "ON" : "OFF",
+        s_wifi_persistent ? "ON" : "OFF",
+        s_tbr_mode ? "ON" : "OFF",
         btn_active ? "PRESSED" : "RELEASED", PIN_SWITCH_INPUT, btn_level,
         pcb_active ? "PRESSED" : "RELEASED", pcb_level,
         dig_level ? "HIGH" : "LOW", PIN_TOUCH_INPUT, dig_level,
@@ -925,6 +1045,36 @@ static esp_err_t api_bench_mode_post(httpd_req_t *req)
 {
     int new_val = g_bench_mode ? 0 : 1;
     bench_mode_save(new_val);
+    httpd_resp_sendstr(req, "OK");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
+/* /api/wifi-persistent — toggle WiFi persistent mode, save to NVS and reboot */
+static esp_err_t api_wifi_persistent_post(httpd_req_t *req)
+{
+    bool new_val = !s_wifi_persistent;
+    ota_wifi_persistent_set(new_val);
+    /* If disabling wifi_persistent, also disable TBR (requires WiFi) */
+    if (!new_val && s_tbr_mode) {
+        ota_tbr_mode_set(false);
+    }
+    httpd_resp_sendstr(req, "OK");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
+/* /api/tbr-mode — toggle Thread Border Router mode, save to NVS and reboot */
+static esp_err_t api_tbr_mode_post(httpd_req_t *req)
+{
+    bool new_val = !s_tbr_mode;
+    /* TBR requires WiFi persistent — auto-enable it */
+    if (new_val && !s_wifi_persistent) {
+        ota_wifi_persistent_set(true);
+    }
+    ota_tbr_mode_set(new_val);
     httpd_resp_sendstr(req, "OK");
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
@@ -986,10 +1136,13 @@ static esp_err_t api_backup_get(httpd_req_t *req)
 
     char hdr[512];
     snprintf(hdr, sizeof(hdr),
-        "{\"version\":2,"
-        "\"ota\":{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\"},"
+        "{\"version\":3,"
+        "\"ota\":{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\","
+        "\"wifi_persistent\":%s,\"tbr_mode\":%s},"
         "\"scripts\":[",
-        ssid, pass, url);
+        ssid, pass, url,
+        s_wifi_persistent ? "true" : "false",
+        s_tbr_mode ? "true" : "false");
     httpd_resp_send_chunk(req, hdr, strlen(hdr));
 
     /* Script slots */
@@ -1077,6 +1230,22 @@ static esp_err_t api_restore_post(httpd_req_t *req)
 
     if (ssid[0]) {
         ota_save_credentials(ssid, pass, url_buf);
+    }
+
+    /* Restore wifi_persistent and tbr_mode (v3+ backup) */
+    {
+        const char *wp = strstr(body, "\"wifi_persistent\":");
+        if (wp) {
+            wp += 18;
+            while (*wp == ' ') wp++;
+            ota_wifi_persistent_set(*wp == 't');
+        }
+        const char *tb = strstr(body, "\"tbr_mode\":");
+        if (tb) {
+            tb += 11;
+            while (*tb == ' ') tb++;
+            ota_tbr_mode_set(*tb == 't');
+        }
     }
 
     /* Restore scripts (if present in backup) */
@@ -1428,6 +1597,8 @@ static void start_httpd(void)
     httpd_uri_t get_settings      = { "/api/settings",      HTTP_GET,    api_settings_get,      NULL };
     httpd_uri_t get_hardware      = { "/api/hardware",      HTTP_GET,    api_hardware_get,      NULL };
     httpd_uri_t post_bench        = { "/api/bench-mode",    HTTP_POST,   api_bench_mode_post,   NULL };
+    httpd_uri_t post_wifip        = { "/api/wifi-persistent", HTTP_POST, api_wifi_persistent_post, NULL };
+    httpd_uri_t post_tbr          = { "/api/tbr-mode",     HTTP_POST,   api_tbr_mode_post,     NULL };
     httpd_uri_t post_restart      = { "/api/restart",       HTTP_POST,   api_restart_post,      NULL };
     httpd_uri_t post_factory      = { "/api/factory-reset", HTTP_POST,   api_factory_reset_post,NULL };
     httpd_uri_t get_backup        = { "/api/backup",        HTTP_GET,    api_backup_get,        NULL };
@@ -1442,6 +1613,8 @@ static void start_httpd(void)
     httpd_register_uri_handler(srv, &get_settings);
     httpd_register_uri_handler(srv, &get_hardware);
     httpd_register_uri_handler(srv, &post_bench);
+    httpd_register_uri_handler(srv, &post_wifip);
+    httpd_register_uri_handler(srv, &post_tbr);
     httpd_register_uri_handler(srv, &post_restart);
     httpd_register_uri_handler(srv, &post_factory);
     httpd_register_uri_handler(srv, &get_backup);
@@ -1647,6 +1820,22 @@ static void wifi_runtime_task(void *arg)
 }
 
 static bool s_wifi_runtime_started = false;
+
+void ota_wifi_ensure_netifs(void)
+{
+    esp_netif_init();
+    esp_event_loop_create_default();
+    if (!esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"))
+        esp_netif_create_default_wifi_sta();
+    if (!esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"))
+        esp_netif_create_default_wifi_ap();
+    ESP_LOGI(TAG, "WiFi netifs created (STA + AP)");
+}
+
+esp_netif_t *ota_get_wifi_sta_netif(void)
+{
+    return esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+}
 
 void ota_enable_wifi_runtime(void)
 {

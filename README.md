@@ -8,6 +8,8 @@
 - **Lua 5.4 scripting** — write custom button/relay/sensor logic per endpoint slot (up to 8 slots)
 - **Matter 1.5** compatible — works with Home Assistant, Google Home, Apple Home
 - **Thread + WiFi coexistence** — Thread for Matter communication, WiFi for management/OTA
+- **WiFi persistent mode** — keep WiFi active after reboot (coexistence with Thread)
+- **Thread Border Router** — optional: route IPv6 between WiFi and Thread mesh
 - **Smart boot** — auto-detects factory reset vs configured vs commissioned state
 - **WiFi management dashboard** — configure scripts, WiFi, endpoints, backup/restore
 
@@ -76,11 +78,28 @@ After reboot with configured endpoints, the module enters **BLE commissioning mo
 
 ### 5. Normal operation
 
-After commissioning, Thread + Bluetooth are active for Matter communication. WiFi is off.
+After commissioning, Thread + Bluetooth are active for Matter communication. WiFi is off by default.
 
-To access the management dashboard again: **press any button 6× rapidly** (within 2.5 seconds). This disables Thread and starts WiFi in APSTA mode:
+To access the management dashboard: **press any button 6× rapidly** (within 2.5 seconds). This disables Thread and starts WiFi in APSTA mode:
 - AP always available: `shelly-cfg-XXXX` on `192.168.4.1`
 - STA connects to your router (if credentials are saved)
+
+### WiFi persistent mode
+
+Enable via **Hardware** tab → **WiFi persistent** toggle. When ON:
+- WiFi stays active across reboots (coexistence with Thread via time-division multiplexing)
+- No need to press 6× — management dashboard always reachable
+- 6× press still works but won't disable Thread (both stay active)
+
+### Thread Border Router (TBR)
+
+Enable via **Hardware** tab → **Thread Border Router** toggle. When ON:
+- Routes IPv6 packets between WiFi backbone and Thread mesh
+- Requires WiFi persistent (auto-enabled when enabling TBR)
+- Allows Thread devices to communicate with non-Thread networks
+- Uses software coexistence (TDM) — single ESP32-C6 radio shared between WiFi and 802.15.4
+
+> **Note:** TBR on a single-SoC ESP32-C6 is functional but has reduced throughput compared to a dual-SoC setup (e.g. ESP32-S3 + ESP32-H2). Suitable for home automation, not industrial use.
 
 ### Backup & restore
 
@@ -201,6 +220,8 @@ After factory reset the module reboots into WiFi setup mode (step 2).
 | **Configured** (scripts, no fabrics) | OFF | ON (BLE commissioning) | After configuring endpoints + reboot |
 | **Commissioned** (normal) | OFF | ON (Thread active) | After commissioning |
 | **6× press** (management) | ON — APSTA mode | Thread disabled | Press any button 6× rapidly |
+| **WiFi persistent** (setting) | ON — APSTA mode | ON (coexistence) | Toggle in Hardware tab |
+| **WiFi persistent + TBR** | ON — APSTA + TBR | ON (border router) | Toggle both in Hardware tab |
 
 ## BENCH_MODE
 
@@ -244,7 +265,7 @@ shelly1gen4_matter_switch/
 
 - **Test vendor ID**: firmware uses vendor ID 0xFFF1. For Google/Apple Home publication a CSA vendor ID is required.
 - **Test DAC**: for production, provision real Device Attestation Certificates in `chip_factory`. For local HA usage the test DAC works fine.
-- **WiFi + Thread coexistence**: ESP32-C6 has one 2.4 GHz radio. Thread is disabled when WiFi is activated via 6× press. Thread resumes on reboot.
+- **WiFi + Thread coexistence**: ESP32-C6 has one 2.4 GHz radio shared via TDM. When WiFi persistent mode is OFF, Thread is disabled when WiFi is activated via 6× press and resumes on reboot. When WiFi persistent mode is ON, both coexist via software coexistence.
 
 ## License
 
