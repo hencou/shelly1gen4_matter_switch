@@ -4,6 +4,11 @@
 extern "C" {
 #endif
 
+/* Firmware version string — displayed on the management dashboard */
+#ifndef FW_VERSION
+#define FW_VERSION "1.5"
+#endif
+
 /* Pin mapping — adjust via `idf.py menuconfig` */
 #define PIN_RELAY           CONFIG_PIN_RELAY
 #define PIN_SWITCH_INPUT    CONFIG_PIN_SWITCH_INPUT

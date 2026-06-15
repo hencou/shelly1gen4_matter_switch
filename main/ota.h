@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -36,6 +37,9 @@ void ota_handle_pending(void);
 /* Set OTA flag in NVS and reboot the device. */
 void ota_request_at_next_boot(void);
 
+/* Set OTA pending flag and reboot (used by web /ota POST handler). */
+void ota_request_ota_reboot(void);
+
 /* Enable WiFi alongside Thread at runtime (non-persistent, lost on reboot).
  * If STA connection fails, WiFi credentials are wiped and AP mode is started. */
 void ota_enable_wifi_runtime(void);
@@ -43,6 +47,11 @@ void ota_enable_wifi_runtime(void);
 /* Save WiFi creds + URL in NVS (can also be done via web form). */
 esp_err_t ota_save_credentials(const char *ssid, const char *password,
                                const char *firmware_url);
+
+/* Load WiFi credentials from NVS. Returns true if ssid is non-empty. */
+bool ota_load_credentials(char *ssid, size_t ssidlen,
+                          char *pass, size_t passlen,
+                          char *url,  size_t urllen);
 
 /* Mark current firmware as valid so ESP-IDF does not roll back.
  * Call after successful boot + Thread/Matter join. */
@@ -57,6 +66,9 @@ esp_err_t ota_wifi_persistent_set(bool on);
  * Requires wifi_persistent=true. Stored in NVS. Default: off. */
 bool ota_tbr_mode_get(void);
 esp_err_t ota_tbr_mode_set(bool on);
+
+/* Save bench mode value to NVS (used by web API). */
+esp_err_t ota_bench_mode_save(int on);
 
 /* Synchronously create WiFi STA + AP netifs (without starting WiFi).
  * Needed so TBR can reference the STA netif as backbone before matter_start(). */
