@@ -251,10 +251,15 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry++ < 5) {
+        s_retry++;
+        if (s_retry <= 5) {
             esp_wifi_connect();
         } else {
             xEventGroupSetBits(s_wifi_evt, WIFI_FAIL_BIT);
+            /* Keep retrying in background with backoff (coexistence needs time) */
+            int delay_ms = (s_retry < 30) ? 5000 : 15000;
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+            esp_wifi_connect();
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         s_retry = 0;

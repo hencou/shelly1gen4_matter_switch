@@ -483,7 +483,9 @@ extern "C" esp_err_t matter_tbr_init(void)
 {
 #if CONFIG_OPENTHREAD_BORDER_ROUTER
     ESP_LOGI(TAG, "Initializing Thread Border Router");
+    chip::DeviceLayer::ThreadStackMgr().LockThreadStack();
     esp_err_t err = esp_openthread_border_router_init();
+    chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Thread Border Router initialized successfully");
     } else {

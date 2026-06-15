@@ -83,23 +83,25 @@ extern "C" void app_main(void)
     script_slot_type_t slot_types[SCRIPT_MAX_SLOTS];
     script_engine_load_slot_types(slot_types, SCRIPT_MAX_SLOTS);
 
-    /* WiFi persistent mode: start WiFi early so it's available alongside Thread.
-     * When TBR is enabled, we also need:
-     *   1. The WiFi STA netif created BEFORE matter_start() (backbone for TBR)
-     *   2. esp_openthread_border_router_init() AFTER matter_start()
-     * We call ota_wifi_ensure_netifs() to synchronously create the netifs,
-     * then ota_enable_wifi_runtime() for the actual connection. */
-    if (ota_wifi_persistent_get()) {
-        ESP_LOGI(TAG, "BOOT-STEP: WiFi persistent ON — creating netifs early");
+    /* WiFi persistent + TBR: prepare netifs BEFORE matter_start() (TBR backbone
+     * must be set before OpenThread starts), but only ACTIVATE after we confirm
+     * the device is commissioned.  This prevents WiFi/Thread coexistence from
+     * interfering with BLE commissioning. */
+    bool wifi_persistent = ota_wifi_persistent_get();
+    bool tbr_mode = ota_tbr_mode_get();
+
+    if (wifi_persistent) {
+        /* Create netifs before matter_start() — TBR backbone must be set before
+         * OpenThread starts.  Actual WiFi connection is deferred until we confirm
+         * the device is commissioned. */
+        ESP_LOGI(TAG, "BOOT-STEP: WiFi persistent — creating netifs early (activation deferred)");
         ota_wifi_ensure_netifs();
 
-        if (ota_tbr_mode_get()) {
+        if (tbr_mode) {
             esp_netif_t *sta = ota_get_wifi_sta_netif();
             if (sta) {
                 matter_set_tbr_backbone(sta);
                 ESP_LOGI(TAG, "BOOT-STEP: TBR backbone netif set");
-            } else {
-                ESP_LOGW(TAG, "BOOT-STEP: TBR enabled but WiFi STA netif not ready");
             }
         }
     }
@@ -110,16 +112,19 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(matter_start(slot_types, SCRIPT_MAX_SLOTS));
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done");
 
-    /* Thread Border Router: init after Matter stack is running. */
-    if (ota_wifi_persistent_get() && ota_tbr_mode_get()) {
-        matter_tbr_init();
-        ESP_LOGI(TAG, "BOOT-STEP: Thread Border Router initialized");
-    }
+    bool commissioned = chip::Server::GetInstance().GetFabricTable().FabricCount() > 0;
 
-    /* Now start the actual WiFi connection (runs as background task) */
-    if (ota_wifi_persistent_get()) {
+    /* WiFi persistent + TBR only activate when commissioned (fabric present).
+     * Before commissioning the radio must be free for BLE. */
+    if (wifi_persistent && commissioned) {
+        if (tbr_mode) {
+            matter_tbr_init();
+            ESP_LOGI(TAG, "BOOT-STEP: Thread Border Router initialized");
+        }
         ota_enable_wifi_runtime();
-        ESP_LOGI(TAG, "BOOT-STEP: WiFi runtime started (persistent)");
+        ESP_LOGI(TAG, "BOOT-STEP: WiFi runtime started (persistent, commissioned)");
+    } else if (wifi_persistent && !commissioned) {
+        ESP_LOGW(TAG, "BOOT-STEP: WiFi persistent ON but not commissioned — deferred until after commissioning");
     }
 
     // =========================================================================
@@ -186,7 +191,7 @@ extern "C" void app_main(void)
     sensors_init(on_temperature, on_occupancy);
     ESP_LOGI(TAG, "BOOT-STEP: sensors_init done");
 
-    if (chip::Server::GetInstance().GetFabricTable().FabricCount() > 0) {
+    if (commissioned) {
         status_led_set(STATUS_LED_HEARTBEAT);
         ESP_LOGI(TAG, "BOOT-STEP: status_led -> HEARTBEAT (commissioned)");
     } else {
@@ -210,19 +215,16 @@ extern "C" void app_main(void)
      *   Let BLE advertising run so the phone can discover and commission.
      *
      * Commissioned → normal operation:
-     *   WiFi only via 6× press. */
-    if (chip::Server::GetInstance().GetFabricTable().FabricCount() == 0) {
-        /* Check if any slots have configured types (using the pre-loaded array) */
+     *   WiFi persistent/TBR already started above; otherwise 6× press. */
+    if (!commissioned) {
         bool has_slots = false;
         for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
             if (slot_types[i] != SLOT_TYPE_NONE) { has_slots = true; break; }
         }
-        if (!has_slots && !ota_wifi_persistent_get()) {
+        if (!has_slots) {
             ESP_LOGI(TAG, "Not commissioned, no scripts — WiFi setup mode (BLE off)");
             chip::DeviceLayer::ConnectivityMgr().SetBLEAdvertisingEnabled(false);
             ota_enable_wifi_runtime();
-        } else if (!has_slots && ota_wifi_persistent_get()) {
-            ESP_LOGI(TAG, "Not commissioned, no scripts, WiFi persistent — skipping smart boot WiFi (already active)");
         } else {
             ESP_LOGI(TAG, "Not commissioned, scripts configured — BLE commissioning mode");
         }
