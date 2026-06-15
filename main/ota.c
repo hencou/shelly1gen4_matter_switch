@@ -22,6 +22,7 @@
 #endif
 #include "button.h"
 #include "status_led.h"
+#include "script_engine.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -1254,8 +1255,6 @@ static esp_err_t ota_post(httpd_req_t *req)
 }
 
 /* ---------- Script API handlers ---------- */
-
-#include "script_engine.h"
 
 /* GET /api/script?slot=N — return slot config as JSON */
 static esp_err_t api_script_get(httpd_req_t *req)
