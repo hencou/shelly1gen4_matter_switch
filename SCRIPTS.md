@@ -288,7 +288,8 @@ automatically updated so HA sees the state change in real-time.
 ```lua
 function run()
   local evt = input.button_event()
-  if evt == "short_press" then
+  --if evt == "short_press" then --or use contact_closed this will be faster
+    if evt == "contact_closed" then
     output.relay_toggle()
     log("relay toggled via button")
   end
