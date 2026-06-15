@@ -44,6 +44,9 @@ extern "C" {
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
 #include <platform/ESP32/OpenthreadLauncher.h>
 #include "esp_openthread_types.h"
+#if CONFIG_OPENTHREAD_BORDER_ROUTER
+#include "esp_openthread_border_router.h"
+#endif
 
 /* Default config macros are NOT provided by esp_openthread.h in esp-matter/
  * esp-idf — canonical Shelly Thread firmware defines them locally. Same
@@ -462,6 +465,34 @@ extern "C" void matter_disable_thread(void)
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
     ESP_LOGW(TAG, "Disabling Thread to free 2.4 GHz radio for WiFi");
     chip::DeviceLayer::ThreadStackMgr().SetThreadEnabled(false);
+#endif
+}
+
+extern "C" void matter_set_tbr_backbone(void *wifi_sta_netif)
+{
+#if CONFIG_OPENTHREAD_BORDER_ROUTER
+    ESP_LOGI(TAG, "Setting WiFi STA as TBR backbone netif");
+    esp_openthread_set_backbone_netif((esp_netif_t *)wifi_sta_netif);
+#else
+    ESP_LOGW(TAG, "TBR not compiled in (CONFIG_OPENTHREAD_BORDER_ROUTER=n)");
+    (void)wifi_sta_netif;
+#endif
+}
+
+extern "C" esp_err_t matter_tbr_init(void)
+{
+#if CONFIG_OPENTHREAD_BORDER_ROUTER
+    ESP_LOGI(TAG, "Initializing Thread Border Router");
+    esp_err_t err = esp_openthread_border_router_init();
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Thread Border Router initialized successfully");
+    } else {
+        ESP_LOGE(TAG, "Thread Border Router init failed: %d", err);
+    }
+    return err;
+#else
+    ESP_LOGW(TAG, "TBR not compiled in (CONFIG_OPENTHREAD_BORDER_ROUTER=n)");
+    return ESP_ERR_NOT_SUPPORTED;
 #endif
 }
 
