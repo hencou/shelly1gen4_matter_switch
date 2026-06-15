@@ -186,11 +186,13 @@ extern "C" void app_main(void)
     sensors_init(on_temperature, on_occupancy);
     ESP_LOGI(TAG, "BOOT-STEP: sensors_init done");
 
-    /* TODO: switch to STATUS_LED_HEARTBEAT once commissioning is complete.
-     * For now: on first boot after flash the BLE pairing window is open,
-     * so slow-blink is a clear "pair me" indicator. */
-    status_led_set(STATUS_LED_SLOW_BLINK);
-    ESP_LOGI(TAG, "BOOT-STEP: status_led -> SLOW_BLINK");
+    if (chip::Server::GetInstance().GetFabricTable().FabricCount() > 0) {
+        status_led_set(STATUS_LED_HEARTBEAT);
+        ESP_LOGI(TAG, "BOOT-STEP: status_led -> HEARTBEAT (commissioned)");
+    } else {
+        status_led_set(STATUS_LED_SLOW_BLINK);
+        ESP_LOGI(TAG, "BOOT-STEP: status_led -> SLOW_BLINK (not commissioned)");
+    }
 
     /* Mark current image as valid so bootloader rollback does not
      * trigger when booting from a fresh OTA. */
@@ -215,10 +217,12 @@ extern "C" void app_main(void)
         for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
             if (slot_types[i] != SLOT_TYPE_NONE) { has_slots = true; break; }
         }
-        if (!has_slots) {
+        if (!has_slots && !ota_wifi_persistent_get()) {
             ESP_LOGI(TAG, "Not commissioned, no scripts — WiFi setup mode (BLE off)");
             chip::DeviceLayer::ConnectivityMgr().SetBLEAdvertisingEnabled(false);
             ota_enable_wifi_runtime();
+        } else if (!has_slots && ota_wifi_persistent_get()) {
+            ESP_LOGI(TAG, "Not commissioned, no scripts, WiFi persistent — skipping smart boot WiFi (already active)");
         } else {
             ESP_LOGI(TAG, "Not commissioned, scripts configured — BLE commissioning mode");
         }
