@@ -46,6 +46,10 @@ extern "C" {
 #include "esp_openthread_types.h"
 #if CONFIG_OPENTHREAD_BORDER_ROUTER
 #include "esp_openthread_border_router.h"
+#include "esp_openthread.h"
+#include <openthread/border_routing.h>
+#include <openthread/instance.h>
+#include "esp_netif.h"
 #endif
 
 /* Default config macros are NOT provided by esp_openthread.h in esp-matter/
@@ -484,14 +488,49 @@ extern "C" esp_err_t matter_tbr_init(void)
 #if CONFIG_OPENTHREAD_BORDER_ROUTER
     ESP_LOGI(TAG, "Initializing Thread Border Router");
     chip::DeviceLayer::ThreadStackMgr().LockThreadStack();
-    esp_err_t err = esp_openthread_border_router_init();
-    chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Thread Border Router initialized successfully");
-    } else {
-        ESP_LOGE(TAG, "Thread Border Router init failed: %d", err);
+
+    /* Do NOT call esp_openthread_border_router_init() — it triggers LwIP IPv6
+     * hook functions (LWIP_HOOK_IP6_ROUTE) that aren't registered yet in the
+     * esp-matter build, causing a NULL-pointer crash (ip6.c:1283).
+     *
+     * Instead, use the OpenThread border routing API directly.  The backbone
+     * netif was already set via esp_openthread_set_backbone_netif() before
+     * matter_start().  CHIP handles mDNS service discovery, so we don't
+     * need the ESP-IDF discovery delegate. */
+    otInstance *instance = esp_openthread_get_instance();
+    if (!instance) {
+        chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
+        ESP_LOGE(TAG, "TBR init: no OpenThread instance");
+        return ESP_ERR_INVALID_STATE;
     }
-    return err;
+
+    esp_netif_t *backbone = esp_openthread_get_backbone_netif();
+    if (!backbone) {
+        chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
+        ESP_LOGE(TAG, "TBR init: no backbone netif — call matter_set_tbr_backbone() first");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint32_t infra_if_idx = esp_netif_get_netif_impl_index(backbone);
+    /* WiFi STA is created but not yet connected at this point; border routing
+     * will start forwarding once the infra interface comes up. */
+    otError ot_err = otBorderRoutingInit(instance, infra_if_idx, /* aInfraIfIsRunning */ false);
+    if (ot_err != OT_ERROR_NONE) {
+        chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
+        ESP_LOGE(TAG, "otBorderRoutingInit failed: %d", ot_err);
+        return ESP_FAIL;
+    }
+
+    ot_err = otBorderRoutingSetEnabled(instance, true);
+    chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
+
+    if (ot_err == OT_ERROR_NONE) {
+        ESP_LOGI(TAG, "Thread Border Router enabled (infra ifindex=%lu)", (unsigned long)infra_if_idx);
+    } else {
+        ESP_LOGE(TAG, "otBorderRoutingSetEnabled failed: %d", ot_err);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
 #else
     ESP_LOGW(TAG, "TBR not compiled in (CONFIG_OPENTHREAD_BORDER_ROUTER=n)");
     return ESP_ERR_NOT_SUPPORTED;
