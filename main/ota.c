@@ -1418,6 +1418,14 @@ static void ota_mode_button_cb(input_id_t id, button_event_t evt)
 
 /* ---------- Runtime WiFi enable (alongside Thread/Matter) ---------- */
 
+/* Build the AP SSID from the softAP MAC address */
+static void build_ap_ssid(char *buf, size_t len)
+{
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+    snprintf(buf, len, "shelly-cfg-%02X%02X%02X", mac[3], mac[4], mac[5]);
+}
+
 static void wifi_runtime_task(void *arg)
 {
     (void)arg;
@@ -1425,6 +1433,7 @@ static void wifi_runtime_task(void *arg)
     bool have_creds = ota_load_credentials(ssid, sizeof(ssid),
                                            pass, sizeof(pass),
                                            url,  sizeof(url));
+    bool from_compile_time = false;
 
 #ifdef DEFAULT_WIFI_SSID
     if (!have_creds) {
@@ -1434,18 +1443,15 @@ static void wifi_runtime_task(void *arg)
         strncpy(ssid, DEFAULT_WIFI_SSID, sizeof(ssid) - 1);
         strncpy(pass, DEFAULT_WIFI_PASS, sizeof(pass) - 1);
         have_creds = strlen(ssid) > 0;
+        from_compile_time = have_creds;
     }
 #endif
 
-    if (!have_creds) {
-        ESP_LOGW(TAG, "wifi_runtime: no credentials, starting AP mode");
-        goto start_ap;
-    }
-
-    /* Initialize netif + WiFi (safe if already done by Matter/Thread) */
-    esp_netif_init();  /* ignore ESP_ERR_INVALID_STATE if already init */
-    esp_event_loop_create_default();  /* ignore if already created */
+    /* Initialize netif + WiFi once — supports both STA and AP */
+    esp_netif_init();
+    esp_event_loop_create_default();
     esp_netif_create_default_wifi_sta();
+    esp_netif_create_default_wifi_ap();
 
     {
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -1462,6 +1468,14 @@ static void wifi_runtime_task(void *arg)
         esp_event_handler_instance_register(
             IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &got_ip);
     }
+
+    if (!have_creds) {
+        ESP_LOGW(TAG, "wifi_runtime: no credentials, starting AP-only mode");
+        goto start_ap;
+    }
+
+    ESP_LOGI(TAG, "wifi_runtime: trying STA '%s' (source: %s)",
+             ssid, from_compile_time ? "compile-time" : "NVS");
 
     {
         wifi_config_t wcfg = { 0 };
@@ -1480,43 +1494,25 @@ static void wifi_runtime_task(void *arg)
 
         if (bits & WIFI_CONNECTED_BIT) {
             ESP_LOGW(TAG, "wifi_runtime: STA connected, starting management httpd");
+            /* Save credentials to NVS on successful connection */
+            if (from_compile_time) {
+                ota_save_credentials(ssid, pass, url);
+                ESP_LOGI(TAG, "wifi_runtime: compile-time credentials saved to NVS");
+            }
             start_httpd();
             vTaskDelete(NULL);
             return;
         }
     }
 
-    /* STA failed — wipe WiFi credentials and switch to AP mode */
-    ESP_LOGW(TAG, "wifi_runtime: STA connection FAILED, wiping WiFi credentials");
+    /* STA failed — switch to AP mode (no deinit, just mode switch) */
+    ESP_LOGW(TAG, "wifi_runtime: STA connection FAILED, switching to AP mode");
     esp_wifi_stop();
-    esp_wifi_deinit();
-
-    {
-        nvs_handle_t h;
-        if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
-            nvs_erase_key(h, NVS_KEY_SSID);
-            nvs_erase_key(h, NVS_KEY_PASS);
-            nvs_commit(h);
-            nvs_close(h);
-        }
-    }
 
 start_ap:
-    ESP_LOGW(TAG, "wifi_runtime: starting AP mode for manual configuration");
-
     {
-        uint8_t mac[6];
-        esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
         char ap_ssid[32];
-        snprintf(ap_ssid, sizeof(ap_ssid), "shelly-cfg-%02X%02X%02X",
-                 mac[3], mac[4], mac[5]);
-
-        esp_netif_init();
-        esp_event_loop_create_default();
-        esp_netif_create_default_wifi_ap();
-
-        wifi_init_config_t wic = WIFI_INIT_CONFIG_DEFAULT();
-        ESP_ERROR_CHECK(esp_wifi_init(&wic));
+        build_ap_ssid(ap_ssid, sizeof(ap_ssid));
 
         wifi_config_t apc = {
             .ap = {
