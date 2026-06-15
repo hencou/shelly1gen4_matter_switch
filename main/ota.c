@@ -40,6 +40,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "freertos/timers.h"
 
 static const char *TAG = "ota";
 
@@ -64,6 +65,7 @@ static bool s_tbr_mode = false;
 
 static EventGroupHandle_t s_wifi_evt;
 static int                s_retry = 0;
+static TimerHandle_t      s_wifi_reconnect_timer = NULL;
 
 /* ---------- NVS helpers ---------- */
 
@@ -245,6 +247,13 @@ void ota_request_ota_reboot(void)
 
 /* ---------- WiFi STA ---------- */
 
+static void wifi_reconnect_cb(TimerHandle_t timer)
+{
+    (void)timer;
+    ESP_LOGI(TAG, "wifi_reconnect: retry %d", s_retry);
+    esp_wifi_connect();
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t base,
                                int32_t id, void *data)
 {
@@ -256,13 +265,17 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
             esp_wifi_connect();
         } else {
             xEventGroupSetBits(s_wifi_evt, WIFI_FAIL_BIT);
-            /* Keep retrying in background with backoff (coexistence needs time) */
-            int delay_ms = (s_retry < 30) ? 5000 : 15000;
-            vTaskDelay(pdMS_TO_TICKS(delay_ms));
-            esp_wifi_connect();
+            /* Schedule reconnect via timer — never block the event handler.
+             * Backoff: 5 s for the first ~30 attempts, then 15 s. */
+            if (s_wifi_reconnect_timer) {
+                TickType_t delay = pdMS_TO_TICKS((s_retry < 30) ? 5000 : 15000);
+                xTimerChangePeriod(s_wifi_reconnect_timer, delay, 0);
+                xTimerStart(s_wifi_reconnect_timer, 0);
+            }
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         s_retry = 0;
+        if (s_wifi_reconnect_timer) xTimerStop(s_wifi_reconnect_timer, 0);
         xEventGroupSetBits(s_wifi_evt, WIFI_CONNECTED_BIT);
     }
 }
@@ -436,6 +449,8 @@ static void wifi_runtime_task(void *arg)
 
     s_wifi_evt = xEventGroupCreate();
     s_retry = 0;
+    s_wifi_reconnect_timer = xTimerCreate(
+        "wifi_rc", pdMS_TO_TICKS(5000), pdFALSE, NULL, wifi_reconnect_cb);
 
     {
         esp_event_handler_instance_t any_id, got_ip;

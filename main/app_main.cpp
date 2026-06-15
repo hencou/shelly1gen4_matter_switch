@@ -10,6 +10,7 @@ extern "C" {
 #include "esp_err.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
+#include "esp_vfs_eventfd.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -68,6 +69,13 @@ extern "C" void on_occupancy(bool occupied)
 extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(nvs_flash_init());
+
+    /* Register VFS eventfd early with enough slots for OpenThread + Border Router.
+     * The OT platform uses ~3 eventfds; the BR discovery delegate needs 1 more.
+     * ESP-IDF v5.4 has no Kconfig for this, so we register explicitly. */
+    esp_vfs_eventfd_config_t eventfd_config = { .max_fds = 8 };
+    ESP_ERROR_CHECK(esp_vfs_eventfd_register(&eventfd_config));
+
     bench_mode_init();
 
     status_led_init();

@@ -47,8 +47,7 @@ CONFIG_LWIP_HOOK_IP6_INPUT_CUSTOM=y
 CONFIG_LWIP_HOOK_IP6_SELECT_SRC_ADDR_CUSTOM=y
 # mDNS for border router service discovery
 CONFIG_MDNS_MULTIPLE_INSTANCE=y
-# Border router discovery delegate needs an extra eventfd slot
-CONFIG_VFS_EVENTFD_MAX_FDS=8
+
 # mbedTLS: DTLS + ECJPAKE required by OpenThread secure_transport (commissioning)
 CONFIG_MBEDTLS_SSL_PROTO_DTLS=y
 CONFIG_MBEDTLS_ECJPAKE_C=y
