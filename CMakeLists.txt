@@ -32,3 +32,11 @@ idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-secur
 # Zonder dit vindt #include <CHIPProjectConfig.h> in CHIPConfig.h ons
 # bestand niet, en valt CHIPDeviceConfig.h terug op "TEST_VENDOR"/"TEST_PRODUCT".
 idf_build_set_property(COMPILE_OPTIONS "-I${CMAKE_SOURCE_DIR}/main" APPEND)
+
+# libopenthread_br.a references mDNS symbols (mdns_query_async_new,
+# mdns_service_add, etc.) but the openthread component does not declare
+# mdns as a dependency. Explicitly link mdns into openthread so the
+# linker resolves these symbols.
+idf_component_get_property(ot_lib openthread COMPONENT_LIB)
+idf_component_get_property(mdns_lib mdns COMPONENT_LIB)
+target_link_libraries(${ot_lib} PUBLIC ${mdns_lib})
