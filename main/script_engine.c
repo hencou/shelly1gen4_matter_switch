@@ -214,6 +214,12 @@ static int l_input_button_event(lua_State *L)
     return 1;
 }
 
+static int l_input_button_id(lua_State *L)
+{
+    lua_pushinteger(L, (int)s_last_btn_event.input);
+    return 1;
+}
+
 static const luaL_Reg input_lib[] = {
     {"analog",       l_input_analog},
     {"digital",      l_input_digital},
@@ -221,6 +227,7 @@ static const luaL_Reg input_lib[] = {
     {"device_btn",   l_input_device_btn},
     {"temperature",  l_input_temperature},
     {"button_event", l_input_button_event},
+    {"button_id",    l_input_button_id},
     {NULL, NULL}
 };
 

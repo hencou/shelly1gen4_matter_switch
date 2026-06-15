@@ -952,53 +952,170 @@ static esp_err_t api_factory_reset_post(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* /api/backup — export NVS settings as JSON download */
+/* Helper: send a JSON-escaped string via chunked response */
+static void send_json_escaped(httpd_req_t *req, const char *s)
+{
+    char buf[128];
+    int pos = 0;
+    for (; *s; s++) {
+        if (pos > (int)sizeof(buf) - 8) {
+            httpd_resp_send_chunk(req, buf, pos);
+            pos = 0;
+        }
+        if (*s == '"' || *s == '\\') { buf[pos++] = '\\'; buf[pos++] = *s; }
+        else if (*s == '\n') { buf[pos++] = '\\'; buf[pos++] = 'n'; }
+        else if (*s == '\r') { buf[pos++] = '\\'; buf[pos++] = 'r'; }
+        else if (*s == '\t') { buf[pos++] = '\\'; buf[pos++] = 't'; }
+        else buf[pos++] = *s;
+    }
+    if (pos > 0) httpd_resp_send_chunk(req, buf, pos);
+}
+
+/* /api/backup — export all NVS settings + scripts as JSON download */
 static esp_err_t api_backup_get(httpd_req_t *req)
 {
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Content-Disposition",
+                       "attachment; filename=\"shelly1gen4_backup.json\"");
+
+    /* WiFi credentials */
     char ssid[33] = {0}, pass[65] = {0}, url[256] = {0};
     ota_load_credentials(ssid, sizeof(ssid), pass, sizeof(pass),
                          url, sizeof(url));
 
-    static char json[512];
-    snprintf(json, sizeof(json),
-        "{\"version\":1,"
-        "\"ota\":{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\"}}",
+    char hdr[512];
+    snprintf(hdr, sizeof(hdr),
+        "{\"version\":2,"
+        "\"ota\":{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\"},"
+        "\"scripts\":[",
         ssid, pass, url);
+    httpd_resp_send_chunk(req, hdr, strlen(hdr));
 
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_set_hdr(req, "Content-Disposition",
-                       "attachment; filename=\"shelly1gen4_backup.json\"");
-    return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+    /* Script slots */
+    for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
+        script_slot_config_t cfg;
+        script_slot_get((uint8_t)i, &cfg);
+
+        char slot_hdr[128];
+        snprintf(slot_hdr, sizeof(slot_hdr),
+            "%s{\"slot\":%d,\"type\":%d,\"trigger\":%d,\"period_ms\":%u,\"name\":\"",
+            (i > 0) ? "," : "", i, (int)cfg.type, (int)cfg.trigger, cfg.period_ms);
+        httpd_resp_send_chunk(req, slot_hdr, strlen(slot_hdr));
+
+        send_json_escaped(req, cfg.name);
+        httpd_resp_send_chunk(req, "\",\"script\":\"", 12);
+        send_json_escaped(req, cfg.script);
+        httpd_resp_send_chunk(req, "\"}", 2);
+    }
+
+    httpd_resp_send_chunk(req, "]}", 2);
+    httpd_resp_send_chunk(req, NULL, 0); /* end chunked */
+    return ESP_OK;
 }
 
-/* /api/restore — import JSON backup and reboot */
+/* Helper: extract JSON escaped string value after key into dst.
+ * Handles \n \r \t \" \\ escapes. Returns pointer past closing quote. */
+static const char *json_extract_string(const char *body, const char *key,
+                                       char *dst, size_t dst_size)
+{
+    const char *p = strstr(body, key);
+    if (!p) { dst[0] = '\0'; return NULL; }
+    p += strlen(key);
+    /* skip to opening quote */
+    while (*p && *p != '"') p++;
+    if (*p == '"') p++;
+    size_t i = 0;
+    while (*p && i < dst_size - 1) {
+        if (*p == '\\') {
+            p++;
+            if (*p == 'n') dst[i++] = '\n';
+            else if (*p == 'r') dst[i++] = '\r';
+            else if (*p == 't') dst[i++] = '\t';
+            else if (*p == '"') dst[i++] = '"';
+            else if (*p == '\\') dst[i++] = '\\';
+            else dst[i++] = *p;
+            p++;
+        } else if (*p == '"') {
+            p++; break;
+        } else {
+            dst[i++] = *p++;
+        }
+    }
+    dst[i] = '\0';
+    return p;
+}
+
+/* /api/restore — import JSON backup (WiFi + scripts) and reboot */
 static esp_err_t api_restore_post(httpd_req_t *req)
 {
-    char body[512] = {0};
-    int len = httpd_req_recv(req, body, sizeof(body) - 1);
-    if (len <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "empty body");
+    /* Allocate on heap — backup can be large with 8 scripts */
+    int content_len = req->content_len;
+    if (content_len <= 0 || content_len > 24 * 1024) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body too large or empty");
+        return ESP_FAIL;
+    }
+    char *body = (char *)calloc(1, content_len + 1);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
         return ESP_FAIL;
     }
 
-    /* Simple JSON extraction (no external parser needed) */
+    int received = 0;
+    while (received < content_len) {
+        int ret = httpd_req_recv(req, body + received, content_len - received);
+        if (ret <= 0) { free(body); httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "recv failed"); return ESP_FAIL; }
+        received += ret;
+    }
+    body[received] = '\0';
+
+    /* Restore WiFi credentials */
     char ssid[33] = {0}, pass[65] = {0}, url_buf[256] = {0};
+    json_extract_string(body, "\"ssid\":", ssid, sizeof(ssid));
+    json_extract_string(body, "\"pass\":", pass, sizeof(pass));
+    json_extract_string(body, "\"url\":", url_buf, sizeof(url_buf));
 
-    /* Extract values between quotes after key names */
-    const char *p;
-    p = strstr(body, "\"ssid\":\"");
-    if (p) { p += 8; const char *e = strchr(p, '"'); if (e) { size_t n = e-p; if (n > 32) n = 32; memcpy(ssid, p, n); } }
-    p = strstr(body, "\"pass\":\"");
-    if (p) { p += 8; const char *e = strchr(p, '"'); if (e) { size_t n = e-p; if (n > 64) n = 64; memcpy(pass, p, n); } }
-    p = strstr(body, "\"url\":\"");
-    if (p) { p += 7; const char *e = strchr(p, '"'); if (e) { size_t n = e-p; if (n > 255) n = 255; memcpy(url_buf, p, n); } }
-
-    if (!ssid[0]) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no ssid in backup");
-        return ESP_FAIL;
+    if (ssid[0]) {
+        ota_save_credentials(ssid, pass, url_buf);
     }
 
-    ota_save_credentials(ssid, pass, url_buf);
+    /* Restore scripts (if present in backup) */
+    const char *scripts = strstr(body, "\"scripts\":");
+    if (scripts) {
+        /* Find each slot object in the array */
+        const char *cursor = scripts;
+        for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
+            char slot_key[16];
+            snprintf(slot_key, sizeof(slot_key), "\"slot\":%d", i);
+            const char *slot_obj = strstr(cursor, slot_key);
+            if (!slot_obj) continue;
+
+            script_slot_config_t cfg;
+            memset(&cfg, 0, sizeof(cfg));
+
+            /* Parse type */
+            const char *tp = strstr(slot_obj, "\"type\":");
+            if (tp) cfg.type = (script_slot_type_t)atoi(tp + 7);
+
+            /* Parse trigger */
+            tp = strstr(slot_obj, "\"trigger\":");
+            if (tp) cfg.trigger = (script_trigger_t)atoi(tp + 10);
+
+            /* Parse period_ms */
+            tp = strstr(slot_obj, "\"period_ms\":");
+            if (tp) cfg.period_ms = (uint16_t)atoi(tp + 12);
+
+            /* Parse name and script */
+            json_extract_string(slot_obj, "\"name\":", cfg.name, sizeof(cfg.name));
+            json_extract_string(slot_obj, "\"script\":", cfg.script, sizeof(cfg.script));
+
+            if (cfg.type != 0 || cfg.name[0] || cfg.script[0]) {
+                script_slot_set((uint8_t)i, &cfg);
+                ESP_LOGI(TAG, "restore: slot %d '%s' type=%d", i, cfg.name, cfg.type);
+            }
+        }
+    }
+
+    free(body);
     httpd_resp_sendstr(req, "OK");
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();

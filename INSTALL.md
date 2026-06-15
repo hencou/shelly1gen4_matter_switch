@@ -4,11 +4,11 @@
 
 > For Windows users: use [`INSTALL_VSCODE_WINDOWS.md`](INSTALL_VSCODE_WINDOWS.md) (WSL2 + VS Code is the officially recommended route). Native Windows is not supported by esp-matter.
 
-## 1. ESP-IDF v5.2.2
+## 1. ESP-IDF v5.4.1
 
 ```bash
 mkdir -p ~/esp && cd ~/esp
-git clone --recursive -b v5.2.2 https://github.com/espressif/esp-idf.git
+git clone --recursive -b v5.4.1 https://github.com/espressif/esp-idf.git
 cd esp-idf
 ./install.sh esp32c6
 . ./export.sh           # every new shell session
@@ -18,8 +18,8 @@ cd esp-idf
 
 ```bash
 cd ~/esp
-# release/v1.4 is the confirmed-working branch for this project
-git clone --depth 1 -b release/v1.4 https://github.com/espressif/esp-matter.git
+# Use a branch with Matter 1.5 support (e.g. main or release/v1.5+)
+git clone --depth 1 https://github.com/espressif/esp-matter.git
 cd esp-matter
 git submodule update --init --depth 1
 
@@ -58,7 +58,7 @@ idf.py build          # first time 20-45 min, then 1-3 min
 
 Tip: add both `source ...export.sh` lines + `IDF_CCACHE_ENABLE=1` to your `~/.bashrc` so they load automatically in every new terminal.
 
-For known build issues (CHIP_HAVE_CONFIG_H, MATTER_OVER_THREAD, API drift in v1.4 etc.), see **section 15 in [`INSTALL_VSCODE_WINDOWS.md`](INSTALL_VSCODE_WINDOWS.md#15-known-build-issues-with-esp-matter-releasev14)**.
+For known build issues, see **section 15 in [`INSTALL_VSCODE_WINDOWS.md`](INSTALL_VSCODE_WINDOWS.md)**.
 
 In `menuconfig`:
 - **Shelly 1 Gen4 Matter Switch configuration** → GPIOs
@@ -227,11 +227,8 @@ After flashing: **remove Pin 6 ↔ Pin 7 bridge**, then power-cycle. Otherwise S
 
 In the log you should see something like:
 ```
-I (... ) matter_dev: EP1 = OnOff Light Switch (pushbutton)
-I (... ) matter_dev: EP2 = Temperature Sensor
-I (... ) matter_dev: EP3 = Occupancy Sensor (LD2410)
-I (... ) matter_dev: EP4 = OnOff Light (relay)
-I (... ) matter_dev: EP5 = OnOff Light Switch (state-follow)
+I (... ) app: Not commissioned, no scripts — WiFi setup mode (BLE off)
+I (... ) ota: wifi_runtime: APSTA mode — AP 'shelly-cfg-XXXX' + STA '...'
 I (... ) chip[DL]: Device Configuration:
 I (... ) chip[DL]:   Setup Pin Code: 20202021
 I (... ) chip[DL]:   Setup Discriminator: 3840 (0xF00)
@@ -258,11 +255,11 @@ Check in HA → Settings → Devices & Services → Thread → you should see at
 
 1. HA → Settings → Devices & Services → "Add Integration" → Matter Server → "Add device".
 2. Scan the QR code from the UART log or enter the Manual Pairing Code.
-3. Wait 30-90 s. It pairs via BLE, receives Thread credentials, joins Thread, and then appears as "Shelly 1 Gen4 Matter Switch" with 4 entities (switch, temp, occupancy, relay).
+3. Wait 30-90 s. It pairs via BLE, receives Thread credentials, joins Thread, and then appears as "Shelly 1 Gen4 Matter Switch" with the endpoints you configured via the Scripts page.
 
 If pairing fails:
 - Check that the Shelly booted less than 5 minutes ago (BLE pairing window).
-- Reset with **6× rapid clicks** on the pushbutton → device wipes Matter NVS and reopens the pairing window.
+- Press **6× rapid clicks** on any button → enables WiFi management dashboard. From there you can factory reset to clear Matter NVS and reopen the pairing window.
 
 ## 8. Pair a KAJPLATS bulb in Matter mode
 
@@ -277,63 +274,36 @@ Note the Matter node-ID of the bulb (visible in HA device info).
 
 ## 9. Binding setup with chip-tool
 
+Endpoints are now dynamic — the endpoint IDs depend on your script slot configuration. Check the boot log or HA device info to find the correct endpoint IDs.
+
 From your laptop:
 
 ```bash
 . ~/esp/esp-matter/export.sh    # adds chip-tool to PATH
 
-# Replace with your own node-IDs (see HA device info)
+# Replace with your own node-IDs and endpoint IDs
 SWITCH=0x0123456789ABCDEF       # Shelly node-ID
-BULB=0x00112233AABBCCDD         # KAJPLATS node-ID
+BULB=0x00112233AABBCCDD         # Target lamp node-ID
+SWITCH_EP=1                     # Endpoint of your client script slot
+BULB_EP=1                       # Endpoint on the lamp
 
-# Bind pushbutton (EP1) to the bulb (EP1, OnOff + LevelControl)
+# Bind client endpoint to the lamp (OnOff + LevelControl + ColorControl)
 chip-tool binding write binding \
-  '[{"fabricIndex":1,"node":'$BULB',"endpoint":1,"cluster":6},
-    {"fabricIndex":1,"node":'$BULB',"endpoint":1,"cluster":8}]' \
-  $SWITCH 1
-
-
+  '[{"fabricIndex":1,"node":'$BULB',"endpoint":'$BULB_EP',"cluster":6},
+    {"fabricIndex":1,"node":'$BULB',"endpoint":'$BULB_EP',"cluster":8},
+    {"fabricIndex":1,"node":'$BULB',"endpoint":'$BULB_EP',"cluster":768}]' \
+  $SWITCH $SWITCH_EP
 ```
 
-Press the pushbutton → the KAJPLATS bulb should respond directly, **without HA in the path**.
-
-### Optional: relay co-switching via binding
-
-The local relay (EP4) is a separate server endpoint and by default only responds to commands from HA. To make the relay switch along on a button press, add EP4 to the binding:
-
-```bash
-# Bind pushbutton (EP1) to both the bulb AND the local relay (EP4)
-chip-tool binding write binding \
-  '[{"fabricIndex":1,"node":'$BULB',"endpoint":1,"cluster":6},
-    {"fabricIndex":1,"node":'$BULB',"endpoint":1,"cluster":8},
-    {"fabricIndex":1,"node":'$SWITCH',"endpoint":4,"cluster":6}]' \
-  $SWITCH 1
-```
-
-### Optional: maintained switch (EP5, state-follow)
-
-EP5 is a second switch endpoint that sends On/Off based on switch position (instead of Toggle). Use EP5 for maintained or toggle switches:
-
-```bash
-# Bind maintained switch (EP5) to the bulb — lamp follows switch position
-chip-tool binding write binding \
-  '[{"fabricIndex":1,"node":'$BULB',"endpoint":1,"cluster":6}]' \
-  $SWITCH 5
-
-# Or bind EP5 to the local relay (EP4)
-chip-tool binding write binding \
-  '[{"fabricIndex":1,"node":'$SWITCH',"endpoint":4,"cluster":6}]' \
-  $SWITCH 5
-```
-
-> EP1 (Toggle) and EP5 (State-follow) work alongside each other. Bind the endpoint that matches your switch type.
+Press the button → the lamp should respond directly, **without HA in the path**.
 
 ## 10. OTA — firmware updates without UART
 
-1. Build new firmware: `idf.py build`. Place `build/shelly1gen4_matter_switch.bin` in HA `/config/www/`.
-2. Click **6× rapidly** on the System 55 pushbutton.
-3. First time: phone → SoftAP `shelly-ota-XXXXXX` → `http://192.168.4.1/` → enter SSID + password + URL.
-4. Subsequent times: 6× clicks suffice (config is saved in NVS).
+1. Build new firmware: `idf.py build`. Place `build/shelly1gen4_matter_switch.bin` on a web server reachable from your WiFi network (e.g. HA `/config/www/`).
+2. Press **6× rapidly** on any button → WiFi management dashboard activates.
+3. Navigate to the WiFi tab in the dashboard → enter SSID + password + OTA URL.
+4. The device downloads and flashes the new firmware, then reboots.
+5. For subsequent OTA updates: 6× press suffices — WiFi credentials are saved in NVS.
 
 ## 11. Rollback to stock Shelly firmware
 
@@ -353,7 +323,7 @@ esptool.py -p /dev/ttyUSB0 write_flash 0x0 shelly_stock_backup.bin
 | Lamp responds slowly (>1s) | Thread mesh can recover via rebooting Google TV Streamer; check `chip-tool thread show-state $SWITCH 0`. |
 | Crash at boot after OTA | Bootloader rollback active (see sdkconfig). It automatically falls back to the previous slot. Check your build. |
 | Long-press dimming doesn't work | Binding must include **cluster 8** (LevelControl), not just cluster 6. |
-| OTA SoftAP doesn't appear | Check that 10× clicks are done within ~3s. Otherwise the pushbutton holds `BTN_EVT_LONG_PRESS`. Reset device and try again. |
+| WiFi AP not visible after 6× press | Ensure 6 rapid clicks within ~3s. If Thread is active (commissioned device), Thread is automatically disabled to free the radio. Try again after reboot. |
 | `esptool` timeout on `/dev/ttyUSB0` | Pin 6 (GPIO0) was not low at power-on. Bridge Pin 6 ↔ Pin 7 (GND) again and re-plug USB-UART. See chapter 4. |
 | Shelly boots into flash mode again after flash | Pin 6 ↔ Pin 7 bridge is still connected. Remove the jumper and power-cycle. |
 | Accidentally applied 5V to Pin 4 | Module is most likely dead. No rescue possible — replace only. Always use 3.3V. |
