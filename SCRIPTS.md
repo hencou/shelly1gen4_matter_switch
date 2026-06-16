@@ -201,7 +201,7 @@ end
 
 ## 7. Occupancy sensor (analog IN)
 
-Reads the analog input duty cycle (0.0–1.0) and reports occupancy state.
+Reads the analog input duty cycle (0–100 %) and reports occupancy state.
 Useful with the HLK-LD2410S mmWave sensor connected to the Shelly Plus Add-on.
 
 | Setting | Value |
@@ -210,17 +210,17 @@ Useful with the HLK-LD2410S mmWave sensor connected to the Shelly Plus Add-on.
 | Trigger | Periodic |
 | Period | 1000 (1 second) |
 
-The duty cycle threshold (0.25 = ~2.5V on a 0–10V scale) determines
+The duty cycle threshold (25 % ≈ 2.5 V on a 0–10 V scale) determines
 when the sensor reports "occupied".
 
 ```lua
-local threshold = 0.25
+local threshold = 25
 
 function run()
   local duty = input.analog()
   local occupied = duty >= threshold
   endpoint.set("occupied", occupied)
-  log("duty=" .. string.format("%.2f", duty) .. " occupied=" .. tostring(occupied))
+  log("duty=" .. duty .. "% occupied=" .. tostring(occupied))
 end
 ```
 
@@ -327,7 +327,7 @@ end
 - `input.sw()` → boolean
 - `input.digital()` → boolean
 - `input.device_btn()` → boolean
-- `input.analog()` → number (0.0–1.0)
+- `input.analog()` → integer (0–100 %)
 - `input.temperature()` → number (°C)
 
 ### Output

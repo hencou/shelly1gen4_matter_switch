@@ -158,7 +158,7 @@ After factory reset the module reboots into WiFi setup mode (step 2).
 | `input.sw()` | boolean | Current state of SW input (GPIO10) |
 | `input.digital()` | boolean | Current state of Digital IN (GPIO18) |
 | `input.device_btn()` | boolean | Current state of PCB button (GPIO4) |
-| `input.analog()` | number | Analog IN duty cycle 0.0–1.0 (GPIO17) |
+| `input.analog()` | integer | Analog IN duty cycle 0–100 % (GPIO17) |
 | `input.temperature()` | number | DS18B20 temperature in °C |
 
 ### Button events
@@ -222,6 +222,19 @@ After factory reset the module reboots into WiFi setup mode (step 2).
 | **6× press** (management) | ON — APSTA mode | Thread disabled | Press any button 6× rapidly |
 | **WiFi persistent** (setting) | ON — APSTA mode | ON (coexistence) | Toggle in Hardware tab |
 | **WiFi persistent + TBR** | ON — APSTA + TBR | ON (border router) | Toggle both in Hardware tab |
+
+## Status LED
+
+The onboard status LED (GPIO15) indicates the device state:
+
+| Pattern | Description |
+|---|---|
+| **Fast blink** (5 Hz) | Boot / initialization in progress, or OTA update active |
+| **Slow blink** (1 Hz) | Not commissioned — waiting for BLE pairing |
+| **Heartbeat** (short flash every 2s) | Normal operation — commissioned and online |
+| **Off** | LED disabled or no pattern set |
+
+During boot the LED blinks fast. After initialization it switches to heartbeat (if commissioned) or slow blink (if not yet commissioned).
 
 ## BENCH_MODE
 
