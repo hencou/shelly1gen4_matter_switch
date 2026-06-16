@@ -97,6 +97,8 @@ struct BindingCommandData
     /* level-control payload */
     uint8_t moveMode = 0; /* 0 = up, 1 = down */
     uint8_t rate     = 50;
+    uint8_t level    = 0; /* for MoveToLevel */
+    uint16_t transitionTime = 0; /* 1/10th seconds */
     /* color-temperature payload */
     uint16_t colorTempMireds = 0;
     uint16_t colorTempRate   = 0;
@@ -154,6 +156,11 @@ static void send_level_multicast(const BindingCommandData &d, const Binding::Tab
         cmd.moveMode = (d.moveMode == 0) ? LevelControl::MoveModeEnum::kUp
                                          : LevelControl::MoveModeEnum::kDown;
         cmd.rate.SetNonNull(d.rate);
+        err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
+    } else if (d.commandId == LevelControl::Commands::MoveToLevelWithOnOff::Id) {
+        LevelControl::Commands::MoveToLevelWithOnOff::Type cmd;
+        cmd.level = d.level;
+        cmd.transitionTime.SetNonNull(d.transitionTime);
         err = chip::Controller::InvokeGroupCommandRequest(em, b.fabricIndex, b.groupId, cmd);
     } else if (d.commandId == LevelControl::Commands::Stop::Id) {
         LevelControl::Commands::Stop::Type cmd;
@@ -244,6 +251,12 @@ struct DirectSendCtx {
                 c.moveMode = (d.moveMode == 0) ? LevelControl::MoveModeEnum::kUp
                                                : LevelControl::MoveModeEnum::kDown;
                 c.rate.SetNonNull(d.rate);
+                chip::Controller::InvokeCommandRequest(
+                    &em, sh, b.remote, c, make_on_success(), make_on_error());
+            } else if (d.commandId == LevelControl::Commands::MoveToLevelWithOnOff::Id) {
+                LevelControl::Commands::MoveToLevelWithOnOff::Type c;
+                c.level = d.level;
+                c.transitionTime.SetNonNull(d.transitionTime);
                 chip::Controller::InvokeCommandRequest(
                     &em, sh, b.remote, c, make_on_success(), make_on_error());
             } else if (d.commandId == LevelControl::Commands::Stop::Id) {
@@ -387,6 +400,20 @@ extern "C" void matter_send_level_stop(uint16_t ep)
 {
     if (!ep) return;
     switch_send(ep, LevelControl::Id, LevelControl::Commands::Stop::Id);
+}
+
+extern "C" void matter_send_level_move_to_level(uint16_t ep, uint8_t level, uint16_t transition_ds)
+{
+    if (!ep) return;
+    ESP_LOGI(TAG, "move_to_level ep=%u level=%u transition=%u", ep, level, transition_ds);
+    BindingCommandData *d = chip::Platform::New<BindingCommandData>();
+    d->localEndpointId = ep;
+    d->clusterId       = LevelControl::Id;
+    d->commandId       = LevelControl::Commands::MoveToLevelWithOnOff::Id;
+    d->level           = level;
+    d->transitionTime  = transition_ds;
+    chip::DeviceLayer::PlatformMgr().ScheduleWork(
+        SwitchWorkerFunction, reinterpret_cast<intptr_t>(d));
 }
 
 extern "C" void matter_send_color_temp_set(uint16_t ep, uint16_t mireds)
