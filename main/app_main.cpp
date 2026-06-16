@@ -58,12 +58,18 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
 
 extern "C" void on_temperature(int16_t centi_c)
 {
+    script_engine_temperature_update(centi_c);
     matter_update_temperature(centi_c);
 }
 
 extern "C" void on_occupancy(bool occupied)
 {
     matter_update_occupancy(occupied);
+}
+
+extern "C" void on_analog(uint8_t duty_pct)
+{
+    script_engine_analog_update(duty_pct);
 }
 
 extern "C" void app_main(void)
@@ -196,7 +202,7 @@ extern "C" void app_main(void)
     button_driver_init(on_button_event);
     ESP_LOGI(TAG, "BOOT-STEP: button_driver_init done, calling sensors_init");
 
-    sensors_init(on_temperature, on_occupancy);
+    sensors_init(on_temperature, on_occupancy, on_analog);
     ESP_LOGI(TAG, "BOOT-STEP: sensors_init done");
 
     if (commissioned) {

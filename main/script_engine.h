@@ -77,6 +77,7 @@ void script_engine_button_event(input_id_t input, button_event_t evt);
 /* Feed sensor data into the script engine */
 void script_engine_temperature_update(int16_t centi_c);
 void script_engine_occupancy_update(bool occupied);
+void script_engine_analog_update(uint8_t duty_pct);
 
 /* Get endpoint ID for a slot (0 if not active) */
 uint16_t script_engine_get_endpoint(uint8_t slot);
