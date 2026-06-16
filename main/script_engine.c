@@ -47,6 +47,7 @@ typedef struct {
     lua_State *L;
     uint16_t endpoint_id;
     bool active;
+    TickType_t last_run;
 } script_slot_t;
 
 static script_slot_t s_slots[SCRIPT_MAX_SLOTS];
@@ -494,11 +495,16 @@ static void script_engine_task(void *arg)
             }
         }
 
-        /* Run periodic scripts */
+        /* Run periodic scripts — only when their interval has elapsed */
+        TickType_t now = xTaskGetTickCount();
         for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
             if (!s_slots[i].active) continue;
-            if (s_slots[i].cfg.trigger == TRIGGER_PERIODIC) {
+            if (s_slots[i].cfg.trigger != TRIGGER_PERIODIC) continue;
+            if (s_slots[i].cfg.period_ms == 0) continue;
+            TickType_t elapsed = now - s_slots[i].last_run;
+            if (elapsed >= pdMS_TO_TICKS(s_slots[i].cfg.period_ms)) {
                 run_slot_script(&s_slots[i], i);
+                s_slots[i].last_run = xTaskGetTickCount();
             }
         }
 
@@ -506,17 +512,20 @@ static void script_engine_task(void *arg)
         s_digital_in = gpio_get_level(PIN_TOUCH_INPUT);
         s_sw_state = gpio_get_level(PIN_SWITCH_INPUT);
 
-        /* Sleep for smallest period (minimum 50ms to avoid starving other tasks) */
-        uint16_t min_period = 500;
+        /* Sleep until the next periodic slot is due (minimum 50ms) */
+        now = xTaskGetTickCount();
+        TickType_t min_sleep = pdMS_TO_TICKS(500);
         for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
-            if (s_slots[i].active && s_slots[i].cfg.trigger == TRIGGER_PERIODIC) {
-                if (s_slots[i].cfg.period_ms < min_period && s_slots[i].cfg.period_ms > 0) {
-                    min_period = s_slots[i].cfg.period_ms;
-                }
-            }
+            if (!s_slots[i].active) continue;
+            if (s_slots[i].cfg.trigger != TRIGGER_PERIODIC) continue;
+            if (s_slots[i].cfg.period_ms == 0) continue;
+            TickType_t period = pdMS_TO_TICKS(s_slots[i].cfg.period_ms);
+            TickType_t elapsed = now - s_slots[i].last_run;
+            TickType_t remaining = (elapsed >= period) ? 0 : (period - elapsed);
+            if (remaining < min_sleep) min_sleep = remaining;
         }
-        if (min_period < 50) min_period = 50;
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(min_period));
+        if (min_sleep < pdMS_TO_TICKS(50)) min_sleep = pdMS_TO_TICKS(50);
+        vTaskDelayUntil(&last_wake, min_sleep);
     }
 }
 
