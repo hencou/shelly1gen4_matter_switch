@@ -326,6 +326,19 @@ static int l_endpoint_command(lua_State *L)
         }
         ESP_LOGI(TAG, "slot %d: command move_with_onoff up=%d rate=%u ep=%u", slot, up, rate, ep);
         matter_send_level_move(ep, up, rate);
+    } else if (strcmp(cmd, "move_to_level") == 0) {
+        uint8_t level = 254;
+        uint16_t transition = 0;
+        if (lua_istable(L, 2)) {
+            lua_getfield(L, 2, "level");
+            if (!lua_isnil(L, -1)) level = (uint8_t)lua_tointeger(L, -1);
+            lua_pop(L, 1);
+            lua_getfield(L, 2, "transition");
+            if (!lua_isnil(L, -1)) transition = (uint16_t)lua_tointeger(L, -1);
+            lua_pop(L, 1);
+        }
+        ESP_LOGI(TAG, "slot %d: command move_to_level level=%u transition=%u ep=%u", slot, level, transition, ep);
+        matter_send_level_move_to_level(ep, level, transition);
     } else if (strcmp(cmd, "stop") == 0) {
         ESP_LOGI(TAG, "slot %d: command stop ep=%u", slot, ep);
         matter_send_level_stop(ep);
