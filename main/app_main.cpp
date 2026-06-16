@@ -64,7 +64,7 @@ extern "C" void on_temperature(int16_t centi_c)
 
 extern "C" void on_occupancy(bool occupied)
 {
-    matter_update_occupancy(occupied);
+    script_engine_occupancy_update(occupied);
 }
 
 extern "C" void on_analog(uint8_t duty_pct)
