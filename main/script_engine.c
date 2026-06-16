@@ -199,7 +199,6 @@ static int l_input_button_event(lua_State *L)
         lua_pushnil(L);
         return 1;
     }
-    s_btn_event_pending = false;
     switch (s_last_btn_event.event) {
         case BTN_EVT_SHORT_PRESS:      lua_pushstring(L, "short_press"); break;
         case BTN_EVT_LONG_PRESS_START: lua_pushstring(L, "long_press_start"); break;
@@ -485,6 +484,7 @@ static void process_button_event(const script_event_t *evt)
             run_slot_script(&s_slots[i], i);
         }
     }
+    s_btn_event_pending = false;
 }
 
 static void script_engine_task(void *arg)
