@@ -92,7 +92,7 @@ static const char MGMT_HTML[] =
 "<td class=hw-val id=hw-bench>-<br>"
 "<button class='btn btn-gray' id=bench-btn onclick=toggleBench() style='margin-top:.4em'>Toggle</button>"
 "</td></tr>"
-"<tr><td>WiFi persistent<br><span style='font-size:.8em;color:#666'>"
+"<!--<tr><td>WiFi persistent<br><span style='font-size:.8em;color:#666'>"
 "ON = WiFi stays active after reboot (coexistence with Thread).<br>"
 "OFF = WiFi only via 6&times; press (default).</span></td>"
 "<td class=hw-val id=hw-wifip>-<br>"
@@ -103,7 +103,7 @@ static const char MGMT_HTML[] =
 "OFF = normal Thread end-device (default).</span></td>"
 "<td class=hw-val id=hw-tbr>-<br>"
 "<button class='btn btn-gray' id=tbr-btn onclick=toggleTBR() style='margin-top:.4em'>Toggle</button>"
-"</td></tr>"
+"</td></tr>-->"
 "</table>"
 
 "<h4>Inputs</h4>"
