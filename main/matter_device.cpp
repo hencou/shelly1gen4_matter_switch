@@ -432,23 +432,27 @@ extern "C" void matter_send_color_temp_stop(uint16_t ep)
 
 extern "C" void matter_update_temperature(int16_t centi_c)
 {
+    chip::DeviceLayer::PlatformMgr().LockChipStack();
     for (int i = 0; i < s_num_slots; i++) {
         if (s_slot_types[i] == SLOT_TYPE_TEMPERATURE && s_slot_endpoints[i]) {
             TemperatureMeasurement::Attributes::MeasuredValue::Set(
                 s_slot_endpoints[i], centi_c);
         }
     }
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
 }
 
 extern "C" void matter_update_occupancy(bool occupied)
 {
     uint8_t b = occupied ? 1 : 0;
+    chip::DeviceLayer::PlatformMgr().LockChipStack();
     for (int i = 0; i < s_num_slots; i++) {
         if (s_slot_types[i] == SLOT_TYPE_OCCUPANCY && s_slot_endpoints[i]) {
             OccupancySensing::Attributes::Occupancy::Set(
                 s_slot_endpoints[i], b);
         }
     }
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
 }
 
 extern "C" void matter_update_relay_onoff(bool on)
