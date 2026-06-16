@@ -443,7 +443,7 @@ static esp_err_t server_attr_update(uint16_t ep_id, uint32_t cluster_id,
     if (!attr) return ESP_ERR_NOT_FOUND;
     esp_err_t err = attribute::set_val(attr, val);
     if (err == ESP_OK) {
-        attribute::report(ep_id, cluster_id, attr_id);
+        attribute::report(ep_id, cluster_id, attr_id, val);
     }
     return err;
 }
