@@ -36,6 +36,7 @@ extern "C" {
 #include <app/clusters/bindings/binding-table.h>
 #include <app/OperationalSessionSetup.h>
 #include <app-common/zap-generated/cluster-objects.h>
+#include <app-common/zap-generated/attributes/Accessors.h>
 #include <controller/InvokeInteraction.h>
 #include <credentials/FabricTable.h>
 #include <platform/PlatformManager.h>
@@ -427,35 +428,14 @@ extern "C" void matter_send_color_temp_stop(uint16_t ep)
         SwitchWorkerFunction, reinterpret_cast<intptr_t>(d));
 }
 
-/* Server-side attribute update: write to attribute store + notify subscribers.
- * attribute::update() goes through the ZCL write path which rejects read-only
- * sensor attributes (err 258) in Matter 1.5.  Use set_val() + report(). */
-static esp_err_t server_attr_update(uint16_t ep_id, uint32_t cluster_id,
-                                    uint32_t attr_id, esp_matter_attr_val_t *val)
-{
-    node_t *node = node::get();
-    if (!node) return ESP_ERR_INVALID_STATE;
-    endpoint_t *ep = endpoint::get(node, ep_id);
-    if (!ep) return ESP_ERR_NOT_FOUND;
-    cluster_t *cl = cluster::get(ep, cluster_id);
-    if (!cl) return ESP_ERR_NOT_FOUND;
-    attribute_t *attr = attribute::get(cl, attr_id);
-    if (!attr) return ESP_ERR_NOT_FOUND;
-    esp_err_t err = attribute::set_val(attr, val);
-    if (err == ESP_OK) {
-        attribute::report(ep_id, cluster_id, attr_id, val);
-    }
-    return err;
-}
+
 
 extern "C" void matter_update_temperature(int16_t centi_c)
 {
-    esp_matter_attr_val_t v = esp_matter_int16(centi_c);
     for (int i = 0; i < s_num_slots; i++) {
         if (s_slot_types[i] == SLOT_TYPE_TEMPERATURE && s_slot_endpoints[i]) {
-            server_attr_update(s_slot_endpoints[i],
-                TemperatureMeasurement::Id,
-                TemperatureMeasurement::Attributes::MeasuredValue::Id, &v);
+            TemperatureMeasurement::Attributes::MeasuredValue::Set(
+                s_slot_endpoints[i], centi_c);
         }
     }
 }
@@ -463,12 +443,10 @@ extern "C" void matter_update_temperature(int16_t centi_c)
 extern "C" void matter_update_occupancy(bool occupied)
 {
     uint8_t b = occupied ? 1 : 0;
-    esp_matter_attr_val_t v = esp_matter_bitmap8(b);
     for (int i = 0; i < s_num_slots; i++) {
         if (s_slot_types[i] == SLOT_TYPE_OCCUPANCY && s_slot_endpoints[i]) {
-            server_attr_update(s_slot_endpoints[i],
-                OccupancySensing::Id,
-                OccupancySensing::Attributes::Occupancy::Id, &v);
+            OccupancySensing::Attributes::Occupancy::Set(
+                s_slot_endpoints[i], b);
         }
     }
 }
