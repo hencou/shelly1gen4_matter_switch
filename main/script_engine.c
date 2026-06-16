@@ -658,8 +658,12 @@ void script_engine_temperature_update(int16_t centi_c)
 
 void script_engine_occupancy_update(bool occupied)
 {
-    /* Occupancy from analog/PWM sensor — update analog percent */
     (void)occupied;
+}
+
+void script_engine_analog_update(uint8_t duty_pct)
+{
+    s_analog_percent = duty_pct;
 }
 
 uint16_t script_engine_get_endpoint(uint8_t slot)

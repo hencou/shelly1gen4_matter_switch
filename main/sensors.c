@@ -171,6 +171,7 @@ static void temp_task(void *arg)
 #define OCC_DUTY_THRESHOLD_PCT    25   /* ≥25 % duty (≈2.5 V) → occupied */
 
 static occupancy_cb_t s_occ_cb;
+static analog_cb_t s_analog_cb;
 
 static int measure_duty_pct(void)
 {
@@ -197,6 +198,7 @@ static void occ_task(void *arg)
     int last_occ = -1;
     for (;;) {
         int duty = measure_duty_pct();
+        if (s_analog_cb) s_analog_cb((uint8_t)duty);
         int occ  = (duty >= OCC_DUTY_THRESHOLD_PCT) ? 1 : 0;
         if (occ != last_occ) {
             last_occ = occ;
@@ -209,10 +211,11 @@ static void occ_task(void *arg)
 
 /* ========================== init ========================== */
 
-void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb)
+void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb, analog_cb_t analog_cb)
 {
-    s_temp_cb = temp_cb;
-    s_occ_cb  = occ_cb;
+    s_temp_cb   = temp_cb;
+    s_occ_cb    = occ_cb;
+    s_analog_cb = analog_cb;
 
     if (g_bench_mode) {
         /* Bench mode: skip sensor tasks so GPIO16 (U0TXD) and GPIO17 (U0RXD)
