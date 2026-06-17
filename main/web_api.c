@@ -120,8 +120,8 @@ static esp_err_t api_settings_get(httpd_req_t *req)
     (void)have;
     static char json[512];
     snprintf(json, sizeof(json),
-        "{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\",\"version\":\"%s\"}",
-        ssid, pass, url, FW_VERSION);
+        "{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\",\"hostname\":\"%s\",\"version\":\"%s\"}",
+        ssid, pass, url, ota_hostname_get(), FW_VERSION);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
@@ -399,9 +399,10 @@ static esp_err_t api_backup_get(httpd_req_t *req)
     snprintf(hdr, sizeof(hdr),
         "{\"version\":3,"
         "\"ota\":{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\","
+        "\"hostname\":\"%s\","
         "\"wifi_persistent\":%s,\"tbr_mode\":%s},"
         "\"scripts\":[",
-        ssid, pass, url,
+        ssid, pass, url, ota_hostname_get(),
         ota_wifi_persistent_get() ? "true" : "false",
         ota_tbr_mode_get() ? "true" : "false");
     httpd_resp_send_chunk(req, hdr, strlen(hdr));
@@ -476,6 +477,10 @@ static esp_err_t api_restore_post(httpd_req_t *req)
         cJSON *j_tbr = cJSON_GetObjectItem(ota, "tbr_mode");
         if (j_tbr && cJSON_IsBool(j_tbr)) {
             ota_tbr_mode_set(cJSON_IsTrue(j_tbr));
+        }
+        cJSON *j_host = cJSON_GetObjectItem(ota, "hostname");
+        if (j_host && cJSON_IsString(j_host) && j_host->valuestring[0]) {
+            ota_hostname_set(j_host->valuestring);
         }
     }
 
@@ -632,14 +637,17 @@ static esp_err_t ota_post(httpd_req_t *req)
         return ESP_FAIL;
     }
     char ssid[33] = {0}, pass[65] = {0}, url[256] = {0};
+    char hostname[32] = {0};
     form_field(body, "ssid", ssid, sizeof(ssid));
     form_field(body, "pass", pass, sizeof(pass));
     form_field(body, "url",  url,  sizeof(url));
+    form_field(body, "hostname", hostname, sizeof(hostname));
     if (!ssid[0]) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "ssid required");
         return ESP_FAIL;
     }
     ota_save_credentials(ssid, pass, url);
+    if (hostname[0]) ota_hostname_set(hostname);
     const char *msg = "Saved. Device restarting into OTA mode on your WiFi...\n";
     httpd_resp_send(req, msg, HTTPD_RESP_USE_STRLEN);
     vTaskDelay(pdMS_TO_TICKS(500));

@@ -392,6 +392,11 @@ extern "C" void matter_send_onoff_off(uint16_t ep)
 extern "C" void matter_send_level_move(uint16_t ep, bool up, uint8_t rate)
 {
     if (!ep) return;
+    /* Some lamps (e.g. IKEA) ignore MoveWithOnOff when the lamp is off.
+     * Send an explicit On first when dimming up to work around this. */
+    if (up) {
+        switch_send(ep, OnOff::Id, OnOff::Commands::On::Id);
+    }
     switch_send(ep, LevelControl::Id, LevelControl::Commands::MoveWithOnOff::Id,
                 up ? 0 : 1, rate);
 }

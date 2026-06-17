@@ -52,6 +52,7 @@ static const char *TAG = "ota";
 #define NVS_KEY_BENCH       "bench"
 #define NVS_KEY_WIFI_PERS   "wifi_pers"
 #define NVS_KEY_TBR         "tbr"
+#define NVS_KEY_HOSTNAME    "hostname"
 
 /* Runtime bench mode — initialised from NVS in bench_mode_init(). */
 int g_bench_mode = BENCH_MODE;
@@ -59,6 +60,7 @@ int g_bench_mode = BENCH_MODE;
 /* Runtime flags — initialised from NVS early in boot. */
 static bool s_wifi_persistent = false;
 static bool s_tbr_mode = false;
+static char s_hostname[32] = {0};
 
 #define WIFI_CONNECTED_BIT  BIT0
 #define WIFI_FAIL_BIT       BIT1
@@ -175,6 +177,48 @@ esp_err_t ota_tbr_mode_set(bool on)
     return ESP_OK;
 }
 
+/* ---------- Hostname NVS ---------- */
+
+static void hostname_build_default(char *buf, size_t len)
+{
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    snprintf(buf, len, "shelly-%02X%02X%02X", mac[3], mac[4], mac[5]);
+}
+
+static void hostname_init(void)
+{
+    nvs_handle_t h;
+    bool loaded = false;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        loaded = nvs_load_str(h, NVS_KEY_HOSTNAME, s_hostname, sizeof(s_hostname));
+        nvs_close(h);
+    }
+    if (!loaded || !s_hostname[0]) {
+        hostname_build_default(s_hostname, sizeof(s_hostname));
+    }
+    ESP_LOGI(TAG, "hostname = %s", s_hostname);
+}
+
+const char *ota_hostname_get(void)
+{
+    return s_hostname;
+}
+
+esp_err_t ota_hostname_set(const char *name)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    nvs_set_str_safe(h, NVS_KEY_HOSTNAME, name);
+    nvs_commit(h);
+    nvs_close(h);
+    strncpy(s_hostname, name, sizeof(s_hostname) - 1);
+    s_hostname[sizeof(s_hostname) - 1] = '\0';
+    ESP_LOGI(TAG, "hostname saved: %s", s_hostname);
+    return ESP_OK;
+}
+
 /* ---------- Bench mode NVS ---------- */
 
 void bench_mode_init(void)
@@ -192,6 +236,7 @@ void bench_mode_init(void)
 
     wifi_persistent_init();
     tbr_mode_init();
+    hostname_init();
 }
 
 esp_err_t ota_bench_mode_save(int on)
@@ -286,7 +331,10 @@ static esp_err_t wifi_init_sta(const char *ssid, const char *pass)
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    esp_netif_t *sta_nif = esp_netif_create_default_wifi_sta();
+    if (sta_nif) {
+        esp_netif_set_hostname(sta_nif, ota_hostname_get());
+    }
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -442,6 +490,13 @@ static void wifi_runtime_task(void *arg)
     if (!esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"))
         esp_netif_create_default_wifi_ap();
 
+    /* Set DHCP hostname so the device is discoverable by name */
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta) {
+        esp_netif_set_hostname(sta, ota_hostname_get());
+        ESP_LOGI(TAG, "wifi_runtime: hostname set to '%s'", ota_hostname_get());
+    }
+
     {
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -526,7 +581,14 @@ void ota_wifi_ensure_netifs(void)
         esp_netif_create_default_wifi_sta();
     if (!esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"))
         esp_netif_create_default_wifi_ap();
-    ESP_LOGI(TAG, "WiFi netifs created (STA + AP)");
+
+    /* Set DHCP hostname on STA netif */
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta) {
+        esp_netif_set_hostname(sta, ota_hostname_get());
+    }
+    ESP_LOGI(TAG, "WiFi netifs created (STA + AP), hostname='%s'",
+             ota_hostname_get());
 }
 
 esp_netif_t *ota_get_wifi_sta_netif(void)
