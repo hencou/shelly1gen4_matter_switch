@@ -33,7 +33,7 @@ static const char MGMT_HTML[] =
 ".info{font-size:.85em;color:#555;margin-bottom:.8em}"
 "</style></head><body>"
 
-"<h2>Shelly1Gen4 Management</h2>"
+"<h2 id=page-title>Shelly1Gen4 Management</h2>"
 "<div id=fw-ver style='font-size:.85em;color:#666;margin-bottom:.5em'></div>"
 
 /* ── Tab bar ── */
@@ -49,6 +49,7 @@ static const char MGMT_HTML[] =
 "<h3>WiFi Settings</h3>"
 "<p class=info>Credentials are stored in flash. On next OTA boot the device "
 "connects to your WiFi automatically.</p>"
+"<label>Hostname</label><input id=hostname placeholder='shelly-XXXXXX' maxlength=31>"
 "<label>WiFi SSID</label><input id=ssid>"
 "<label>WiFi Password</label><input id=pass type=password>"
 "<label>Firmware URL (optional)</label>"
@@ -201,10 +202,12 @@ static const char MGMT_HTML[] =
 "  x.onload=function(){"
 "    if(x.status==200){"
 "      var d=JSON.parse(x.responseText);"
+"      document.getElementById('hostname').value=d.hostname||'';"
 "      document.getElementById('ssid').value=d.ssid||'';"
 "      document.getElementById('pass').value=d.pass||'';"
 "      document.getElementById('url').value=d.url||'';"
 "      if(d.version){document.getElementById('fw-ver').textContent='Firmware: '+d.version}"
+"      if(d.hostname){document.getElementById('page-title').textContent=d.hostname+' Management';document.title=d.hostname+' Management'}"
 "    }"
 "  };"
 "  x.open('GET','/api/settings');x.send();"
@@ -213,7 +216,8 @@ static const char MGMT_HTML[] =
 
 /* WiFi save & restart */
 "function doSaveRestart(){"
-"  var b='ssid='+encodeURIComponent(document.getElementById('ssid').value)"
+"  var b='hostname='+encodeURIComponent(document.getElementById('hostname').value)"
+"    +'&ssid='+encodeURIComponent(document.getElementById('ssid').value)"
 "    +'&pass='+encodeURIComponent(document.getElementById('pass').value)"
 "    +'&url='+encodeURIComponent(document.getElementById('url').value);"
 "  var x=new XMLHttpRequest();"

@@ -70,6 +70,11 @@ esp_err_t ota_tbr_mode_set(bool on);
 /* Save bench mode value to NVS (used by web API). */
 esp_err_t ota_bench_mode_save(int on);
 
+/* Hostname: stored in NVS, used as DHCP hostname.
+ * Default: "shelly-XXXXXX" (last 3 bytes of MAC). */
+const char *ota_hostname_get(void);
+esp_err_t ota_hostname_set(const char *name);
+
 /* Synchronously create WiFi STA + AP netifs (without starting WiFi).
  * Needed so TBR can reference the STA netif as backbone before matter_start(). */
 void ota_wifi_ensure_netifs(void);
