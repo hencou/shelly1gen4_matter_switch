@@ -8,10 +8,6 @@
 - **Lua 5.4 scripting** — write custom button/relay/sensor logic per endpoint slot (up to 8 slots)
 - **Matter 1.5** compatible — works with Home Assistant, Google Home, Apple Home
 - **Thread + WiFi** — Thread for Matter communication, WiFi for management/OTA
-<del>
-- **WiFi persistent mode** — keep WiFi active after reboot (coexistence with Thread)
-- **Thread Border Router** — optional: route IPv6 between WiFi and Thread mesh
-</del>
 - **Smart boot** — auto-detects factory reset vs configured vs commissioned state
 - **WiFi management dashboard** — configure scripts, WiFi, endpoints, backup/restore
 
