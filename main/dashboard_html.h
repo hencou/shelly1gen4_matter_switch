@@ -57,6 +57,7 @@ static const char MGMT_HTML[] =
 "<div style='margin:1em 0'>"
 "<button class='btn btn-green' onclick=doSaveRestart()>Save &amp; Restart</button>"
 "<button class='btn btn-gray' onclick=doRestart()>Restart without saving</button>"
+"<button class='btn btn-blue' onclick=doCommission()>Commission Mode</button>"
 "<button class='btn btn-red' onclick=doFactory()>Factory Reset</button>"
 "</div>"
 "<div id=wifi-msg class=msg></div>"
@@ -236,6 +237,15 @@ static const char MGMT_HTML[] =
 "  x.onload=function(){document.getElementById('wifi-msg').innerHTML="
 "    '<span class=ok>Restarting...</span>'};"
 "  x.open('POST','/api/restart');x.send();"
+"}"
+
+/* Commission mode */
+"function doCommission(){"
+"  if(!confirm('Commission Mode: removes all Matter pairings and reboots into BLE pairing mode. WiFi and script settings are kept. Continue?'))return;"
+"  var x=new XMLHttpRequest();"
+"  x.onload=function(){document.getElementById('wifi-msg').innerHTML="
+"    '<span class=ok>Rebooting into commission mode...</span>'};"
+"  x.open('POST','/api/commission');x.send();"
 "}"
 
 /* Factory reset */

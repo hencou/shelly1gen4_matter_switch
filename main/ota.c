@@ -572,6 +572,19 @@ static void wifi_runtime_task(void *arg)
 }
 
 static bool s_wifi_runtime_started = false;
+static TimerHandle_t s_wifi_timeout_timer = NULL;
+
+#define WIFI_TIMEOUT_MS (10 * 60 * 1000)  /* 10 minutes */
+
+static void wifi_timeout_cb(TimerHandle_t xTimer)
+{
+    (void)xTimer;
+    ESP_LOGW(TAG, "WiFi timeout (10 min) — shutting down WiFi");
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    s_wifi_runtime_started = false;
+    ESP_LOGI(TAG, "WiFi stopped, back to Thread-only mode");
+}
 
 void ota_wifi_ensure_netifs(void)
 {
@@ -605,6 +618,16 @@ void ota_enable_wifi_runtime(void)
     s_wifi_runtime_started = true;
     ESP_LOGW(TAG, "Enabling WiFi alongside Thread (runtime, non-persistent)");
     xTaskCreate(wifi_runtime_task, "wifi_rt", 4096, NULL, 5, NULL);
+
+    /* Auto-off after 10 minutes unless wifi_persistent is enabled */
+    if (!s_wifi_persistent) {
+        s_wifi_timeout_timer = xTimerCreate(
+            "wifi_to", pdMS_TO_TICKS(WIFI_TIMEOUT_MS), pdFALSE, NULL, wifi_timeout_cb);
+        if (s_wifi_timeout_timer) {
+            xTimerStart(s_wifi_timeout_timer, 0);
+            ESP_LOGI(TAG, "WiFi auto-off timer started (10 min)");
+        }
+    }
 }
 
 /* ---------- Public entrypoints ---------- */

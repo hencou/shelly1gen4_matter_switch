@@ -39,6 +39,8 @@
 
 #include "esp_private/periph_ctrl.h"
 #include "soc/periph_defs.h"
+#include "esp_partition.h"
+#include "mbedtls/base64.h"
 
 static const char *TAG = "web_api";
 
@@ -366,6 +368,17 @@ static esp_err_t api_factory_reset_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t api_commission_post(httpd_req_t *req)
+{
+    httpd_resp_sendstr(req, "OK");
+    ESP_LOGW(TAG, "Commission mode: removing all fabrics and rebooting into BLE pairing");
+    /* Wipe only chip_kvs (Matter fabrics/bindings) — keep WiFi/scripts in nvs */
+    nvs_flash_erase_partition("chip_kvs");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
 /* Helper: send a JSON-escaped string via chunked response */
 static void send_json_escaped(httpd_req_t *req, const char *s)
 {
@@ -397,7 +410,7 @@ static esp_err_t api_backup_get(httpd_req_t *req)
 
     char hdr[512];
     snprintf(hdr, sizeof(hdr),
-        "{\"version\":3,"
+        "{\"version\":4,"
         "\"ota\":{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\","
         "\"hostname\":\"%s\","
         "\"wifi_persistent\":%s,\"tbr_mode\":%s},"
@@ -423,7 +436,30 @@ static esp_err_t api_backup_get(httpd_req_t *req)
         httpd_resp_send_chunk(req, "\"}", 2);
     }
 
-    httpd_resp_send_chunk(req, "]}", 2);
+    httpd_resp_send_chunk(req, "]", 1);
+
+    /* Include chip_kvs partition (Matter commissioning + binding data) */
+    const esp_partition_t *kvs = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "chip_kvs");
+    if (kvs) {
+        /* Read partition in chunks and base64-encode */
+        httpd_resp_send_chunk(req, ",\"chip_kvs\":\"", 13);
+
+        uint8_t rbuf[768];
+        char b64buf[1024 + 4];
+        size_t olen = 0;
+        for (size_t off = 0; off < kvs->size; off += sizeof(rbuf)) {
+            size_t chunk = sizeof(rbuf);
+            if (off + chunk > kvs->size) chunk = kvs->size - off;
+            if (esp_partition_read(kvs, off, rbuf, chunk) == ESP_OK) {
+                mbedtls_base64_encode((unsigned char *)b64buf, sizeof(b64buf), &olen, rbuf, chunk);
+                if (olen > 0) httpd_resp_send_chunk(req, b64buf, olen);
+            }
+        }
+        httpd_resp_send_chunk(req, "\"", 1);
+    }
+
+    httpd_resp_send_chunk(req, "}", 1);
     httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
@@ -432,7 +468,7 @@ static esp_err_t api_backup_get(httpd_req_t *req)
 static esp_err_t api_restore_post(httpd_req_t *req)
 {
     int content_len = req->content_len;
-    if (content_len <= 0 || content_len > 24 * 1024) {
+    if (content_len <= 0 || content_len > 64 * 1024) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body too large or empty");
         return ESP_FAIL;
     }
@@ -520,6 +556,35 @@ static esp_err_t api_restore_post(httpd_req_t *req)
             if (cfg.type != 0 || cfg.name[0] || cfg.script[0]) {
                 script_slot_set((uint8_t)slot, &cfg);
                 ESP_LOGI(TAG, "restore: slot %d '%s' type=%d", slot, cfg.name, cfg.type);
+            }
+        }
+    }
+
+    /* Restore chip_kvs (Matter commissioning + binding data) */
+    cJSON *j_kvs = cJSON_GetObjectItem(root, "chip_kvs");
+    if (j_kvs && cJSON_IsString(j_kvs) && j_kvs->valuestring[0]) {
+        const esp_partition_t *kvs = esp_partition_find_first(
+            ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "chip_kvs");
+        if (kvs) {
+            size_t b64_len = strlen(j_kvs->valuestring);
+            size_t decoded_len = 0;
+            /* Calculate decoded size */
+            mbedtls_base64_decode(NULL, 0, &decoded_len,
+                (const unsigned char *)j_kvs->valuestring, b64_len);
+
+            if (decoded_len > 0 && decoded_len <= kvs->size) {
+                uint8_t *decoded = (uint8_t *)malloc(decoded_len);
+                if (decoded) {
+                    size_t olen = 0;
+                    int ret = mbedtls_base64_decode(decoded, decoded_len, &olen,
+                        (const unsigned char *)j_kvs->valuestring, b64_len);
+                    if (ret == 0 && olen == decoded_len) {
+                        esp_partition_erase_range(kvs, 0, kvs->size);
+                        esp_partition_write(kvs, 0, decoded, decoded_len);
+                        ESP_LOGI(TAG, "restore: chip_kvs partition written (%u bytes)", (unsigned)decoded_len);
+                    }
+                    free(decoded);
+                }
             }
         }
     }
@@ -808,7 +873,7 @@ void web_api_start_httpd(void)
     hc.recv_wait_timeout  = 30;
     hc.send_wait_timeout  = 10;
     hc.max_open_sockets   = 3;
-    hc.max_uri_handlers   = 15;
+    hc.max_uri_handlers   = 16;
     ESP_ERROR_CHECK(httpd_start(&srv, &hc));
 
     httpd_uri_t get_root          = { "/",                  HTTP_GET,    form_get,              NULL };
@@ -821,6 +886,7 @@ void web_api_start_httpd(void)
     httpd_uri_t post_tbr          = { "/api/tbr-mode",     HTTP_POST,   api_tbr_mode_post,     NULL };
     httpd_uri_t post_restart      = { "/api/restart",       HTTP_POST,   api_restart_post,      NULL };
     httpd_uri_t post_factory      = { "/api/factory-reset", HTTP_POST,   api_factory_reset_post,NULL };
+    httpd_uri_t post_commission   = { "/api/commission",    HTTP_POST,   api_commission_post,   NULL };
     httpd_uri_t get_backup        = { "/api/backup",        HTTP_GET,    api_backup_get,        NULL };
     httpd_uri_t post_restore      = { "/api/restore",       HTTP_POST,   api_restore_post,      NULL };
     httpd_uri_t get_script        = { "/api/script",        HTTP_GET,    api_script_get,        NULL };
@@ -837,6 +903,7 @@ void web_api_start_httpd(void)
     httpd_register_uri_handler(srv, &post_tbr);
     httpd_register_uri_handler(srv, &post_restart);
     httpd_register_uri_handler(srv, &post_factory);
+    httpd_register_uri_handler(srv, &post_commission);
     httpd_register_uri_handler(srv, &get_backup);
     httpd_register_uri_handler(srv, &post_restore);
     httpd_register_uri_handler(srv, &get_script);
