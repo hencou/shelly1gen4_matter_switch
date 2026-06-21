@@ -34,6 +34,7 @@ extern "C" {
 
 #include <app/server/Server.h>
 #include <app/clusters/bindings/binding-table.h>
+#include <app/clusters/bindings/BindingManager.h>
 #include <app/OperationalSessionSetup.h>
 #include <app-common/zap-generated/cluster-objects.h>
 #include <app-common/zap-generated/attributes/Accessors.h>
@@ -609,9 +610,25 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
     return ESP_OK;
 }
 
-/* BindingManager is initialized automatically by esp_matter in v1.5
- * (client::binding_manager_init() called on kDnssdInitialized event).
- * No manual init needed here. */
+/* BindingManager: esp_matter v1.5 defers initialization until kDnssdInitialized.
+ * Without a border router / SRP server, DNS-SD never becomes ready and the
+ * binding table is never loaded from persistent storage.  We force-init here
+ * so bindings work even without network connectivity. */
+static void force_binding_manager_init(intptr_t)
+{
+    auto & server = chip::Server::GetInstance();
+    chip::BindingManagerInitParams params;
+    params.mFabricTable        = &server.GetFabricTable();
+    params.mCASESessionManager = server.GetCASESessionManager();
+    params.mStorage            = &server.GetPersistentStorage();
+    CHIP_ERROR err = chip::BindingManager::GetInstance().Init(params);
+    if (err == CHIP_NO_ERROR) {
+        ESP_LOGI(TAG, "BindingManager force-initialized (table loaded from NVS)");
+    } else {
+        ESP_LOGW(TAG, "BindingManager force-init: %s (will retry on DNS-SD ready)",
+                 err.Format());
+    }
+}
 
 static endpoint_t *create_endpoint_for_type(node_t *node, script_slot_type_t type)
 {
@@ -715,6 +732,10 @@ extern "C" esp_err_t matter_start(const script_slot_type_t *slot_types, uint8_t 
     /* Start the stack */
     esp_err_t err = esp_matter::start(NULL);
     if (err != ESP_OK) { ESP_LOGE(TAG, "esp_matter::start: %d", err); return err; }
+
+    /* Force-init BindingManager so binding table loads from NVS immediately,
+     * regardless of DNS-SD / network state.  Must run on CHIP thread. */
+    chip::DeviceLayer::PlatformMgr().ScheduleWork(force_binding_manager_init, 0);
 
     return ESP_OK;
 }
