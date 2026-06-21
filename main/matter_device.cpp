@@ -34,7 +34,6 @@ extern "C" {
 
 #include <app/server/Server.h>
 #include <app/clusters/bindings/binding-table.h>
-#include <app/clusters/bindings/BindingManager.h>
 #include <app/OperationalSessionSetup.h>
 #include <app-common/zap-generated/cluster-objects.h>
 #include <app-common/zap-generated/attributes/Accessors.h>
@@ -619,19 +618,15 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
  * Without a border router / SRP server, DNS-SD never becomes ready and the
  * binding table is never loaded from persistent storage.  We force-init here
  * so bindings work even without network connectivity. */
+namespace esp_matter { namespace client { esp_err_t binding_manager_init(); } }
+
 static void force_binding_manager_init(intptr_t)
 {
-    auto & server = chip::Server::GetInstance();
-    chip::BindingManagerInitParams params;
-    params.mFabricTable        = &server.GetFabricTable();
-    params.mCASESessionManager = server.GetCASESessionManager();
-    params.mStorage            = &server.GetPersistentStorage();
-    CHIP_ERROR err = chip::BindingManager::GetInstance().Init(params);
-    if (err == CHIP_NO_ERROR) {
+    esp_err_t ret = esp_matter::client::binding_manager_init();
+    if (ret == ESP_OK) {
         ESP_LOGI(TAG, "BindingManager force-initialized (table loaded from NVS)");
     } else {
-        ESP_LOGW(TAG, "BindingManager force-init: %s (will retry on DNS-SD ready)",
-                 err.Format());
+        ESP_LOGW(TAG, "BindingManager force-init failed: %d (will retry on DNS-SD ready)", ret);
     }
 }
 
