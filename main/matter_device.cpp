@@ -33,6 +33,7 @@ extern "C" {
 #include <esp_matter_ota.h>
 
 #include <app/server/Server.h>
+#include <app/server/CommissioningWindowManager.h>
 #include <app/clusters/bindings/binding-table.h>
 #include <app/OperationalSessionSetup.h>
 #include <app-common/zap-generated/cluster-objects.h>
@@ -576,6 +577,20 @@ extern "C" void matter_factory_reset(void)
 {
     ESP_LOGW(TAG, "factory reset requested");
     esp_matter::factory_reset();   /* wipes Matter NVS + reboot */
+}
+
+extern "C" void matter_open_commissioning_window(void)
+{
+    ESP_LOGW(TAG, "Opening commissioning window (BLE + on-network)");
+    auto & commissionMgr = chip::Server::GetInstance().GetCommissioningWindowManager();
+    /* Open a Basic Commissioning Window (180 s timeout, default discriminator+passcode) */
+    CHIP_ERROR err = commissionMgr.OpenBasicCommissioningWindow(
+        chip::System::Clock::Seconds16(180));
+    if (err == CHIP_NO_ERROR) {
+        ESP_LOGI(TAG, "Commissioning window open (180s)");
+    } else {
+        ESP_LOGW(TAG, "Failed to open commissioning window: %" CHIP_ERROR_FORMAT, err.Format());
+    }
 }
 
 extern "C" uint16_t matter_get_slot_endpoint(uint8_t slot)
