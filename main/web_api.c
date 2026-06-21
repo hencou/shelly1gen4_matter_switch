@@ -5,7 +5,6 @@
 
 #include "web_api.h"
 #include "ota.h"
-#include "matter_device.h"
 #include "app_config.h"
 #include "script_engine.h"
 #include "dashboard_html.h"
@@ -371,8 +370,12 @@ static esp_err_t api_factory_reset_post(httpd_req_t *req)
 
 static esp_err_t api_commission_post(httpd_req_t *req)
 {
-    matter_open_commissioning_window();
     httpd_resp_sendstr(req, "OK");
+    ESP_LOGW(TAG, "Commission mode: removing all fabrics and rebooting into BLE pairing");
+    /* Wipe only chip_kvs (Matter fabrics/bindings) — keep WiFi/scripts in nvs */
+    nvs_flash_erase_partition("chip_kvs");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
     return ESP_OK;
 }
 

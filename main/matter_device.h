@@ -57,10 +57,6 @@ esp_err_t matter_tbr_init(void);
 /* Factory reset → wipes Matter NVS, leaves the fabric, reboot. */
 void matter_factory_reset(void);
 
-/* Open a Basic Commissioning Window (180 s) without factory reset.
- * Allows adding the device to another fabric or re-commissioning. */
-void matter_open_commissioning_window(void);
-
 #ifdef __cplusplus
 }
 #endif

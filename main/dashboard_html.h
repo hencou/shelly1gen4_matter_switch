@@ -241,10 +241,10 @@ static const char MGMT_HTML[] =
 
 /* Commission mode */
 "function doCommission(){"
-"  if(!confirm('Open commissioning window (180s)? Device will be discoverable for pairing.'))return;"
+"  if(!confirm('Commission Mode: removes all Matter pairings and reboots into BLE pairing mode. WiFi and script settings are kept. Continue?'))return;"
 "  var x=new XMLHttpRequest();"
 "  x.onload=function(){document.getElementById('wifi-msg').innerHTML="
-"    '<span class=ok>Commissioning window open (180s). Use your Matter controller to pair.</span>'};"
+"    '<span class=ok>Rebooting into commission mode...</span>'};"
 "  x.open('POST','/api/commission');x.send();"
 "}"
 
