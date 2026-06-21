@@ -486,6 +486,46 @@ static esp_err_t api_restore_post(httpd_req_t *req)
     }
     body[received] = '\0';
 
+    /* Process chip_kvs base64 FIRST (before cJSON parsing) to avoid OOM.
+     * The base64 blob can be ~32KB; cJSON would duplicate it, doubling heap use.
+     * We decode+write the partition directly, then truncate the field in the body. */
+    char *kvs_marker = strstr(body, "\"chip_kvs\":\"");
+    if (kvs_marker) {
+        char *b64_start = kvs_marker + 12;
+        char *b64_end = strchr(b64_start, '"');
+        if (b64_end && b64_end > b64_start) {
+            size_t b64_len = b64_end - b64_start;
+            const esp_partition_t *kvs = esp_partition_find_first(
+                ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "chip_kvs");
+            if (kvs) {
+                /* Decode in chunks to avoid allocating full decoded buffer */
+                esp_partition_erase_range(kvs, 0, kvs->size);
+                size_t src_off = 0, dst_off = 0;
+                uint8_t dec_buf[768];
+                bool decode_ok = true;
+                while (src_off < b64_len && dst_off < kvs->size) {
+                    /* Process 1024 base64 chars at a time (= 768 decoded bytes) */
+                    size_t chunk = b64_len - src_off;
+                    if (chunk > 1024) chunk = 1024;
+                    size_t olen = 0;
+                    int r = mbedtls_base64_decode(dec_buf, sizeof(dec_buf), &olen,
+                        (const unsigned char *)(b64_start + src_off), chunk);
+                    if (r != 0) { decode_ok = false; break; }
+                    if (olen > 0 && dst_off + olen <= kvs->size) {
+                        esp_partition_write(kvs, dst_off, dec_buf, olen);
+                        dst_off += olen;
+                    }
+                    src_off += chunk;
+                }
+                if (decode_ok && dst_off > 0) {
+                    ESP_LOGI(TAG, "restore: chip_kvs written (%u bytes)", (unsigned)dst_off);
+                }
+            }
+            /* Truncate the chip_kvs value in the body so cJSON doesn't choke */
+            memmove(b64_start, b64_end, strlen(b64_end) + 1);
+        }
+    }
+
     cJSON *root = cJSON_Parse(body);
     free(body);
     if (!root) {
@@ -556,35 +596,6 @@ static esp_err_t api_restore_post(httpd_req_t *req)
             if (cfg.type != 0 || cfg.name[0] || cfg.script[0]) {
                 script_slot_set((uint8_t)slot, &cfg);
                 ESP_LOGI(TAG, "restore: slot %d '%s' type=%d", slot, cfg.name, cfg.type);
-            }
-        }
-    }
-
-    /* Restore chip_kvs (Matter commissioning + binding data) */
-    cJSON *j_kvs = cJSON_GetObjectItem(root, "chip_kvs");
-    if (j_kvs && cJSON_IsString(j_kvs) && j_kvs->valuestring[0]) {
-        const esp_partition_t *kvs = esp_partition_find_first(
-            ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "chip_kvs");
-        if (kvs) {
-            size_t b64_len = strlen(j_kvs->valuestring);
-            size_t decoded_len = 0;
-            /* Calculate decoded size */
-            mbedtls_base64_decode(NULL, 0, &decoded_len,
-                (const unsigned char *)j_kvs->valuestring, b64_len);
-
-            if (decoded_len > 0 && decoded_len <= kvs->size) {
-                uint8_t *decoded = (uint8_t *)malloc(decoded_len);
-                if (decoded) {
-                    size_t olen = 0;
-                    int ret = mbedtls_base64_decode(decoded, decoded_len, &olen,
-                        (const unsigned char *)j_kvs->valuestring, b64_len);
-                    if (ret == 0 && olen == decoded_len) {
-                        esp_partition_erase_range(kvs, 0, kvs->size);
-                        esp_partition_write(kvs, 0, decoded, decoded_len);
-                        ESP_LOGI(TAG, "restore: chip_kvs partition written (%u bytes)", (unsigned)decoded_len);
-                    }
-                    free(decoded);
-                }
             }
         }
     }
