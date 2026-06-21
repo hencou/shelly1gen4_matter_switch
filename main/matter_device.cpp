@@ -618,16 +618,10 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
  * Without a border router / SRP server, DNS-SD never becomes ready and the
  * binding table is never loaded from persistent storage.  We force-init here
  * so bindings work even without network connectivity. */
-namespace esp_matter { namespace client { esp_err_t binding_manager_init(); } }
-
 static void force_binding_manager_init(intptr_t)
 {
-    esp_err_t ret = esp_matter::client::binding_manager_init();
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "BindingManager force-initialized (table loaded from NVS)");
-    } else {
-        ESP_LOGW(TAG, "BindingManager force-init failed: %d (will retry on DNS-SD ready)", ret);
-    }
+    esp_matter::client::binding_manager_init();
+    ESP_LOGI(TAG, "BindingManager force-initialized (table loaded from NVS)");
 }
 
 static endpoint_t *create_endpoint_for_type(node_t *node, script_slot_type_t type)
