@@ -52,6 +52,7 @@ static const char *TAG = "ota";
 #define NVS_KEY_BENCH       "bench"
 #define NVS_KEY_WIFI_PERS   "wifi_pers"
 #define NVS_KEY_TBR         "tbr"
+#define NVS_KEY_SRP         "srp"
 #define NVS_KEY_HOSTNAME    "hostname"
 
 /* Runtime bench mode — initialised from NVS in bench_mode_init(). */
@@ -60,6 +61,7 @@ int g_bench_mode = BENCH_MODE;
 /* Runtime flags — initialised from NVS early in boot. */
 static bool s_wifi_persistent = false;
 static bool s_tbr_mode = false;
+static bool s_srp_mode = false;
 static char s_hostname[32] = {0};
 
 #define WIFI_CONNECTED_BIT  BIT0
@@ -177,6 +179,37 @@ esp_err_t ota_tbr_mode_set(bool on)
     return ESP_OK;
 }
 
+static void srp_mode_init(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        uint8_t v = 0;
+        if (nvs_get_u8(h, NVS_KEY_SRP, &v) == ESP_OK) {
+            s_srp_mode = (v != 0);
+        }
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "srp_mode = %d", s_srp_mode);
+}
+
+bool ota_srp_mode_get(void)
+{
+    return s_srp_mode;
+}
+
+esp_err_t ota_srp_mode_set(bool on)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    nvs_set_u8(h, NVS_KEY_SRP, on ? 1 : 0);
+    nvs_commit(h);
+    nvs_close(h);
+    s_srp_mode = on;
+    ESP_LOGI(TAG, "srp_mode saved: %d", on);
+    return ESP_OK;
+}
+
 /* ---------- Hostname NVS ---------- */
 
 static void hostname_build_default(char *buf, size_t len)
@@ -236,6 +269,7 @@ void bench_mode_init(void)
 
     wifi_persistent_init();
     tbr_mode_init();
+    srp_mode_init();
     hostname_init();
 }
 

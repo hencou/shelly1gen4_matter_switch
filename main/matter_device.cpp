@@ -50,6 +50,7 @@ extern "C" {
 #include "esp_openthread.h"
 #include <openthread/border_routing.h>
 #include <openthread/instance.h>
+#include <openthread/srp_server.h>
 #include "esp_netif.h"
 #endif
 
@@ -568,6 +569,30 @@ extern "C" esp_err_t matter_tbr_init(void)
     return ESP_OK;
 #else
     ESP_LOGW(TAG, "TBR not compiled in (CONFIG_OPENTHREAD_BORDER_ROUTER=n)");
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+extern "C" esp_err_t matter_srp_server_start(void)
+{
+#if CONFIG_OPENTHREAD_BORDER_ROUTER
+    ESP_LOGI(TAG, "Starting SRP server (DNS-SD for Thread mesh)");
+    chip::DeviceLayer::ThreadStackMgr().LockThreadStack();
+
+    otInstance *instance = esp_openthread_get_instance();
+    if (!instance) {
+        chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
+        ESP_LOGE(TAG, "SRP server: no OpenThread instance");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    otSrpServerSetEnabled(instance, true);
+    chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
+
+    ESP_LOGI(TAG, "SRP server enabled — Thread devices can register and resolve services");
+    return ESP_OK;
+#else
+    ESP_LOGW(TAG, "SRP server not compiled in (CONFIG_OPENTHREAD_BORDER_ROUTER=n)");
     return ESP_ERR_NOT_SUPPORTED;
 #endif
 }

@@ -285,6 +285,7 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         "\"bench_mode\":\"%s\","
         "\"wifi_persistent\":\"%s\","
         "\"tbr_mode\":\"%s\","
+        "\"srp_mode\":\"%s\","
         "\"pushbutton\":\"%s (GPIO%d=%d)\","
         "\"pcb_button\":\"%s (GPIO4=%d)\","
         "\"digital_in\":\"%s (GPIO%d=%d)\","
@@ -302,6 +303,7 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         g_bench_mode ? "ON" : "OFF",
         ota_wifi_persistent_get() ? "ON" : "OFF",
         ota_tbr_mode_get() ? "ON" : "OFF",
+        ota_srp_mode_get() ? "ON" : "OFF",
         btn_active ? "PRESSED" : "RELEASED", PIN_SWITCH_INPUT, btn_level,
         pcb_active ? "PRESSED" : "RELEASED", pcb_level,
         dig_level ? "HIGH" : "LOW", PIN_TOUCH_INPUT, dig_level,
@@ -342,6 +344,16 @@ static esp_err_t api_tbr_mode_post(httpd_req_t *req)
         ota_wifi_persistent_set(true);
     }
     ota_tbr_mode_set(new_val);
+    httpd_resp_sendstr(req, "OK");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
+static esp_err_t api_srp_mode_post(httpd_req_t *req)
+{
+    bool new_val = !ota_srp_mode_get();
+    ota_srp_mode_set(new_val);
     httpd_resp_sendstr(req, "OK");
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
@@ -413,11 +425,12 @@ static esp_err_t api_backup_get(httpd_req_t *req)
         "{\"version\":4,"
         "\"ota\":{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\","
         "\"hostname\":\"%s\","
-        "\"wifi_persistent\":%s,\"tbr_mode\":%s},"
+        "\"wifi_persistent\":%s,\"tbr_mode\":%s,\"srp_mode\":%s},"
         "\"scripts\":[",
         ssid, pass, url, ota_hostname_get(),
         ota_wifi_persistent_get() ? "true" : "false",
-        ota_tbr_mode_get() ? "true" : "false");
+        ota_tbr_mode_get() ? "true" : "false",
+        ota_srp_mode_get() ? "true" : "false");
     httpd_resp_send_chunk(req, hdr, strlen(hdr));
 
     for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
@@ -553,6 +566,10 @@ static esp_err_t api_restore_post(httpd_req_t *req)
         cJSON *j_tbr = cJSON_GetObjectItem(ota, "tbr_mode");
         if (j_tbr && cJSON_IsBool(j_tbr)) {
             ota_tbr_mode_set(cJSON_IsTrue(j_tbr));
+        }
+        cJSON *j_srp = cJSON_GetObjectItem(ota, "srp_mode");
+        if (j_srp && cJSON_IsBool(j_srp)) {
+            ota_srp_mode_set(cJSON_IsTrue(j_srp));
         }
         cJSON *j_host = cJSON_GetObjectItem(ota, "hostname");
         if (j_host && cJSON_IsString(j_host) && j_host->valuestring[0]) {
@@ -895,6 +912,7 @@ void web_api_start_httpd(void)
     httpd_uri_t post_bench        = { "/api/bench-mode",    HTTP_POST,   api_bench_mode_post,   NULL };
     httpd_uri_t post_wifip        = { "/api/wifi-persistent", HTTP_POST, api_wifi_persistent_post, NULL };
     httpd_uri_t post_tbr          = { "/api/tbr-mode",     HTTP_POST,   api_tbr_mode_post,     NULL };
+    httpd_uri_t post_srp          = { "/api/srp-mode",     HTTP_POST,   api_srp_mode_post,     NULL };
     httpd_uri_t post_restart      = { "/api/restart",       HTTP_POST,   api_restart_post,      NULL };
     httpd_uri_t post_factory      = { "/api/factory-reset", HTTP_POST,   api_factory_reset_post,NULL };
     httpd_uri_t post_commission   = { "/api/commission",    HTTP_POST,   api_commission_post,   NULL };
@@ -912,6 +930,7 @@ void web_api_start_httpd(void)
     httpd_register_uri_handler(srv, &post_bench);
     httpd_register_uri_handler(srv, &post_wifip);
     httpd_register_uri_handler(srv, &post_tbr);
+    httpd_register_uri_handler(srv, &post_srp);
     httpd_register_uri_handler(srv, &post_restart);
     httpd_register_uri_handler(srv, &post_factory);
     httpd_register_uri_handler(srv, &post_commission);
