@@ -54,6 +54,11 @@ void matter_set_tbr_backbone(void *wifi_sta_netif);
  * Routes IPv6 between WiFi backbone and Thread mesh. */
 esp_err_t matter_tbr_init(void);
 
+/* Start SRP server on the Thread mesh (without full border routing).
+ * Provides DNS-SD service discovery so other Thread devices can resolve
+ * node addresses and establish CASE sessions without a TBR. */
+esp_err_t matter_srp_server_start(void);
+
 /* Factory reset → wipes Matter NVS, leaves the fabric, reboot. */
 void matter_factory_reset(void);
 

@@ -67,6 +67,13 @@ esp_err_t ota_wifi_persistent_set(bool on);
 bool ota_tbr_mode_get(void);
 esp_err_t ota_tbr_mode_set(bool on);
 
+/* SRP Server mode: enable Thread DNS-SD service discovery without full TBR.
+ * When enabled, the Shelly runs an SRP server so other Thread devices can
+ * register and resolve services (needed for CASE sessions without a TBR).
+ * Stored in NVS. Default: off. */
+bool ota_srp_mode_get(void);
+esp_err_t ota_srp_mode_set(bool on);
+
 /* Save bench mode value to NVS (used by web API). */
 esp_err_t ota_bench_mode_save(int on);
 

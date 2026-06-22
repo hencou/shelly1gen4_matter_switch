@@ -141,6 +141,14 @@ extern "C" void app_main(void)
         ESP_LOGW(TAG, "BOOT-STEP: WiFi persistent ON but not commissioned — deferred until after commissioning");
     }
 
+    /* SRP server: provides DNS-SD service discovery on Thread mesh without
+     * requiring a full border router or WiFi.  Enables CASE sessions between
+     * Thread devices (e.g. Shelly → IKEA lamp) without an external TBR. */
+    if (ota_srp_mode_get() && commissioned) {
+        matter_srp_server_start();
+        ESP_LOGI(TAG, "BOOT-STEP: SRP server started (Thread DNS-SD)");
+    }
+
     // =========================================================================
     // MULTICAST GROUP KEY — install KeySet 1 + GroupKeyMap
     // =========================================================================
