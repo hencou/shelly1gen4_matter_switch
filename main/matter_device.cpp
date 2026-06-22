@@ -51,6 +51,7 @@ extern "C" {
 #include <openthread/border_routing.h>
 #include <openthread/instance.h>
 #include <openthread/srp_server.h>
+#include <openthread/thread.h>
 #include "esp_netif.h"
 #endif
 
@@ -573,10 +574,30 @@ extern "C" esp_err_t matter_tbr_init(void)
 #endif
 }
 
+#if CONFIG_OPENTHREAD_BORDER_ROUTER
+static bool s_srp_server_enabled = false;
+
+static void srp_role_changed_cb(otChangedFlags aFlags, void *aContext)
+{
+    if (s_srp_server_enabled) return;
+    if (!(aFlags & OT_CHANGED_THREAD_ROLE)) return;
+
+    otInstance *instance = esp_openthread_get_instance();
+    if (!instance) return;
+
+    otDeviceRole role = otThreadGetDeviceRole(instance);
+    if (role == OT_DEVICE_ROLE_ROUTER || role == OT_DEVICE_ROLE_LEADER) {
+        otSrpServerSetEnabled(instance, true);
+        s_srp_server_enabled = true;
+        ESP_LOGI(TAG, "SRP server enabled (role=%s) — Thread devices can register and resolve services",
+                 role == OT_DEVICE_ROLE_LEADER ? "leader" : "router");
+    }
+}
+#endif
+
 extern "C" esp_err_t matter_srp_server_start(void)
 {
 #if CONFIG_OPENTHREAD_BORDER_ROUTER
-    ESP_LOGI(TAG, "Starting SRP server (DNS-SD for Thread mesh)");
     chip::DeviceLayer::ThreadStackMgr().LockThreadStack();
 
     otInstance *instance = esp_openthread_get_instance();
@@ -586,10 +607,18 @@ extern "C" esp_err_t matter_srp_server_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    otSrpServerSetEnabled(instance, true);
-    chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
+    otDeviceRole role = otThreadGetDeviceRole(instance);
+    if (role == OT_DEVICE_ROLE_ROUTER || role == OT_DEVICE_ROLE_LEADER) {
+        otSrpServerSetEnabled(instance, true);
+        s_srp_server_enabled = true;
+        ESP_LOGI(TAG, "SRP server enabled immediately (already %s)",
+                 role == OT_DEVICE_ROLE_LEADER ? "leader" : "router");
+    } else {
+        otSetStateChangedCallback(instance, srp_role_changed_cb, NULL);
+        ESP_LOGI(TAG, "SRP server deferred — waiting for router/leader role (current: %d)", (int)role);
+    }
 
-    ESP_LOGI(TAG, "SRP server enabled — Thread devices can register and resolve services");
+    chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
     return ESP_OK;
 #else
     ESP_LOGW(TAG, "SRP server not compiled in (CONFIG_OPENTHREAD_BORDER_ROUTER=n)");
