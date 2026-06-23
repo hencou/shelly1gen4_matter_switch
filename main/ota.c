@@ -30,6 +30,7 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "esp_coexist.h"  /* esp_coex_preference_set() */
 #include "esp_https_ota.h"
 #include "esp_ota_ops.h"
 #include "esp_app_format.h"
@@ -588,53 +589,93 @@ static void wifi_runtime_task(void *arg)
     char ap_ssid[32];
     build_ap_ssid(ap_ssid, sizeof(ap_ssid));
 
-    wifi_config_t apc = {
-        .ap = {
-            .max_connection = 3,
-            .authmode = WIFI_AUTH_OPEN,
-            .channel = 6,
-        },
-    };
-    strncpy((char*)apc.ap.ssid, ap_ssid, sizeof(apc.ap.ssid));
-    apc.ap.ssid_len = strlen(ap_ssid);
+    if (s_wifi_ap_early_started) {
+        /* AP was already started before matter_start() by ota_wifi_start_ap_early().
+         * WiFi is already beaconing.  Just upgrade to APSTA if we have STA creds. */
+        if (have_creds) {
+            ESP_LOGI(TAG, "wifi_runtime: upgrading AP -> APSTA, STA '%s' (source: %s)",
+                     ssid, from_compile_time ? "compile-time" : "NVS");
 
-    if (have_creds) {
-        ESP_LOGI(TAG, "wifi_runtime: APSTA mode — AP '%s' + STA '%s' (source: %s)",
-                 ap_ssid, ssid, from_compile_time ? "compile-time" : "NVS");
+            wifi_config_t wcfg = { 0 };
+            strncpy((char*)wcfg.sta.ssid, ssid, sizeof(wcfg.sta.ssid));
+            strncpy((char*)wcfg.sta.password, pass, sizeof(wcfg.sta.password));
+            wcfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
 
-        wifi_config_t wcfg = { 0 };
-        strncpy((char*)wcfg.sta.ssid, ssid, sizeof(wcfg.sta.ssid));
-        strncpy((char*)wcfg.sta.password, pass, sizeof(wcfg.sta.password));
-        wcfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
+            esp_wifi_set_mode(WIFI_MODE_APSTA);
+            esp_wifi_set_config(WIFI_IF_STA, &wcfg);
+            esp_wifi_connect();
 
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &apc));
-        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wcfg));
-        ESP_ERROR_CHECK(esp_wifi_start());
+            ESP_LOGW(TAG, "wifi_runtime: AP '%s' active, STA connecting...", ap_ssid);
 
-        ESP_LOGW(TAG, "wifi_runtime: AP ready '%s', http://192.168.4.1/", ap_ssid);
+            EventBits_t bits = xEventGroupWaitBits(
+                s_wifi_evt, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
 
-        EventBits_t bits = xEventGroupWaitBits(
-            s_wifi_evt, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-            pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
-
-        if (bits & WIFI_CONNECTED_BIT) {
-            ESP_LOGW(TAG, "wifi_runtime: STA connected — management httpd on both AP and STA");
-            if (from_compile_time) {
-                ota_save_credentials(ssid, pass, url);
-                ESP_LOGI(TAG, "wifi_runtime: compile-time credentials saved to NVS");
+            if (bits & WIFI_CONNECTED_BIT) {
+                ESP_LOGW(TAG, "wifi_runtime: STA connected — management httpd on both AP and STA");
+                if (from_compile_time) {
+                    ota_save_credentials(ssid, pass, url);
+                    ESP_LOGI(TAG, "wifi_runtime: compile-time credentials saved to NVS");
+                }
+            } else {
+                ESP_LOGW(TAG, "wifi_runtime: STA failed — AP '%s' still available", ap_ssid);
             }
         } else {
-            ESP_LOGW(TAG, "wifi_runtime: STA failed — AP '%s' still available", ap_ssid);
+            ESP_LOGW(TAG, "wifi_runtime: AP '%s' already active (early start), no STA creds", ap_ssid);
         }
     } else {
-        ESP_LOGW(TAG, "wifi_runtime: no credentials, AP-only mode '%s'", ap_ssid);
+        /* Normal path: WiFi not started yet (e.g. non-commissioned setup mode).
+         * Start from scratch. */
+        wifi_config_t apc = {
+            .ap = {
+                .max_connection = 3,
+                .authmode = WIFI_AUTH_OPEN,
+                .channel = 6,
+            },
+        };
+        strncpy((char*)apc.ap.ssid, ap_ssid, sizeof(apc.ap.ssid));
+        apc.ap.ssid_len = strlen(ap_ssid);
 
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &apc));
-        ESP_ERROR_CHECK(esp_wifi_start());
+        if (have_creds) {
+            ESP_LOGI(TAG, "wifi_runtime: APSTA mode — AP '%s' + STA '%s' (source: %s)",
+                     ap_ssid, ssid, from_compile_time ? "compile-time" : "NVS");
 
-        ESP_LOGW(TAG, "wifi_runtime: AP ready '%s', http://192.168.4.1/", ap_ssid);
+            wifi_config_t wcfg = { 0 };
+            strncpy((char*)wcfg.sta.ssid, ssid, sizeof(wcfg.sta.ssid));
+            strncpy((char*)wcfg.sta.password, pass, sizeof(wcfg.sta.password));
+            wcfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
+
+            ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+            ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &apc));
+            ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wcfg));
+            ESP_ERROR_CHECK(esp_wifi_start());
+            esp_wifi_set_ps(WIFI_PS_NONE);
+
+            ESP_LOGW(TAG, "wifi_runtime: AP ready '%s', http://192.168.4.1/", ap_ssid);
+
+            EventBits_t bits = xEventGroupWaitBits(
+                s_wifi_evt, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                pdFALSE, pdFALSE, pdMS_TO_TICKS(30000));
+
+            if (bits & WIFI_CONNECTED_BIT) {
+                ESP_LOGW(TAG, "wifi_runtime: STA connected — management httpd on both AP and STA");
+                if (from_compile_time) {
+                    ota_save_credentials(ssid, pass, url);
+                    ESP_LOGI(TAG, "wifi_runtime: compile-time credentials saved to NVS");
+                }
+            } else {
+                ESP_LOGW(TAG, "wifi_runtime: STA failed — AP '%s' still available", ap_ssid);
+            }
+        } else {
+            ESP_LOGW(TAG, "wifi_runtime: no credentials, AP-only mode '%s'", ap_ssid);
+
+            ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+            ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &apc));
+            ESP_ERROR_CHECK(esp_wifi_start());
+            esp_wifi_set_ps(WIFI_PS_NONE);
+
+            ESP_LOGW(TAG, "wifi_runtime: AP ready '%s', http://192.168.4.1/", ap_ssid);
+        }
     }
 
     web_api_start_httpd();
@@ -656,6 +697,7 @@ static void wifi_timeout_cb(TimerHandle_t xTimer)
 }
 
 static bool s_wifi_driver_inited = false;
+static bool s_wifi_ap_early_started = false;
 
 void ota_wifi_ensure_netifs(void)
 {
@@ -685,6 +727,36 @@ void ota_wifi_ensure_netifs(void)
 
     ESP_LOGI(TAG, "WiFi netifs created (STA + AP), hostname='%s'",
              ota_hostname_get());
+}
+
+void ota_wifi_start_ap_early(void)
+{
+    char ap_ssid[32];
+    build_ap_ssid(ap_ssid, sizeof(ap_ssid));
+
+    wifi_config_t apc = {
+        .ap = {
+            .max_connection = 3,
+            .authmode = WIFI_AUTH_OPEN,
+            .channel = 6,
+        },
+    };
+    strncpy((char*)apc.ap.ssid, ap_ssid, sizeof(apc.ap.ssid));
+    apc.ap.ssid_len = strlen(ap_ssid);
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &apc));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    /* Disable power save — ensures beacons are sent reliably alongside Thread */
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
+    /* Set coexistence preference to BALANCE so WiFi and 802.15.4 get equal
+     * radio time.  Default may favour 802.15.4 which starves WiFi beacons. */
+    esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+
+    s_wifi_ap_early_started = true;
+    ESP_LOGW(TAG, "WiFi AP started EARLY (before Thread) — '%s'", ap_ssid);
 }
 
 esp_netif_t *ota_get_wifi_sta_netif(void)

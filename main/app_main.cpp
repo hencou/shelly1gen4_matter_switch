@@ -10,6 +10,7 @@ extern "C" {
 #include "esp_err.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
+#include "esp_wifi.h"
 #include "esp_vfs_eventfd.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -116,6 +117,16 @@ extern "C" void app_main(void)
         }
     }
 
+    /* Start WiFi AP BEFORE Thread/Matter when wifi_at_boot is set.
+     * This ensures WiFi beacons are already transmitting when OpenThread
+     * starts, forcing the coexistence arbiter to allocate time for both.
+     * Without this, Thread claims the radio exclusively and WiFi never
+     * gets TX slots (AP invisible despite being "started"). */
+    if (wifi_at_boot) {
+        ota_wifi_start_ap_early();
+        ESP_LOGI(TAG, "BOOT-STEP: WiFi AP started early (before Thread)");
+    }
+
     /* Matter MUST start before button_driver_init / sensors_init:
      * those install GPIO ISRs and FreeRTOS tasks that immediately call
      * Matter APIs via callbacks. */
@@ -136,7 +147,10 @@ extern "C" void app_main(void)
         ESP_LOGI(TAG, "BOOT-STEP: WiFi started at boot (%s, commissioned)",
                  wifi_tmp ? "tmp/6×press" : "persistent");
     } else if (wifi_at_boot && !commissioned) {
-        ESP_LOGW(TAG, "BOOT-STEP: WiFi requested but not commissioned — deferred (BLE needed)");
+        ESP_LOGW(TAG, "BOOT-STEP: WiFi requested but not commissioned — stopping WiFi for BLE");
+        /* WiFi AP was started early but BLE needs the radio for commissioning.
+         * Stop WiFi so BLE can work. */
+        esp_wifi_stop();
         /* Clear tmp flag so device doesn't keep rebooting into WiFi mode
          * while waiting for commissioning. */
         if (wifi_tmp) {
