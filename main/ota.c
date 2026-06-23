@@ -517,23 +517,12 @@ static void wifi_runtime_task(void *arg)
     }
 #endif
 
-    esp_netif_init();
-    esp_event_loop_create_default();
-    if (!esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"))
-        esp_netif_create_default_wifi_sta();
-    if (!esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"))
-        esp_netif_create_default_wifi_ap();
-
-    /* Set DHCP hostname so the device is discoverable by name */
+    /* Netifs + WiFi driver already created/inited by ota_wifi_ensure_netifs()
+     * at boot.  Just set hostname in case it changed. */
     esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     if (sta) {
         esp_netif_set_hostname(sta, ota_hostname_get());
         ESP_LOGI(TAG, "wifi_runtime: hostname set to '%s'", ota_hostname_get());
-    }
-
-    {
-        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-        ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     }
 
     s_wifi_evt = xEventGroupCreate();
@@ -615,10 +604,13 @@ static void wifi_timeout_cb(TimerHandle_t xTimer)
     (void)xTimer;
     ESP_LOGW(TAG, "WiFi timeout (10 min) — shutting down WiFi");
     esp_wifi_stop();
-    esp_wifi_deinit();
+    /* Do NOT call esp_wifi_deinit() — keep the driver registered with the
+     * coexistence arbiter so a subsequent 6× press can restart WiFi. */
     s_wifi_runtime_started = false;
     ESP_LOGI(TAG, "WiFi stopped, back to Thread-only mode");
 }
+
+static bool s_wifi_driver_inited = false;
 
 void ota_wifi_ensure_netifs(void)
 {
@@ -634,6 +626,18 @@ void ota_wifi_ensure_netifs(void)
     if (sta) {
         esp_netif_set_hostname(sta, ota_hostname_get());
     }
+
+    /* Init WiFi driver early so it registers with the coexistence arbiter
+     * BEFORE OpenThread claims the radio.  Without this, WiFi started
+     * later (6× press) cannot transmit — the coex TDM never schedules
+     * WiFi slots because it didn't know WiFi existed at Thread start. */
+    if (!s_wifi_driver_inited) {
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+        s_wifi_driver_inited = true;
+        ESP_LOGI(TAG, "WiFi driver initialized (coex registered)");
+    }
+
     ESP_LOGI(TAG, "WiFi netifs created (STA + AP), hostname='%s'",
              ota_hostname_get());
 }
