@@ -117,16 +117,6 @@ extern "C" void app_main(void)
         }
     }
 
-    /* Start WiFi AP BEFORE Thread/Matter when wifi_at_boot is set.
-     * This ensures WiFi beacons are already transmitting when OpenThread
-     * starts, forcing the coexistence arbiter to allocate time for both.
-     * Without this, Thread claims the radio exclusively and WiFi never
-     * gets TX slots (AP invisible despite being "started"). */
-    if (wifi_at_boot) {
-        ota_wifi_start_ap_early();
-        ESP_LOGI(TAG, "BOOT-STEP: WiFi AP started early (before Thread)");
-    }
-
     /* Matter MUST start before button_driver_init / sensors_init:
      * those install GPIO ISRs and FreeRTOS tasks that immediately call
      * Matter APIs via callbacks. */
@@ -136,15 +126,22 @@ extern "C" void app_main(void)
     bool commissioned = chip::Server::GetInstance().GetFabricTable().FabricCount() > 0;
 
     /* ESP32-C6 coex limitation: SoftAP + Thread Router = NOT SUPPORTED.
-     * Downgrade Thread to End Device so coex arbiter allows SoftAP beacons.
-     * Device stays in the mesh as a child — can still send/receive commands. */
+     * The coex arbiter evaluates the Thread device type when WiFi starts.
+     * Sequence: matter_start() → Thread starts as Router → downgrade to
+     * End Device → wait for re-attach → THEN start WiFi AP.
+     * This way the arbiter sees End Device when WiFi requests radio time. */
     if (wifi_at_boot && commissioned) {
         matter_thread_set_end_device();
+        /* Give Thread time to detach and re-attach as End Device child.
+         * Log shows this takes ~1.5s (detach at +0ms, reattach at ~1500ms). */
+        ESP_LOGI(TAG, "BOOT-STEP: waiting for Thread to re-attach as End Device...");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        /* NOW start WiFi — coex arbiter sees Thread End Device → allows beacons */
+        ota_wifi_start_ap_early();
+        ESP_LOGI(TAG, "BOOT-STEP: WiFi AP started (after Thread End Device settle)");
     }
 
-    /* WiFi at boot (persistent OR tmp flag from 6× press reboot).
-     * Both start WiFi alongside Thread from the beginning so the coexistence
-     * arbiter properly schedules time slots for both protocols. */
+    /* WiFi at boot (persistent OR tmp flag from 6× press reboot). */
     if (wifi_at_boot && commissioned) {
         if (wifi_persistent && tbr_mode) {
             matter_tbr_init();
@@ -154,12 +151,7 @@ extern "C" void app_main(void)
         ESP_LOGI(TAG, "BOOT-STEP: WiFi started at boot (%s, commissioned)",
                  wifi_tmp ? "tmp/6×press" : "persistent");
     } else if (wifi_at_boot && !commissioned) {
-        ESP_LOGW(TAG, "BOOT-STEP: WiFi requested but not commissioned — stopping WiFi for BLE");
-        /* WiFi AP was started early but BLE needs the radio for commissioning.
-         * Stop WiFi so BLE can work. */
-        esp_wifi_stop();
-        /* Clear tmp flag so device doesn't keep rebooting into WiFi mode
-         * while waiting for commissioning. */
+        /* Not commissioned — need BLE for commissioning, skip WiFi. */
         if (wifi_tmp) {
             ota_wifi_tmp_clear();
             ESP_LOGW(TAG, "BOOT-STEP: wifi_tmp cleared (not commissioned)");
