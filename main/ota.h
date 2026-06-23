@@ -97,6 +97,12 @@ esp_err_t ota_hostname_set(const char *name);
  * Needed so TBR can reference the STA netif as backbone before matter_start(). */
 void ota_wifi_ensure_netifs(void);
 
+/* Start WiFi AP immediately (before matter_start / Thread).
+ * Must be called AFTER ota_wifi_ensure_netifs().
+ * This ensures WiFi beacons are already being transmitted when Thread starts,
+ * forcing the coexistence arbiter to schedule time for both protocols. */
+void ota_wifi_start_ap_early(void);
+
 /* Get the WiFi STA netif (needed for TBR backbone). Returns NULL if WiFi not started. */
 struct esp_netif_obj;
 typedef struct esp_netif_obj esp_netif_t;
