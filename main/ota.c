@@ -54,12 +54,14 @@ static const char *TAG = "ota";
 #define NVS_KEY_TBR         "tbr"
 #define NVS_KEY_SRP         "srp"
 #define NVS_KEY_HOSTNAME    "hostname"
+#define NVS_KEY_WIFI_TMP    "wifi_tmp"
 
 /* Runtime bench mode — initialised from NVS in bench_mode_init(). */
 int g_bench_mode = BENCH_MODE;
 
 /* Runtime flags — initialised from NVS early in boot. */
 static bool s_wifi_persistent = false;
+static bool s_wifi_tmp = false;
 static bool s_tbr_mode = false;
 static bool s_srp_mode = false;
 static char s_hostname[32] = {0};
@@ -146,6 +148,50 @@ esp_err_t ota_wifi_persistent_set(bool on)
     s_wifi_persistent = on;
     ESP_LOGI(TAG, "wifi_persistent saved: %d", on);
     return ESP_OK;
+}
+
+/* ---------- Temporary WiFi flag (reboot-based coexistence) ---------- */
+
+static void wifi_tmp_init(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        uint8_t v = 0;
+        if (nvs_get_u8(h, NVS_KEY_WIFI_TMP, &v) == ESP_OK) {
+            s_wifi_tmp = (v != 0);
+        }
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "wifi_tmp = %d", s_wifi_tmp);
+}
+
+bool ota_wifi_tmp_get(void)
+{
+    return s_wifi_tmp;
+}
+
+void ota_wifi_tmp_set_and_reboot(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, NVS_KEY_WIFI_TMP, 1);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    ESP_LOGW(TAG, "wifi_tmp flag set — rebooting for WiFi coexistence");
+    vTaskDelay(pdMS_TO_TICKS(100));
+    esp_restart();
+}
+
+void ota_wifi_tmp_clear(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, NVS_KEY_WIFI_TMP, 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    s_wifi_tmp = false;
 }
 
 static void tbr_mode_init(void)
@@ -268,6 +314,7 @@ void bench_mode_init(void)
              g_bench_mode, BENCH_MODE);
 
     wifi_persistent_init();
+    wifi_tmp_init();
     tbr_mode_init();
     srp_mode_init();
     hostname_init();
@@ -602,12 +649,10 @@ static TimerHandle_t s_wifi_timeout_timer = NULL;
 static void wifi_timeout_cb(TimerHandle_t xTimer)
 {
     (void)xTimer;
-    ESP_LOGW(TAG, "WiFi timeout (10 min) — shutting down WiFi");
-    esp_wifi_stop();
-    /* Do NOT call esp_wifi_deinit() — keep the driver registered with the
-     * coexistence arbiter so a subsequent 6× press can restart WiFi. */
-    s_wifi_runtime_started = false;
-    ESP_LOGI(TAG, "WiFi stopped, back to Thread-only mode");
+    ESP_LOGW(TAG, "WiFi timeout (10 min) — clearing wifi_tmp flag and rebooting");
+    ota_wifi_tmp_clear();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    esp_restart();
 }
 
 static bool s_wifi_driver_inited = false;
