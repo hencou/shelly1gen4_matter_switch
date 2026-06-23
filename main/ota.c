@@ -537,6 +537,9 @@ static void ota_mode_button_cb(input_id_t id, button_event_t evt)
 
 /* ---------- Runtime WiFi enable (alongside Thread/Matter) ---------- */
 
+static bool s_wifi_driver_inited = false;
+static bool s_wifi_ap_early_started = false;
+
 static void build_ap_ssid(char *buf, size_t len)
 {
     uint8_t mac[6];
@@ -695,9 +698,6 @@ static void wifi_timeout_cb(TimerHandle_t xTimer)
     vTaskDelay(pdMS_TO_TICKS(100));
     esp_restart();
 }
-
-static bool s_wifi_driver_inited = false;
-static bool s_wifi_ap_early_started = false;
 
 void ota_wifi_ensure_netifs(void)
 {
