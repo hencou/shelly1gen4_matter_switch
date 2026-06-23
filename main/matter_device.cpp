@@ -48,6 +48,7 @@ extern "C" {
 #include "esp_openthread.h"
 #include <openthread/instance.h>
 #include <openthread/thread.h>
+#include <openthread/thread_ftd.h>
 #if CONFIG_OPENTHREAD_BORDER_ROUTER
 #include "esp_openthread_border_router.h"
 #include <openthread/border_routing.h>
