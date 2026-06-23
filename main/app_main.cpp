@@ -135,6 +135,13 @@ extern "C" void app_main(void)
 
     bool commissioned = chip::Server::GetInstance().GetFabricTable().FabricCount() > 0;
 
+    /* ESP32-C6 coex limitation: SoftAP + Thread Router = NOT SUPPORTED.
+     * Downgrade Thread to End Device so coex arbiter allows SoftAP beacons.
+     * Device stays in the mesh as a child — can still send/receive commands. */
+    if (wifi_at_boot && commissioned) {
+        matter_thread_set_end_device();
+    }
+
     /* WiFi at boot (persistent OR tmp flag from 6× press reboot).
      * Both start WiFi alongside Thread from the beginning so the coexistence
      * arbiter properly schedules time slots for both protocols. */
