@@ -45,8 +45,7 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
             ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> WiFi already persistent, opening dashboard", id);
             ota_enable_wifi_runtime();
         } else {
-            ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> disabling Thread, enabling WiFi", id);
-            matter_disable_thread();
+            ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> enabling WiFi (Thread stays active, coexistence)", id);
             ota_enable_wifi_runtime();
         }
         return;
