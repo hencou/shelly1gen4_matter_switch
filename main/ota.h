@@ -11,15 +11,19 @@ extern "C" {
 /**
  * OTA / WiFi module for the Shelly 1 Gen4 custom firmware.
  *
- * Two WiFi paths:
+ * WiFi paths:
  *
- * A) Runtime WiFi enable (6x clicks in Matter mode):
- *   - WiFi starts alongside Thread (both active, non-persistent).
- *   - If STA connection succeeds: management dashboard reachable.
- *   - If STA fails: WiFi credentials wiped, AP mode started.
- *   - After reboot: WiFi is OFF again (only in RAM, not NVS flag).
+ * A) 6× press WiFi (reboot-based coexistence):
+ *   - Sets NVS wifi_tmp flag + reboots (~2 sec).
+ *   - On next boot: WiFi starts alongside Thread from the beginning,
+ *     ensuring the coexistence arbiter properly schedules both protocols.
+ *   - AP "shelly-cfg-XXXXXX" available for management.
+ *   - After 10 min: flag cleared + reboot back to Thread-only.
  *
- * B) Dedicated OTA mode (via ota_request_at_next_boot):
+ * B) WiFi persistent mode (ota_wifi_persistent_set):
+ *   - WiFi starts at every boot alongside Thread (no timeout).
+ *
+ * C) Dedicated OTA mode (via ota_request_at_next_boot):
  *   1) NVS flag set + reboot.
  *   2) At boot: ota_handle_pending() inspects the flag.
  *      - If saved WiFi creds exist -> direct STA OTA.
@@ -61,6 +65,13 @@ void ota_mark_app_valid(void);
  * Stored in NVS. Default: off. */
 bool ota_wifi_persistent_get(void);
 esp_err_t ota_wifi_persistent_set(bool on);
+
+/* Temporary WiFi flag: 6× press sets this and reboots. On next boot WiFi
+ * starts at boot alongside Thread (proper coexistence from the start).
+ * After 10 min the flag is cleared and device reboots back to Thread-only. */
+bool ota_wifi_tmp_get(void);
+void ota_wifi_tmp_set_and_reboot(void);
+void ota_wifi_tmp_clear(void);
 
 /* Thread Border Router mode: enable IPv6 routing between WiFi and Thread.
  * Requires wifi_persistent=true. Stored in NVS. Default: off. */

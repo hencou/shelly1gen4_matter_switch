@@ -39,14 +39,14 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
     ESP_LOGI(TAG, "button id=%d evt=%d", id, evt);
 
     if (evt == BTN_EVT_MODE_TOGGLE) {
-        if (ota_wifi_persistent_get()) {
-            /* WiFi is already active — just open management dashboard.
-             * No need to disable Thread (coexistence handles both). */
-            ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> WiFi already persistent, opening dashboard", id);
-            ota_enable_wifi_runtime();
+        if (ota_wifi_persistent_get() || ota_wifi_tmp_get()) {
+            /* WiFi is already active at boot — ignore duplicate 6× press */
+            ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> WiFi already active (persistent or tmp)", id);
         } else {
-            ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> enabling WiFi (Thread stays active, coexistence)", id);
-            ota_enable_wifi_runtime();
+            /* Set temporary WiFi flag and reboot. On next boot WiFi starts
+             * at boot alongside Thread for proper coexistence. */
+            ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> setting wifi_tmp flag, rebooting for coex", id);
+            ota_wifi_tmp_set_and_reboot();
         }
         return;
     }
@@ -104,6 +104,8 @@ extern "C" void app_main(void)
     ota_wifi_ensure_netifs();
 
     bool wifi_persistent = ota_wifi_persistent_get();
+    bool wifi_tmp = ota_wifi_tmp_get();
+    bool wifi_at_boot = wifi_persistent || wifi_tmp;
     bool tbr_mode = ota_tbr_mode_get();
 
     if (wifi_persistent && tbr_mode) {
@@ -122,17 +124,25 @@ extern "C" void app_main(void)
 
     bool commissioned = chip::Server::GetInstance().GetFabricTable().FabricCount() > 0;
 
-    /* WiFi persistent + TBR only activate when commissioned (fabric present).
-     * Before commissioning the radio must be free for BLE. */
-    if (wifi_persistent && commissioned) {
-        if (tbr_mode) {
+    /* WiFi at boot (persistent OR tmp flag from 6× press reboot).
+     * Both start WiFi alongside Thread from the beginning so the coexistence
+     * arbiter properly schedules time slots for both protocols. */
+    if (wifi_at_boot && commissioned) {
+        if (wifi_persistent && tbr_mode) {
             matter_tbr_init();
             ESP_LOGI(TAG, "BOOT-STEP: Thread Border Router initialized");
         }
         ota_enable_wifi_runtime();
-        ESP_LOGI(TAG, "BOOT-STEP: WiFi runtime started (persistent, commissioned)");
-    } else if (wifi_persistent && !commissioned) {
-        ESP_LOGW(TAG, "BOOT-STEP: WiFi persistent ON but not commissioned — deferred until after commissioning");
+        ESP_LOGI(TAG, "BOOT-STEP: WiFi started at boot (%s, commissioned)",
+                 wifi_tmp ? "tmp/6×press" : "persistent");
+    } else if (wifi_at_boot && !commissioned) {
+        ESP_LOGW(TAG, "BOOT-STEP: WiFi requested but not commissioned — deferred (BLE needed)");
+        /* Clear tmp flag so device doesn't keep rebooting into WiFi mode
+         * while waiting for commissioning. */
+        if (wifi_tmp) {
+            ota_wifi_tmp_clear();
+            ESP_LOGW(TAG, "BOOT-STEP: wifi_tmp cleared (not commissioned)");
+        }
     }
 
     /* SRP server: provides DNS-SD service discovery on Thread mesh without
