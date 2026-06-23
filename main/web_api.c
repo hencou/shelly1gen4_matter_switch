@@ -901,7 +901,7 @@ void web_api_start_httpd(void)
     hc.recv_wait_timeout  = 30;
     hc.send_wait_timeout  = 10;
     hc.max_open_sockets   = 3;
-    hc.max_uri_handlers   = 16;
+    hc.max_uri_handlers   = 20;
     ESP_ERROR_CHECK(httpd_start(&srv, &hc));
 
     httpd_uri_t get_root          = { "/",                  HTTP_GET,    form_get,              NULL };
