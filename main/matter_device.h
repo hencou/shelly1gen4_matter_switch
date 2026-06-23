@@ -59,6 +59,12 @@ esp_err_t matter_tbr_init(void);
  * node addresses and establish CASE sessions without a TBR. */
 esp_err_t matter_srp_server_start(void);
 
+/* Downgrade Thread role to End Device (prevent Router promotion).
+ * Required for WiFi SoftAP coexistence — ESP32-C6 coex arbiter does NOT
+ * support SoftAP + Thread Router simultaneously. Must be called AFTER
+ * matter_start(). The device remains in the Thread mesh as a child. */
+void matter_thread_set_end_device(void);
+
 /* Factory reset → wipes Matter NVS, leaves the fabric, reboot. */
 void matter_factory_reset(void);
 

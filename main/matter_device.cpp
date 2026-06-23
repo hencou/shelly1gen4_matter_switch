@@ -45,13 +45,13 @@ extern "C" {
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
 #include <platform/ESP32/OpenthreadLauncher.h>
 #include "esp_openthread_types.h"
+#include "esp_openthread.h"
+#include <openthread/instance.h>
+#include <openthread/thread.h>
 #if CONFIG_OPENTHREAD_BORDER_ROUTER
 #include "esp_openthread_border_router.h"
-#include "esp_openthread.h"
 #include <openthread/border_routing.h>
-#include <openthread/instance.h>
 #include <openthread/srp_server.h>
-#include <openthread/thread.h>
 #include "esp_netif.h"
 #endif
 
@@ -506,6 +506,34 @@ extern "C" void matter_disable_thread(void)
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
     ESP_LOGW(TAG, "Disabling Thread to free 2.4 GHz radio for WiFi");
     chip::DeviceLayer::ThreadStackMgr().SetThreadEnabled(false);
+#endif
+}
+
+extern "C" void matter_thread_set_end_device(void)
+{
+#if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+    chip::DeviceLayer::ThreadStackMgr().LockThreadStack();
+    otInstance *instance = esp_openthread_get_instance();
+    if (instance) {
+        /* Prevent this device from becoming a Router.  It will stay as a child
+         * (end device) in the Thread mesh.  This is required because the ESP32-C6
+         * coex arbiter does NOT support SoftAP + Thread Router simultaneously
+         * (see ESP-IDF RF Coexistence docs: SoftAP + Router = X). */
+        otThreadSetRouterEligible(instance, false);
+
+        /* Also set link mode to signal End Device to the coex arbiter:
+         * rx-on-when-idle=true (stay awake), device-type=0 (not FTD/router),
+         * full-network-data=true. */
+        otLinkModeConfig mode = {
+            .mRxOnWhenIdle = true,
+            .mDeviceType   = false,  /* NOT Full Thread Device */
+            .mNetworkData  = true,
+        };
+        otThreadSetLinkMode(instance, mode);
+
+        ESP_LOGW(TAG, "Thread downgraded to End Device (WiFi coexistence)");
+    }
+    chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
 #endif
 }
 
