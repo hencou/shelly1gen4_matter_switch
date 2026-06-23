@@ -96,26 +96,21 @@ extern "C" void app_main(void)
     script_slot_type_t slot_types[SCRIPT_MAX_SLOTS];
     script_engine_load_slot_types(slot_types, SCRIPT_MAX_SLOTS);
 
-    /* WiFi persistent + TBR: prepare netifs BEFORE matter_start() (TBR backbone
-     * must be set before OpenThread starts), but only ACTIVATE after we confirm
-     * the device is commissioned.  This prevents WiFi/Thread coexistence from
-     * interfering with BLE commissioning. */
+    /* Always create WiFi netifs BEFORE matter_start() so the coexistence layer
+     * is initialized when OpenThread starts.  This is required for WiFi to work
+     * alongside Thread — both at boot (wifi_persistent) and at runtime (6× press).
+     * The WiFi driver itself only starts when actually needed. */
+    ESP_LOGI(TAG, "BOOT-STEP: creating WiFi netifs early (coexistence prep)");
+    ota_wifi_ensure_netifs();
+
     bool wifi_persistent = ota_wifi_persistent_get();
     bool tbr_mode = ota_tbr_mode_get();
 
-    if (wifi_persistent) {
-        /* Create netifs before matter_start() — TBR backbone must be set before
-         * OpenThread starts.  Actual WiFi connection is deferred until we confirm
-         * the device is commissioned. */
-        ESP_LOGI(TAG, "BOOT-STEP: WiFi persistent — creating netifs early (activation deferred)");
-        ota_wifi_ensure_netifs();
-
-        if (tbr_mode) {
-            esp_netif_t *sta = ota_get_wifi_sta_netif();
-            if (sta) {
-                matter_set_tbr_backbone(sta);
-                ESP_LOGI(TAG, "BOOT-STEP: TBR backbone netif set");
-            }
+    if (wifi_persistent && tbr_mode) {
+        esp_netif_t *sta = ota_get_wifi_sta_netif();
+        if (sta) {
+            matter_set_tbr_backbone(sta);
+            ESP_LOGI(TAG, "BOOT-STEP: TBR backbone netif set");
         }
     }
 
