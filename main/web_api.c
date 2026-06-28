@@ -521,23 +521,6 @@ static esp_err_t api_restore_post(httpd_req_t *req)
         }
     }
 
-    /* The 'body' allocation is still sized for the original (large) request,
-     * even though the NVS blob text has been removed above. cJSON_Parse()
-     * builds a whole second tree of allocations on top of whatever 'body'
-     * still occupies, and that combination is what was driving the device
-     * out of memory (Matter/Thread/BLE already hold a large chunk of the
-     * ~320KB internal RAM, there's no PSRAM configured). Shrink the buffer
-     * with realloc() so the freed ~60KB+ is returned to the heap before
-     * cJSON allocates anything. */
-    size_t remaining_len = strlen(body) + 1;
-    ESP_LOGI(TAG, "restore: free heap before shrink=%u, body before=%d after=%u",
-             (unsigned)esp_get_free_heap_size(), content_len, (unsigned)remaining_len);
-    char *shrunk = (char *)realloc(body, remaining_len);
-    if (shrunk) {
-        body = shrunk;
-    }
-    ESP_LOGI(TAG, "restore: free heap after shrink=%u", (unsigned)esp_get_free_heap_size());
-
     cJSON *root = cJSON_Parse(body);
     free(body);
     if (!root) {
