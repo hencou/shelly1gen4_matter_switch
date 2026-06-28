@@ -84,7 +84,7 @@ static esp_err_t restore_handler(httpd_req_t *req)
                 const char *script = cJSON_GetObjectItem(slot, "script") ? 
                                      cJSON_GetObjectItem(slot, "script")->valuestring : "";
 
-                script_engine_save_slot(slot_id, name, script);   // corrected function name
+                script_engine_save(slot_id, name, script);   // <--- juiste naam
 
                 ESP_LOGI(TAG, "Restored slot %d: %s", slot_id, name);
             }
@@ -97,7 +97,7 @@ static esp_err_t restore_handler(httpd_req_t *req)
         cJSON *ssid = cJSON_GetObjectItem(ota, "ssid");
         cJSON *pass = cJSON_GetObjectItem(ota, "pass");
         if (ssid && pass && ssid->valuestring && pass->valuestring) {
-            ota_save_credentials(ssid->valuestring, pass->valuestring, "shelly"); // 3 arguments
+            ota_save_credentials(ssid->valuestring, pass->valuestring, "shelly");
             ESP_LOGI(TAG, "Restored WiFi credentials for SSID: %s", ssid->valuestring);
         }
     }
@@ -118,7 +118,7 @@ esp_err_t web_api_init(void)
     config.stack_size = 8192;
 
     if (httpd_start(&server, &config) == ESP_OK) {
-        // Register your other handlers here (index, scripts, etc.)
+        // Register your URI handlers here
         ESP_LOGI(TAG, "Web API server started successfully");
         return ESP_OK;
     }
