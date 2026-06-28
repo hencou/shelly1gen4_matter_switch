@@ -1,6 +1,6 @@
 /*
  * web_api.c - Web management dashboard + OTA + backup/restore
- * Optimized for low memory usage during large restores
+ * Memory-optimized restore handler
  */
 
 #include "web_api.h"
@@ -15,6 +15,7 @@
 #include <cJSON.h>
 #include <esp_ota_ops.h>
 #include <esp_log.h>
+#include <esp_task_wdt.h>          // Added for esp_task_wdt_reset
 #include <nvs.h>
 #include <nvs_flash.h>
 #include <string.h>
@@ -36,7 +37,6 @@ static esp_err_t restore_handler(httpd_req_t *req)
     char *buf = NULL;
     size_t buf_len = req->content_len;
 
-    // Hard limit to prevent OOM
     if (buf_len > 131072) {
         ESP_LOGE(TAG, "Restore JSON too large (%d bytes)", buf_len);
         return httpd_resp_send_500(req);
@@ -64,7 +64,7 @@ static esp_err_t restore_handler(httpd_req_t *req)
         return httpd_resp_send_500(req);
     }
 
-    // Process scripts one by one to reduce peak memory usage
+    // Process scripts one by one
     cJSON *scripts = cJSON_GetObjectItem(root, "scripts");
     if (cJSON_IsArray(scripts)) {
         int count = cJSON_GetArraySize(scripts);
@@ -73,7 +73,6 @@ static esp_err_t restore_handler(httpd_req_t *req)
         for (int i = 0; i < count && i < 8; i++) {
             cJSON *slot = cJSON_GetArrayItem(scripts, i);
             if (slot) {
-                // Memory cleanup per slot
                 vTaskDelay(pdMS_TO_TICKS(80));
                 heap_caps_free(NULL);
 
@@ -86,7 +85,8 @@ static esp_err_t restore_handler(httpd_req_t *req)
                 const char *script = cJSON_GetObjectItem(slot, "script") ? 
                                      cJSON_GetObjectItem(slot, "script")->valuestring : "";
 
-                script_engine_save_slot(slot_id, name, script);
+                // Use correct function name from your project
+                script_engine_save(slot_id, name, script);
 
                 ESP_LOGI(TAG, "Restored slot %d: %s", slot_id, name);
             }
@@ -99,7 +99,7 @@ static esp_err_t restore_handler(httpd_req_t *req)
         cJSON *ssid = cJSON_GetObjectItem(ota, "ssid");
         cJSON *pass = cJSON_GetObjectItem(ota, "pass");
         if (ssid && pass && ssid->valuestring && pass->valuestring) {
-            ota_save_wifi_credentials(ssid->valuestring, pass->valuestring);
+            ota_save_credentials(ssid->valuestring, pass->valuestring);
             ESP_LOGI(TAG, "Restored WiFi credentials for SSID: %s", ssid->valuestring);
         }
     }
@@ -110,17 +110,6 @@ static esp_err_t restore_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"status\":\"ok\",\"message\":\"Restore successful\"}");
 }
 
-// ==================== OTHER HANDLERS (unchanged) ====================
-
-// Add your other URI handlers here (index, save_script, etc.)
-// For example:
-
-static esp_err_t index_handler(httpd_req_t *req)
-{
-    // Your existing index handler code
-    return ESP_OK;
-}
-
 // ==================== INIT ====================
 
 esp_err_t web_api_init(void)
@@ -128,13 +117,13 @@ esp_err_t web_api_init(void)
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 20;
-    config.stack_size = 8192;           // increased for safety
+    config.stack_size = 8192;
 
     if (httpd_start(&server, &config) == ESP_OK) {
-        // Register your URIs here
-        // httpd_register_uri_handler(server, &index_uri);
-        // httpd_register_uri_handler(server, &restore_uri);
-        // ... other handlers
+        // Register your URI handlers here
+        // Example:
+        // httpd_register_uri_handler(server, &your_index_uri);
+        // httpd_register_uri_handler(server, &your_restore_uri);
 
         ESP_LOGI(TAG, "Web API server started successfully");
         return ESP_OK;
