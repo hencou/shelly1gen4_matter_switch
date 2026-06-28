@@ -50,8 +50,6 @@ static const char *TAG = "ota";
 #define NVS_KEY_PASS        "pass"
 #define NVS_KEY_URL         "url"
 #define NVS_KEY_BENCH       "bench"
-#define NVS_KEY_WIFI_PERS   "wifi_pers"
-#define NVS_KEY_TBR         "tbr"
 #define NVS_KEY_SRP         "srp"
 #define NVS_KEY_HOSTNAME    "hostname"
 
@@ -59,8 +57,6 @@ static const char *TAG = "ota";
 int g_bench_mode = BENCH_MODE;
 
 /* Runtime flags — initialised from NVS early in boot. */
-static bool s_wifi_persistent = false;
-static bool s_tbr_mode = false;
 static bool s_srp_mode = false;
 static char s_hostname[32] = {0};
 
@@ -113,70 +109,6 @@ bool ota_load_credentials(char *ssid, size_t ssidlen,
     }
     nvs_close(h);
     return ok;
-}
-
-/* ---------- WiFi persistent + TBR mode NVS ---------- */
-
-static void wifi_persistent_init(void)
-{
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-        uint8_t v = 0;
-        if (nvs_get_u8(h, NVS_KEY_WIFI_PERS, &v) == ESP_OK) {
-            s_wifi_persistent = (v != 0);
-        }
-        nvs_close(h);
-    }
-    ESP_LOGI(TAG, "wifi_persistent = %d", s_wifi_persistent);
-}
-
-bool ota_wifi_persistent_get(void)
-{
-    return s_wifi_persistent;
-}
-
-esp_err_t ota_wifi_persistent_set(bool on)
-{
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
-    if (err != ESP_OK) return err;
-    nvs_set_u8(h, NVS_KEY_WIFI_PERS, on ? 1 : 0);
-    nvs_commit(h);
-    nvs_close(h);
-    s_wifi_persistent = on;
-    ESP_LOGI(TAG, "wifi_persistent saved: %d", on);
-    return ESP_OK;
-}
-
-static void tbr_mode_init(void)
-{
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-        uint8_t v = 0;
-        if (nvs_get_u8(h, NVS_KEY_TBR, &v) == ESP_OK) {
-            s_tbr_mode = (v != 0);
-        }
-        nvs_close(h);
-    }
-    ESP_LOGI(TAG, "tbr_mode = %d", s_tbr_mode);
-}
-
-bool ota_tbr_mode_get(void)
-{
-    return s_tbr_mode;
-}
-
-esp_err_t ota_tbr_mode_set(bool on)
-{
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
-    if (err != ESP_OK) return err;
-    nvs_set_u8(h, NVS_KEY_TBR, on ? 1 : 0);
-    nvs_commit(h);
-    nvs_close(h);
-    s_tbr_mode = on;
-    ESP_LOGI(TAG, "tbr_mode saved: %d", on);
-    return ESP_OK;
 }
 
 static void srp_mode_init(void)
@@ -267,8 +199,6 @@ void bench_mode_init(void)
     ESP_LOGI(TAG, "bench_mode = %d (compile-time default = %d)",
              g_bench_mode, BENCH_MODE);
 
-    wifi_persistent_init();
-    tbr_mode_init();
     srp_mode_init();
     hostname_init();
 }
@@ -620,29 +550,6 @@ static void wifi_timeout_cb(TimerHandle_t xTimer)
     ESP_LOGI(TAG, "WiFi stopped, back to Thread-only mode");
 }
 
-void ota_wifi_ensure_netifs(void)
-{
-    esp_netif_init();
-    esp_event_loop_create_default();
-    if (!esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"))
-        esp_netif_create_default_wifi_sta();
-    if (!esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"))
-        esp_netif_create_default_wifi_ap();
-
-    /* Set DHCP hostname on STA netif */
-    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (sta) {
-        esp_netif_set_hostname(sta, ota_hostname_get());
-    }
-    ESP_LOGI(TAG, "WiFi netifs created (STA + AP), hostname='%s'",
-             ota_hostname_get());
-}
-
-esp_netif_t *ota_get_wifi_sta_netif(void)
-{
-    return esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-}
-
 void ota_enable_wifi_runtime(void)
 {
     if (s_wifi_runtime_started) {
@@ -653,14 +560,11 @@ void ota_enable_wifi_runtime(void)
     ESP_LOGW(TAG, "Enabling WiFi alongside Thread (runtime, non-persistent)");
     xTaskCreate(wifi_runtime_task, "wifi_rt", 4096, NULL, 5, NULL);
 
-    /* Auto-off after 10 minutes unless wifi_persistent is enabled */
-    if (!s_wifi_persistent) {
-        s_wifi_timeout_timer = xTimerCreate(
-            "wifi_to", pdMS_TO_TICKS(WIFI_TIMEOUT_MS), pdFALSE, NULL, wifi_timeout_cb);
-        if (s_wifi_timeout_timer) {
-            xTimerStart(s_wifi_timeout_timer, 0);
-            ESP_LOGI(TAG, "WiFi auto-off timer started (10 min)");
-        }
+    s_wifi_timeout_timer = xTimerCreate(
+        "wifi_to", pdMS_TO_TICKS(WIFI_TIMEOUT_MS), pdFALSE, NULL, wifi_timeout_cb);
+    if (s_wifi_timeout_timer) {
+        xTimerStart(s_wifi_timeout_timer, 0);
+        ESP_LOGI(TAG, "WiFi auto-off timer started (10 min)");
     }
 }
 

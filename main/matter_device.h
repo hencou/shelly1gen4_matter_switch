@@ -46,17 +46,9 @@ void matter_update_relay_onoff(bool on);
 /* Disable Thread radio so WiFi can use the 2.4 GHz radio exclusively. */
 void matter_disable_thread(void);
 
-/* Set the WiFi STA netif as OpenThread Border Router backbone.
- * Must be called BEFORE matter_start(). */
-void matter_set_tbr_backbone(void *wifi_sta_netif);
-
-/* Initialize Thread Border Router features after matter_start().
- * Routes IPv6 between WiFi backbone and Thread mesh. */
-esp_err_t matter_tbr_init(void);
-
-/* Start SRP server on the Thread mesh (without full border routing).
+/* Start SRP server on the Thread mesh.
  * Provides DNS-SD service discovery so other Thread devices can resolve
- * node addresses and establish CASE sessions without a TBR. */
+ * node addresses and establish CASE sessions without an external TBR. */
 esp_err_t matter_srp_server_start(void);
 
 /* Factory reset → wipes Matter NVS, leaves the fabric, reboot. */

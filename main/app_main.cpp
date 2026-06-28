@@ -39,16 +39,9 @@ extern "C" void on_button_event(input_id_t id, button_event_t evt)
     ESP_LOGI(TAG, "button id=%d evt=%d", id, evt);
 
     if (evt == BTN_EVT_MODE_TOGGLE) {
-        if (ota_wifi_persistent_get()) {
-            /* WiFi is already active — just open management dashboard.
-             * No need to disable Thread (coexistence handles both). */
-            ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> WiFi already persistent, opening dashboard", id);
-            ota_enable_wifi_runtime();
-        } else {
-            ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> disabling Thread, enabling WiFi", id);
-            matter_disable_thread();
-            ota_enable_wifi_runtime();
-        }
+        ESP_LOGW(TAG, "MODE_TOGGLE from input %d -> disabling Thread, enabling WiFi", id);
+        matter_disable_thread();
+        ota_enable_wifi_runtime();
         return;
     }
 
@@ -76,8 +69,8 @@ extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(nvs_flash_init());
 
-    /* Register VFS eventfd early with enough slots for OpenThread + Border Router.
-     * The OT platform uses ~3 eventfds; the BR discovery delegate needs 1 more.
+    /* Register VFS eventfd early with enough slots for OpenThread.
+     * The OT platform uses ~3 eventfds.
      * ESP-IDF v5.4 has no Kconfig for this, so we register explicitly. */
     esp_vfs_eventfd_config_t eventfd_config = { .max_fds = 8 };
     ESP_ERROR_CHECK(esp_vfs_eventfd_register(&eventfd_config));
@@ -97,29 +90,6 @@ extern "C" void app_main(void)
     script_slot_type_t slot_types[SCRIPT_MAX_SLOTS];
     script_engine_load_slot_types(slot_types, SCRIPT_MAX_SLOTS);
 
-    /* WiFi persistent + TBR: prepare netifs BEFORE matter_start() (TBR backbone
-     * must be set before OpenThread starts), but only ACTIVATE after we confirm
-     * the device is commissioned.  This prevents WiFi/Thread coexistence from
-     * interfering with BLE commissioning. */
-    bool wifi_persistent = ota_wifi_persistent_get();
-    bool tbr_mode = ota_tbr_mode_get();
-
-    if (wifi_persistent) {
-        /* Create netifs before matter_start() — TBR backbone must be set before
-         * OpenThread starts.  Actual WiFi connection is deferred until we confirm
-         * the device is commissioned. */
-        ESP_LOGI(TAG, "BOOT-STEP: WiFi persistent — creating netifs early (activation deferred)");
-        ota_wifi_ensure_netifs();
-
-        if (tbr_mode) {
-            esp_netif_t *sta = ota_get_wifi_sta_netif();
-            if (sta) {
-                matter_set_tbr_backbone(sta);
-                ESP_LOGI(TAG, "BOOT-STEP: TBR backbone netif set");
-            }
-        }
-    }
-
     /* Matter MUST start before button_driver_init / sensors_init:
      * those install GPIO ISRs and FreeRTOS tasks that immediately call
      * Matter APIs via callbacks. */
@@ -127,19 +97,6 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "BOOT-STEP: matter_start() done");
 
     bool commissioned = chip::Server::GetInstance().GetFabricTable().FabricCount() > 0;
-
-    /* WiFi persistent + TBR only activate when commissioned (fabric present).
-     * Before commissioning the radio must be free for BLE. */
-    if (wifi_persistent && commissioned) {
-        if (tbr_mode) {
-            matter_tbr_init();
-            ESP_LOGI(TAG, "BOOT-STEP: Thread Border Router initialized");
-        }
-        ota_enable_wifi_runtime();
-        ESP_LOGI(TAG, "BOOT-STEP: WiFi runtime started (persistent, commissioned)");
-    } else if (wifi_persistent && !commissioned) {
-        ESP_LOGW(TAG, "BOOT-STEP: WiFi persistent ON but not commissioned — deferred until after commissioning");
-    }
 
     /* SRP server: provides DNS-SD service discovery on Thread mesh without
      * requiring a full border router or WiFi.  Enables CASE sessions between
@@ -237,7 +194,7 @@ extern "C" void app_main(void)
      *   Let BLE advertising run so the phone can discover and commission.
      *
      * Commissioned → normal operation:
-     *   WiFi persistent/TBR already started above; otherwise 6× press. */
+     *   6× press enables WiFi temporarily (Thread disabled). */
     if (!commissioned) {
         bool has_slots = false;
         for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
