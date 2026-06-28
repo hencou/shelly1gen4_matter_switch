@@ -69,6 +69,10 @@ extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(nvs_flash_init());
 
+    /* Mark current image as valid immediately so the bootloader does not
+     * roll back while the rest of init runs (Matter/sensors can take seconds). */
+    ota_mark_app_valid();
+
     /* Register VFS eventfd early with enough slots for OpenThread.
      * The OT platform uses ~3 eventfds.
      * ESP-IDF v5.4 has no Kconfig for this, so we register explicitly. */
@@ -177,11 +181,6 @@ extern "C" void app_main(void)
         status_led_set(STATUS_LED_SLOW_BLINK);
         ESP_LOGI(TAG, "BOOT-STEP: status_led -> SLOW_BLINK (not commissioned)");
     }
-
-    /* Mark current image as valid so bootloader rollback does not
-     * trigger when booting from a fresh OTA. */
-    ota_mark_app_valid();
-    ESP_LOGI(TAG, "BOOT-STEP: ota_mark_app_valid done");
 
     /* Smart boot: decide between WiFi-setup mode and BLE-commissioning mode.
      *
