@@ -80,9 +80,6 @@ CONFIG_CHIP_PROJECT_CONFIG="main/CHIPProjectConfig.h"
 CONFIG_DEFAULT_SETUP_PASSCODE=20202021
 CONFIG_DEFAULT_SETUP_DISCRIMINATOR=3840
 
-# Storage backend for CHIP key-value store
-CONFIG_CHIP_FACTORY_NAMESPACE_PARTITION_LABEL="chip_factory"
-CONFIG_CHIP_KVS_NAMESPACE_PARTITION_LABEL="chip_kvs"
 
 # ---------- Shelly 1 Gen4 pinout (canonical-validated, see main/Kconfig.projbuild) ----------
 # Pushbutton (System 55 / wall switch) on the SW terminal — external pull on PCB

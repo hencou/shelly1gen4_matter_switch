@@ -564,7 +564,7 @@ extern "C" void matter_factory_reset(void)
     esp_matter::factory_reset();   /* wipes Matter NVS + reboot */
 }
 
-/* Commission mode is now handled by wiping chip_kvs + reboot (web_api.c).
+/* Commission mode is now handled by wiping Matter NVS namespaces + reboot (web_api.c).
  * The device boots without any fabric → enters BLE commissioning automatically. */
 
 extern "C" uint16_t matter_get_slot_endpoint(uint8_t slot)
