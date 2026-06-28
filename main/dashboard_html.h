@@ -176,6 +176,8 @@ static const char MGMT_HTML[] =
 "<h3>Backup &amp; Restore</h3>"
 "<p class=info>Download all saved settings as a backup file, or restore "
 "from a previously saved backup.</p>"
+"<label style='font-weight:normal;margin:.5em 0;display:flex;align-items:center;gap:.5em'>"
+"<input type=checkbox id=bk-nvs> Include NVS (Matter commissioning data)</label>"
 "<button class='btn btn-blue' onclick=doBackup()>Download Backup</button>"
 "<h3>Restore from file</h3>"
 "<input type=file id=restfile accept='.json'>"
@@ -405,7 +407,8 @@ static const char MGMT_HTML[] =
 "}"
 
 /* Backup */
-"function doBackup(){window.location='/api/backup'}"
+"function doBackup(){var q=document.getElementById('bk-nvs').checked?'?nvs=1':'';"
+"window.location='/api/backup'+q}"
 
 /* Restore */
 "function doRestore(){"
