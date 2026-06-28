@@ -40,6 +40,7 @@
 #include "esp_private/periph_ctrl.h"
 #include "soc/periph_defs.h"
 #include "esp_partition.h"
+#include "mbedtls/base64.h"
 
 
 static const char *TAG = "web_api";
@@ -428,7 +429,33 @@ static esp_err_t api_backup_get(httpd_req_t *req)
         httpd_resp_send_chunk(req, "\"}", 2);
     }
 
-    httpd_resp_send_chunk(req, "]}", 2);
+    httpd_resp_send_chunk(req, "]", 1);
+
+    /* Optionally include raw NVS partition dump when ?nvs=1 is passed */
+    char qbuf[16] = {0};
+    if (httpd_req_get_url_query_str(req, qbuf, sizeof(qbuf)) == ESP_OK &&
+        strstr(qbuf, "nvs=1")) {
+        const esp_partition_t *nvs_part = esp_partition_find_first(
+            ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "nvs");
+        if (nvs_part) {
+            httpd_resp_send_chunk(req, ",\"nvs\":\"", 8);
+            uint8_t rbuf[768];
+            char b64buf[1024 + 4];
+            size_t olen = 0;
+            for (size_t off = 0; off < nvs_part->size; off += sizeof(rbuf)) {
+                size_t chunk = sizeof(rbuf);
+                if (off + chunk > nvs_part->size) chunk = nvs_part->size - off;
+                if (esp_partition_read(nvs_part, off, rbuf, chunk) == ESP_OK) {
+                    mbedtls_base64_encode((unsigned char *)b64buf, sizeof(b64buf),
+                                          &olen, rbuf, chunk);
+                    if (olen > 0) httpd_resp_send_chunk(req, b64buf, olen);
+                }
+            }
+            httpd_resp_send_chunk(req, "\"", 1);
+        }
+    }
+
+    httpd_resp_send_chunk(req, "}", 1);
     httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
@@ -437,7 +464,7 @@ static esp_err_t api_backup_get(httpd_req_t *req)
 static esp_err_t api_restore_post(httpd_req_t *req)
 {
     int content_len = req->content_len;
-    if (content_len <= 0 || content_len > 64 * 1024) {
+    if (content_len <= 0 || content_len > 128 * 1024) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body too large or empty");
         return ESP_FAIL;
     }
@@ -454,6 +481,45 @@ static esp_err_t api_restore_post(httpd_req_t *req)
         received += ret;
     }
     body[received] = '\0';
+
+    /* Process NVS base64 blob FIRST (before cJSON parsing) to avoid OOM.
+     * The base64 blob can be ~64KB; cJSON would duplicate it. */
+    char *nvs_marker = strstr(body, "\"nvs\":\"");
+    if (nvs_marker) {
+        char *b64_start = nvs_marker + 7;
+        char *b64_end = strchr(b64_start, '"');
+        if (b64_end && b64_end > b64_start) {
+            size_t b64_len = b64_end - b64_start;
+            const esp_partition_t *nvs_part = esp_partition_find_first(
+                ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "nvs");
+            if (nvs_part) {
+                nvs_flash_deinit();
+                esp_partition_erase_range(nvs_part, 0, nvs_part->size);
+                size_t src_off = 0, dst_off = 0;
+                uint8_t dec_buf[768];
+                bool decode_ok = true;
+                while (src_off < b64_len && dst_off < nvs_part->size) {
+                    size_t chunk = b64_len - src_off;
+                    if (chunk > 1024) chunk = 1024;
+                    size_t olen = 0;
+                    int r = mbedtls_base64_decode(dec_buf, sizeof(dec_buf), &olen,
+                        (const unsigned char *)(b64_start + src_off), chunk);
+                    if (r != 0) { decode_ok = false; break; }
+                    if (olen > 0 && dst_off + olen <= nvs_part->size) {
+                        esp_partition_write(nvs_part, dst_off, dec_buf, olen);
+                        dst_off += olen;
+                    }
+                    src_off += chunk;
+                }
+                nvs_flash_init();
+                if (decode_ok && dst_off > 0) {
+                    ESP_LOGI(TAG, "restore: NVS written (%u bytes)", (unsigned)dst_off);
+                }
+            }
+            /* Truncate the nvs value so cJSON doesn't choke on the large blob */
+            memmove(b64_start, b64_end, strlen(b64_end) + 1);
+        }
+    }
 
     cJSON *root = cJSON_Parse(body);
     free(body);
