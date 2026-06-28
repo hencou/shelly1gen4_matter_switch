@@ -283,8 +283,6 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         "\"chip_temp\":\"%s\","
         "\"reset_reason\":\"%s\","
         "\"bench_mode\":\"%s\","
-        "\"wifi_persistent\":\"%s\","
-        "\"tbr_mode\":\"%s\","
         "\"srp_mode\":\"%s\","
         "\"pushbutton\":\"%s (GPIO%d=%d)\","
         "\"pcb_button\":\"%s (GPIO4=%d)\","
@@ -301,8 +299,6 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         ctemp_str,
         rst,
         g_bench_mode ? "ON" : "OFF",
-        ota_wifi_persistent_get() ? "ON" : "OFF",
-        ota_tbr_mode_get() ? "ON" : "OFF",
         ota_srp_mode_get() ? "ON" : "OFF",
         btn_active ? "PRESSED" : "RELEASED", PIN_SWITCH_INPUT, btn_level,
         pcb_active ? "PRESSED" : "RELEASED", pcb_level,
@@ -318,32 +314,6 @@ static esp_err_t api_bench_mode_post(httpd_req_t *req)
 {
     int new_val = g_bench_mode ? 0 : 1;
     ota_bench_mode_save(new_val);
-    httpd_resp_sendstr(req, "OK");
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
-    return ESP_OK;
-}
-
-static esp_err_t api_wifi_persistent_post(httpd_req_t *req)
-{
-    bool new_val = !ota_wifi_persistent_get();
-    ota_wifi_persistent_set(new_val);
-    if (!new_val && ota_tbr_mode_get()) {
-        ota_tbr_mode_set(false);
-    }
-    httpd_resp_sendstr(req, "OK");
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
-    return ESP_OK;
-}
-
-static esp_err_t api_tbr_mode_post(httpd_req_t *req)
-{
-    bool new_val = !ota_tbr_mode_get();
-    if (new_val && !ota_wifi_persistent_get()) {
-        ota_wifi_persistent_set(true);
-    }
-    ota_tbr_mode_set(new_val);
     httpd_resp_sendstr(req, "OK");
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
@@ -425,11 +395,9 @@ static esp_err_t api_backup_get(httpd_req_t *req)
         "{\"version\":4,"
         "\"ota\":{\"ssid\":\"%s\",\"pass\":\"%s\",\"url\":\"%s\","
         "\"hostname\":\"%s\","
-        "\"wifi_persistent\":%s,\"tbr_mode\":%s,\"srp_mode\":%s},"
+        "\"srp_mode\":%s},"
         "\"scripts\":[",
         ssid, pass, url, ota_hostname_get(),
-        ota_wifi_persistent_get() ? "true" : "false",
-        ota_tbr_mode_get() ? "true" : "false",
         ota_srp_mode_get() ? "true" : "false");
     httpd_resp_send_chunk(req, hdr, strlen(hdr));
 
@@ -559,14 +527,6 @@ static esp_err_t api_restore_post(httpd_req_t *req)
                 (j_url  && cJSON_IsString(j_url))  ? j_url->valuestring  : "");
         }
 
-        cJSON *j_wp = cJSON_GetObjectItem(ota, "wifi_persistent");
-        if (j_wp && cJSON_IsBool(j_wp)) {
-            ota_wifi_persistent_set(cJSON_IsTrue(j_wp));
-        }
-        cJSON *j_tbr = cJSON_GetObjectItem(ota, "tbr_mode");
-        if (j_tbr && cJSON_IsBool(j_tbr)) {
-            ota_tbr_mode_set(cJSON_IsTrue(j_tbr));
-        }
         cJSON *j_srp = cJSON_GetObjectItem(ota, "srp_mode");
         if (j_srp && cJSON_IsBool(j_srp)) {
             ota_srp_mode_set(cJSON_IsTrue(j_srp));
@@ -901,7 +861,7 @@ void web_api_start_httpd(void)
     hc.recv_wait_timeout  = 30;
     hc.send_wait_timeout  = 10;
     hc.max_open_sockets   = 3;
-    hc.max_uri_handlers   = 20;
+    hc.max_uri_handlers   = 18;
     ESP_ERROR_CHECK(httpd_start(&srv, &hc));
 
     httpd_uri_t get_root          = { "/",                  HTTP_GET,    form_get,              NULL };
@@ -910,8 +870,6 @@ void web_api_start_httpd(void)
     httpd_uri_t get_settings      = { "/api/settings",      HTTP_GET,    api_settings_get,      NULL };
     httpd_uri_t get_hardware      = { "/api/hardware",      HTTP_GET,    api_hardware_get,      NULL };
     httpd_uri_t post_bench        = { "/api/bench-mode",    HTTP_POST,   api_bench_mode_post,   NULL };
-    httpd_uri_t post_wifip        = { "/api/wifi-persistent", HTTP_POST, api_wifi_persistent_post, NULL };
-    httpd_uri_t post_tbr          = { "/api/tbr-mode",     HTTP_POST,   api_tbr_mode_post,     NULL };
     httpd_uri_t post_srp          = { "/api/srp-mode",     HTTP_POST,   api_srp_mode_post,     NULL };
     httpd_uri_t post_restart      = { "/api/restart",       HTTP_POST,   api_restart_post,      NULL };
     httpd_uri_t post_factory      = { "/api/factory-reset", HTTP_POST,   api_factory_reset_post,NULL };
@@ -928,8 +886,6 @@ void web_api_start_httpd(void)
     httpd_register_uri_handler(srv, &get_settings);
     httpd_register_uri_handler(srv, &get_hardware);
     httpd_register_uri_handler(srv, &post_bench);
-    httpd_register_uri_handler(srv, &post_wifip);
-    httpd_register_uri_handler(srv, &post_tbr);
     httpd_register_uri_handler(srv, &post_srp);
     httpd_register_uri_handler(srv, &post_restart);
     httpd_register_uri_handler(srv, &post_factory);

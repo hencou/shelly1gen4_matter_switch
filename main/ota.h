@@ -57,16 +57,6 @@ bool ota_load_credentials(char *ssid, size_t ssidlen,
  * Call after successful boot + Thread/Matter join. */
 void ota_mark_app_valid(void);
 
-/* WiFi persistent mode: WiFi stays active after reboot (with coexistence).
- * Stored in NVS. Default: off. */
-bool ota_wifi_persistent_get(void);
-esp_err_t ota_wifi_persistent_set(bool on);
-
-/* Thread Border Router mode: enable IPv6 routing between WiFi and Thread.
- * Requires wifi_persistent=true. Stored in NVS. Default: off. */
-bool ota_tbr_mode_get(void);
-esp_err_t ota_tbr_mode_set(bool on);
-
 /* SRP Server mode: enable Thread DNS-SD service discovery without full TBR.
  * When enabled, the Shelly runs an SRP server so other Thread devices can
  * register and resolve services (needed for CASE sessions without a TBR).
@@ -81,15 +71,6 @@ esp_err_t ota_bench_mode_save(int on);
  * Default: "shelly-XXXXXX" (last 3 bytes of MAC). */
 const char *ota_hostname_get(void);
 esp_err_t ota_hostname_set(const char *name);
-
-/* Synchronously create WiFi STA + AP netifs (without starting WiFi).
- * Needed so TBR can reference the STA netif as backbone before matter_start(). */
-void ota_wifi_ensure_netifs(void);
-
-/* Get the WiFi STA netif (needed for TBR backbone). Returns NULL if WiFi not started. */
-struct esp_netif_obj;
-typedef struct esp_netif_obj esp_netif_t;
-esp_netif_t *ota_get_wifi_sta_netif(void);
 
 #ifdef __cplusplus
 }
