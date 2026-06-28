@@ -1,12 +1,16 @@
-# Shelly 1 Gen4 (8 MB flash) — Matter dual-OTA layout.
-# Matter + TBR firmware ~2.4 MB, so ota_0/ota_1 are 2.5 MB each.
-# Name,      Type, SubType,  Offset,    Size,     Flags
-nvs,         data, nvs,      0x9000,    0x6000,
-otadata,     data, ota,      0xf000,    0x2000,
-phy_init,    data, phy,      0x11000,   0x1000,
-nvs_keys,    data, nvs_keys, 0x12000,   0x1000,   encrypted,
-ota_0,       app,  ota_0,    0x20000,   0x280000,
-ota_1,       app,  ota_1,    0x2a0000,  0x280000,
-fctry,       data, nvs,      0x520000,  0x6000,
-chip_factory,data, nvs,      0x526000,  0x6000,
-chip_kvs,    data, nvs,      0x52c000,  0x6000,
+# Shelly 1 Gen4 (8 MB flash) — stock-compatible partition layout.
+# Offsets follow the stock Shelly 1 Gen4 layout for Web UI OTA compatibility.
+# The fs_0/fs_1/zb_storage/shelly partitions are stock placeholders not used
+# by this firmware. chip_factory and chip_kvs store Matter commissioning data.
+# Name,        Type, SubType,  Offset,    Size,     Flags
+otadata,       data, ota,      0x11000,   0x2000,
+nvs,           data, nvs,      0x14000,   0xC000,
+app_0,         app,  ota_0,    0x20000,   0x280000,
+fs_0,          data, 0x82,     0x2A0000,  0xE0000,
+app_1,         app,  ota_1,    0x380000,  0x280000,
+fs_1,          data, 0x82,     0x600000,  0xE0000,
+chip_factory,  data, nvs,      0x6E0000,  0x6000,
+chip_kvs,      data, nvs,      0x6E6000,  0x6000,
+fctry,         data, nvs,      0x6EC000,  0x6000,
+zb_storage,    data, 0x81,     0x7E8000,  0x8000,
+shelly,        data, 0x88,     0x7F0000,  0x10000,
