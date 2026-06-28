@@ -111,7 +111,7 @@ Via the management dashboard → **Backup** tab:
 
 Via the web management dashboard → **Factory Reset** button. This wipes:
 - All NVS data (WiFi credentials, script configurations, bench mode)
-- All Matter fabrics and commissioning data (`chip_kvs` partition)
+- All Matter fabrics and commissioning data (NVS namespaces)
 
 After factory reset the module reboots into WiFi setup mode (step 2).
 
@@ -277,7 +277,7 @@ shelly1gen4_matter_switch/
 ## Known limitations
 
 - **Test vendor ID**: firmware uses vendor ID 0xFFF1. For Google/Apple Home publication a CSA vendor ID is required.
-- **Test DAC**: for production, provision real Device Attestation Certificates in `chip_factory`. For local HA usage the test DAC works fine.
+- **Test DAC**: for production, provision real Device Attestation Certificates in the NVS `chip-factory` namespace. For local HA usage the test DAC works fine.
 - **WiFi + Thread coexistence**: ESP32-C6 has one 2.4 GHz radio shared via TDM. When WiFi persistent mode is OFF, Thread is disabled when WiFi is activated via 6× press and resumes on reboot. When WiFi persistent mode is ON, both coexist via software coexistence.
 
 ## License

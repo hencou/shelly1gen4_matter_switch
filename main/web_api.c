@@ -40,7 +40,7 @@
 #include "esp_private/periph_ctrl.h"
 #include "soc/periph_defs.h"
 #include "esp_partition.h"
-#include "mbedtls/base64.h"
+
 
 static const char *TAG = "web_api";
 
@@ -341,8 +341,7 @@ static esp_err_t api_restart_post(httpd_req_t *req)
 static esp_err_t api_factory_reset_post(httpd_req_t *req)
 {
     httpd_resp_sendstr(req, "OK");
-    ESP_LOGW(TAG, "Factory reset via web: wiping nvs + chip_kvs");
-    nvs_flash_erase_partition("chip_kvs");
+    ESP_LOGW(TAG, "Factory reset via web: wiping nvs");
     nvs_flash_deinit();
     nvs_flash_erase();
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -350,12 +349,24 @@ static esp_err_t api_factory_reset_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+static void erase_nvs_namespace(const char *ns)
+{
+    nvs_handle_t h;
+    if (nvs_open(ns, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_erase_all(h);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
 static esp_err_t api_commission_post(httpd_req_t *req)
 {
     httpd_resp_sendstr(req, "OK");
-    ESP_LOGW(TAG, "Commission mode: removing all fabrics and rebooting into BLE pairing");
-    /* Wipe only chip_kvs (Matter fabrics/bindings) — keep WiFi/scripts in nvs */
-    nvs_flash_erase_partition("chip_kvs");
+    ESP_LOGW(TAG, "Commission mode: removing Matter fabrics and rebooting into BLE pairing");
+    /* Wipe Matter NVS namespaces — keep WiFi/scripts untouched */
+    erase_nvs_namespace("chip-kvs");
+    erase_nvs_namespace("chip-config");
+    erase_nvs_namespace("chip-counters");
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
     return ESP_OK;
@@ -417,30 +428,7 @@ static esp_err_t api_backup_get(httpd_req_t *req)
         httpd_resp_send_chunk(req, "\"}", 2);
     }
 
-    httpd_resp_send_chunk(req, "]", 1);
-
-    /* Include chip_kvs partition (Matter commissioning + binding data) */
-    const esp_partition_t *kvs = esp_partition_find_first(
-        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "chip_kvs");
-    if (kvs) {
-        /* Read partition in chunks and base64-encode */
-        httpd_resp_send_chunk(req, ",\"chip_kvs\":\"", 13);
-
-        uint8_t rbuf[768];
-        char b64buf[1024 + 4];
-        size_t olen = 0;
-        for (size_t off = 0; off < kvs->size; off += sizeof(rbuf)) {
-            size_t chunk = sizeof(rbuf);
-            if (off + chunk > kvs->size) chunk = kvs->size - off;
-            if (esp_partition_read(kvs, off, rbuf, chunk) == ESP_OK) {
-                mbedtls_base64_encode((unsigned char *)b64buf, sizeof(b64buf), &olen, rbuf, chunk);
-                if (olen > 0) httpd_resp_send_chunk(req, b64buf, olen);
-            }
-        }
-        httpd_resp_send_chunk(req, "\"", 1);
-    }
-
-    httpd_resp_send_chunk(req, "}", 1);
+    httpd_resp_send_chunk(req, "]}", 2);
     httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
@@ -466,46 +454,6 @@ static esp_err_t api_restore_post(httpd_req_t *req)
         received += ret;
     }
     body[received] = '\0';
-
-    /* Process chip_kvs base64 FIRST (before cJSON parsing) to avoid OOM.
-     * The base64 blob can be ~32KB; cJSON would duplicate it, doubling heap use.
-     * We decode+write the partition directly, then truncate the field in the body. */
-    char *kvs_marker = strstr(body, "\"chip_kvs\":\"");
-    if (kvs_marker) {
-        char *b64_start = kvs_marker + 12;
-        char *b64_end = strchr(b64_start, '"');
-        if (b64_end && b64_end > b64_start) {
-            size_t b64_len = b64_end - b64_start;
-            const esp_partition_t *kvs = esp_partition_find_first(
-                ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "chip_kvs");
-            if (kvs) {
-                /* Decode in chunks to avoid allocating full decoded buffer */
-                esp_partition_erase_range(kvs, 0, kvs->size);
-                size_t src_off = 0, dst_off = 0;
-                uint8_t dec_buf[768];
-                bool decode_ok = true;
-                while (src_off < b64_len && dst_off < kvs->size) {
-                    /* Process 1024 base64 chars at a time (= 768 decoded bytes) */
-                    size_t chunk = b64_len - src_off;
-                    if (chunk > 1024) chunk = 1024;
-                    size_t olen = 0;
-                    int r = mbedtls_base64_decode(dec_buf, sizeof(dec_buf), &olen,
-                        (const unsigned char *)(b64_start + src_off), chunk);
-                    if (r != 0) { decode_ok = false; break; }
-                    if (olen > 0 && dst_off + olen <= kvs->size) {
-                        esp_partition_write(kvs, dst_off, dec_buf, olen);
-                        dst_off += olen;
-                    }
-                    src_off += chunk;
-                }
-                if (decode_ok && dst_off > 0) {
-                    ESP_LOGI(TAG, "restore: chip_kvs written (%u bytes)", (unsigned)dst_off);
-                }
-            }
-            /* Truncate the chip_kvs value in the body so cJSON doesn't choke */
-            memmove(b64_start, b64_end, strlen(b64_end) + 1);
-        }
-    }
 
     cJSON *root = cJSON_Parse(body);
     free(body);
