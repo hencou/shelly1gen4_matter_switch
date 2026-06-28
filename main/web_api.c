@@ -15,7 +15,7 @@
 #include <cJSON.h>
 #include <esp_ota_ops.h>
 #include <esp_log.h>
-#include <esp_task_wdt.h>          // Added for esp_task_wdt_reset
+#include <esp_task_wdt.h>
 #include <nvs.h>
 #include <nvs_flash.h>
 #include <string.h>
@@ -29,7 +29,6 @@ static esp_err_t restore_handler(httpd_req_t *req)
 {
     ESP_LOGW(TAG, "=== RESTORE STARTED - Memory optimized mode ===");
 
-    // Free memory before starting
     esp_task_wdt_reset();
     heap_caps_free(NULL);
     vTaskDelay(pdMS_TO_TICKS(150));
@@ -58,13 +57,13 @@ static esp_err_t restore_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "Parsing %d byte restore JSON...", ret);
 
     cJSON *root = cJSON_Parse(buf);
-    free(buf);                     // free immediately
+    free(buf);
     if (!root) {
         ESP_LOGE(TAG, "JSON parse failed");
         return httpd_resp_send_500(req);
     }
 
-    // Process scripts one by one
+    // Scripts één voor één
     cJSON *scripts = cJSON_GetObjectItem(root, "scripts");
     if (cJSON_IsArray(scripts)) {
         int count = cJSON_GetArraySize(scripts);
@@ -85,21 +84,20 @@ static esp_err_t restore_handler(httpd_req_t *req)
                 const char *script = cJSON_GetObjectItem(slot, "script") ? 
                                      cJSON_GetObjectItem(slot, "script")->valuestring : "";
 
-                // Use correct function name from your project
-                script_engine_save(slot_id, name, script);
+                script_engine_save_slot(slot_id, name, script);   // corrected function name
 
                 ESP_LOGI(TAG, "Restored slot %d: %s", slot_id, name);
             }
         }
     }
 
-    // Restore WiFi credentials
+    // WiFi credentials
     cJSON *ota = cJSON_GetObjectItem(root, "ota");
     if (ota) {
         cJSON *ssid = cJSON_GetObjectItem(ota, "ssid");
         cJSON *pass = cJSON_GetObjectItem(ota, "pass");
         if (ssid && pass && ssid->valuestring && pass->valuestring) {
-            ota_save_credentials(ssid->valuestring, pass->valuestring);
+            ota_save_credentials(ssid->valuestring, pass->valuestring, "shelly"); // 3 arguments
             ESP_LOGI(TAG, "Restored WiFi credentials for SSID: %s", ssid->valuestring);
         }
     }
@@ -120,11 +118,7 @@ esp_err_t web_api_init(void)
     config.stack_size = 8192;
 
     if (httpd_start(&server, &config) == ESP_OK) {
-        // Register your URI handlers here
-        // Example:
-        // httpd_register_uri_handler(server, &your_index_uri);
-        // httpd_register_uri_handler(server, &your_restore_uri);
-
+        // Register your other handlers here (index, scripts, etc.)
         ESP_LOGI(TAG, "Web API server started successfully");
         return ESP_OK;
     }
