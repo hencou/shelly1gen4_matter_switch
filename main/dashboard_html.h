@@ -16,7 +16,7 @@ static const char MGMT_HTML[] =
 "  margin-right:2px;border-radius:6px 6px 0 0;background:#f5f5f5;font-size:.95em}"
 ".tab.act{background:#0066cc;color:#fff;border-color:#0066cc}"
 ".pane{display:none;padding:1em 0}.pane.act{display:block}"
-"input,select{width:100%;padding:.5em;margin:.3em 0 .8em;border:1px solid #ccc;border-radius:3px}"
+"input,select{padding:.5em;margin:.3em 0 .8em;border:1px solid #ccc;border-radius:3px}"
 "label{font-weight:bold;display:block;margin-top:.3em}"
 ".btn{padding:.55em 1.2em;color:#fff;border:0;cursor:pointer;font-size:.95em;border-radius:3px;margin:.3em .3em .3em 0}"
 ".btn-blue{background:#0066cc}.btn-green{background:#28a745}"
