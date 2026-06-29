@@ -96,12 +96,22 @@ static void migrate_partition_table_if_needed(void)
              CONFIG_PARTITION_TABLE_OFFSET, STOCK_PT_OFFSET);
 
     uint8_t *buf = (uint8_t *)malloc(PT_SECTOR_SIZE);
-    if (!buf) return;
-    if (esp_flash_read(NULL, buf, STOCK_PT_OFFSET, PT_SECTOR_SIZE) != ESP_OK ||
-        esp_flash_erase_region(NULL, CONFIG_PARTITION_TABLE_OFFSET, PT_SECTOR_SIZE) != ESP_OK ||
-        esp_flash_write(NULL, buf, CONFIG_PARTITION_TABLE_OFFSET, PT_SECTOR_SIZE) != ESP_OK) {
-        free(buf);
+    if (!buf) {
+        ESP_LOGE("boot", "PT migrate: malloc failed");
         return;
+    }
+    esp_err_t err;
+    if ((err = esp_flash_read(NULL, buf, STOCK_PT_OFFSET, PT_SECTOR_SIZE)) != ESP_OK) {
+        ESP_LOGE("boot", "PT migrate: read 0x%x failed (%s)", STOCK_PT_OFFSET, esp_err_to_name(err));
+        free(buf); return;
+    }
+    if ((err = esp_flash_erase_region(NULL, CONFIG_PARTITION_TABLE_OFFSET, PT_SECTOR_SIZE)) != ESP_OK) {
+        ESP_LOGE("boot", "PT migrate: erase 0x%x failed (%s)", CONFIG_PARTITION_TABLE_OFFSET, esp_err_to_name(err));
+        free(buf); return;
+    }
+    if ((err = esp_flash_write(NULL, buf, CONFIG_PARTITION_TABLE_OFFSET, PT_SECTOR_SIZE)) != ESP_OK) {
+        ESP_LOGE("boot", "PT migrate: write 0x%x failed (%s)", CONFIG_PARTITION_TABLE_OFFSET, esp_err_to_name(err));
+        free(buf); return;
     }
     free(buf);
     ESP_LOGW("boot", "PT migrated to 0x%x, rebooting", CONFIG_PARTITION_TABLE_OFFSET);
