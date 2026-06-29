@@ -9,6 +9,7 @@ extern "C" {
 #include "esp_log.h"
 #include "esp_err.h"
 #include "nvs_flash.h"
+#include "esp_flash.h"
 #include "driver/gpio.h"
 #include "esp_vfs_eventfd.h"
 #include "freertos/FreeRTOS.h"
@@ -65,8 +66,51 @@ extern "C" void on_analog(uint8_t duty_pct)
     script_engine_analog_update(duty_pct);
 }
 
+/* Stock Shelly 1 Gen4 stores its partition table at 0x10000.
+ * Old custom firmware builds used 0x8000 (ESP-IDF default).
+ * After OTA from stock Shelly, the PT lives at 0x10000 but this
+ * firmware is compiled with CONFIG_PARTITION_TABLE_OFFSET=0x8000.
+ * Copy the PT to the compiled offset so esp_partition finds it. */
+#define STOCK_PT_OFFSET 0x10000
+#define PT_MAGIC_0 0xAA
+#define PT_MAGIC_1 0x50
+#define PT_SECTOR_SIZE 4096
+
+static void migrate_partition_table_if_needed(void)
+{
+    if (CONFIG_PARTITION_TABLE_OFFSET == STOCK_PT_OFFSET)
+        return;
+
+    uint8_t magic[2];
+    if (esp_flash_read(NULL, magic, CONFIG_PARTITION_TABLE_OFFSET, 2) != ESP_OK)
+        return;
+    if (magic[0] == PT_MAGIC_0 && magic[1] == PT_MAGIC_1)
+        return; /* PT already at compiled offset */
+
+    if (esp_flash_read(NULL, magic, STOCK_PT_OFFSET, 2) != ESP_OK)
+        return;
+    if (magic[0] != PT_MAGIC_0 || magic[1] != PT_MAGIC_1)
+        return; /* no valid PT at stock offset either */
+
+    ESP_LOGW("boot", "PT at 0x%x invalid, found at 0x%x — migrating",
+             CONFIG_PARTITION_TABLE_OFFSET, STOCK_PT_OFFSET);
+
+    uint8_t *buf = (uint8_t *)malloc(PT_SECTOR_SIZE);
+    if (!buf) return;
+    if (esp_flash_read(NULL, buf, STOCK_PT_OFFSET, PT_SECTOR_SIZE) != ESP_OK ||
+        esp_flash_erase_region(NULL, CONFIG_PARTITION_TABLE_OFFSET, PT_SECTOR_SIZE) != ESP_OK ||
+        esp_flash_write(NULL, buf, CONFIG_PARTITION_TABLE_OFFSET, PT_SECTOR_SIZE) != ESP_OK) {
+        free(buf);
+        return;
+    }
+    free(buf);
+    ESP_LOGW("boot", "PT migrated to 0x%x, rebooting", CONFIG_PARTITION_TABLE_OFFSET);
+    esp_restart();
+}
+
 extern "C" void app_main(void)
 {
+    migrate_partition_table_if_needed();
     ESP_ERROR_CHECK(nvs_flash_init());
 
     /* Mark current image as valid immediately so the bootloader does not
