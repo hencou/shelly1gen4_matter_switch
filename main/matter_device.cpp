@@ -564,8 +564,32 @@ extern "C" void matter_factory_reset(void)
     esp_matter::factory_reset();   /* wipes Matter NVS + reboot */
 }
 
-/* Commission mode is now handled by wiping Matter NVS namespaces + reboot (web_api.c).
- * The device boots without any fabric → enters BLE commissioning automatically. */
+/* Commission mode: delete every commissioned fabric through the CHIP FabricTable
+ * API. This removes the NOCs, operational keys and index metadata regardless of
+ * which NVS namespace/partition they live in — unlike erasing the "chip-kvs"
+ * namespace directly, which misses fabric data on devices whose KVS lives in a
+ * separate partition. Scripts and WiFi config (in the "ota" namespace) are kept.
+ * After this the device boots uncommissioned → BLE commissioning advertising. */
+extern "C" void matter_delete_all_fabrics(void)
+{
+    chip::DeviceLayer::PlatformMgr().LockChipStack();
+    auto &fabricTable = chip::Server::GetInstance().GetFabricTable();
+
+    /* Collect indices first — deleting while iterating invalidates the iterator. */
+    chip::FabricIndex indices[CHIP_CONFIG_MAX_FABRICS];
+    size_t count = 0;
+    for (const auto &fb : fabricTable) {
+        if (count < CHIP_CONFIG_MAX_FABRICS) {
+            indices[count++] = fb.GetFabricIndex();
+        }
+    }
+    for (size_t i = 0; i < count; i++) {
+        CHIP_ERROR err = fabricTable.Delete(indices[i]);
+        ESP_LOGW(TAG, "Deleted fabric index %u: %s", indices[i], chip::ErrorStr(err));
+    }
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+    ESP_LOGW(TAG, "matter_delete_all_fabrics: removed %u fabric(s)", (unsigned)count);
+}
 
 extern "C" uint16_t matter_get_slot_endpoint(uint8_t slot)
 {
