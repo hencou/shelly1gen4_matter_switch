@@ -8,6 +8,7 @@
 #include "app_config.h"
 #include "script_engine.h"
 #include "dashboard_html.h"
+#include "matter_device.h"
 
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -364,7 +365,12 @@ static esp_err_t api_commission_post(httpd_req_t *req)
 {
     httpd_resp_sendstr(req, "OK");
     ESP_LOGW(TAG, "Commission mode: removing Matter fabrics and rebooting into BLE pairing");
-    /* Wipe Matter NVS namespaces — keep WiFi/scripts untouched */
+    /* Delete fabrics via the CHIP FabricTable API — partition-agnostic, so it
+     * works whether the KVS lives in the "nvs" partition or a dedicated
+     * "chip_kvs" partition (old-layout devices). */
+    matter_delete_all_fabrics();
+    /* Also wipe the residual Matter NVS namespaces so no stale config/counters
+     * survive — keeps WiFi/scripts (in the "ota" namespace) untouched. */
     erase_nvs_namespace("chip-kvs");
     erase_nvs_namespace("chip-config");
     erase_nvs_namespace("chip-counters");

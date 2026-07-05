@@ -54,6 +54,10 @@ esp_err_t matter_srp_server_start(void);
 /* Factory reset → wipes Matter NVS, leaves the fabric, reboot. */
 void matter_factory_reset(void);
 
+/* Commission mode → delete all commissioned fabrics via the CHIP FabricTable
+ * API (partition-agnostic). Keeps scripts + WiFi config. Caller reboots after. */
+void matter_delete_all_fabrics(void);
+
 #ifdef __cplusplus
 }
 #endif
