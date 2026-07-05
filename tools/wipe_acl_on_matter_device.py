@@ -112,6 +112,18 @@ def filter_admin_entries(acl: list) -> tuple[list, list]:
     return keep, drop
 
 
+def _normalize_scalar(resp: dict, path: str):
+    """Same idea as _normalize_result() but for single-value attributes
+    (MaxGroupsPerFabric, MaxGroupKeysPerFabric), which some matter-server
+    versions also wrap in a {attribute_path: value} dict."""
+    result = resp.get("result")
+    if isinstance(result, dict):
+        if path in result:
+            return result[path]
+        return next(iter(result.values()), None)
+    return result
+
+
 def _normalize_result(resp: dict, path: str) -> list:
     """matter-server can return the result as a list OR as a dict
     ({attribute_path: value}), depending on the version. Normalize to a list."""
@@ -170,6 +182,32 @@ async def discover_group_endpoints(ws, node_id: int) -> list[int]:
             endpoints.add(int(parts[0]))
 
     return sorted(endpoints)
+
+
+async def read_stored_keyset_ids(ws, node_id: int) -> list[int]:
+    """Ask the node which GroupKeySets it actually has stored (this is a
+    separate resource from GroupKeyMap: GroupKeyMap only maps GroupId ->
+    GroupKeySetID, the keyset itself — the crypto material — takes up its
+    own slot regardless of whether anything currently maps to it).
+    Uses the KeySetReadAllIndices command on the Group Key Management
+    cluster (endpoint 0, cluster 0x3F / 63)."""
+    resp = await send_command(ws, "device_command", {
+        "node_id": node_id,
+        "endpoint_id": 0,
+        "cluster_id": 63,
+        "command_name": "KeySetReadAllIndices",
+        "payload": {},
+    }, message_id="keyset-read-all-indices")
+
+    if "error_code" in resp or "error" in resp:
+        sys.exit(f"ERROR during device_command (KeySetReadAllIndices): {resp}")
+
+    result = resp.get("result") or {}
+    # Field name casing can differ between matter-server versions.
+    ids = result.get("groupKeySetIDs")
+    if ids is None:
+        ids = result.get("GroupKeySetIDs", [])
+    return list(ids)
 
 
 async def main() -> int:
@@ -323,13 +361,13 @@ async def main() -> int:
                 "node_id": args.node,
                 "attribute_path": MAX_GROUPS_PER_FABRIC_PATH,
             }, message_id="read-maxgroups")
-            max_groups = resp.get("result")
+            max_groups = _normalize_scalar(resp, MAX_GROUPS_PER_FABRIC_PATH)
 
             resp = await send_command(ws, "read_attribute", {
                 "node_id": args.node,
                 "attribute_path": MAX_GROUP_KEYS_PER_FABRIC_PATH,
             }, message_id="read-maxgroupkeys")
-            max_group_keys = resp.get("result")
+            max_group_keys = _normalize_scalar(resp, MAX_GROUP_KEYS_PER_FABRIC_PATH)
 
             print(f"[*] MaxGroupsPerFabric={max_groups!r} "
                   f"MaxGroupKeysPerFabric={max_group_keys!r}")
@@ -368,7 +406,40 @@ async def main() -> int:
 
                 print(f"[*] OK — response: {resp.get('result', resp)}")
 
-            # ----- 8) Clear the fabric-scoped GroupKeyMap -------------------
+            # ----- 8) Remove stale GroupKeySets (the actual scarce resource) --
+            print(f"\n[*] Reading stored GroupKeySet indices on node {args.node} ...")
+            stored_ids = await read_stored_keyset_ids(ws, args.node)
+            print(f"[*] Stored GroupKeySet IDs: {stored_ids}")
+
+            removable_ids = [i for i in stored_ids if i != 0]
+            if 0 in stored_ids:
+                print("[*] Keeping keyset ID 0 (IPK) — never remove this one.")
+
+            if not removable_ids:
+                print("[*] No removable GroupKeySets found — nothing to do here.")
+            else:
+                print(f"[*] Removable GroupKeySets: {removable_ids}")
+                for keyset_id in removable_ids:
+                    if args.dry_run:
+                        print(f"[*] --dry-run: would remove GroupKeySet {keyset_id}.")
+                        continue
+
+                    print(f"[*] Removing GroupKeySet {keyset_id} ...")
+                    resp = await send_command(ws, "device_command", {
+                        "node_id": args.node,
+                        "endpoint_id": 0,
+                        "cluster_id": 63,
+                        "command_name": "KeySetRemove",
+                        "payload": {"groupKeySetID": keyset_id},
+                    }, message_id=f"keyset-remove-{keyset_id}")
+
+                    if "error_code" in resp or "error" in resp:
+                        sys.exit(f"ERROR during device_command (KeySetRemove "
+                                  f"{keyset_id}): {resp}")
+
+                    print(f"[*] OK — response: {resp.get('result', resp)}")
+
+            # ----- 9) Clear the fabric-scoped GroupKeyMap -------------------
             if not group_key_map:
                 print("\n[*] GroupKeyMap: nothing to do — already empty.")
             elif args.dry_run:
