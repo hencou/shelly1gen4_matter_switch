@@ -111,6 +111,31 @@ def _normalize_result(resp: dict, path: str) -> list:
     sys.exit(f"ERROR: unexpected result format: {result!r}")
 
 
+async def discover_binding_endpoints(ws, node_id: int) -> list[int]:
+    """Find which endpoint(s) actually expose the Binding cluster (0x1E / 30)
+    on this node. Not every device has a Binding cluster, and if it does,
+    it isn't always on endpoint 1 — so ask the server instead of guessing.
+    Uses the 'get_node' command, which returns the full cached node data
+    including an 'attributes' dict keyed by 'endpoint/cluster/attribute'."""
+    resp = await send_command(ws, "get_node", {
+        "node_id": node_id,
+    }, message_id="get-node")
+
+    if "error_code" in resp or "error" in resp:
+        sys.exit(f"ERROR during get_node: {resp}")
+
+    node_data = resp.get("result", {})
+    attributes = node_data.get("attributes", {})
+
+    endpoints = set()
+    for key in attributes:
+        parts = key.split("/")
+        if len(parts) == 3 and parts[1] == "30":
+            endpoints.add(int(parts[0]))
+
+    return sorted(endpoints)
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser(
         description="Wipe stale ACL entries from a Matter node.",
@@ -120,8 +145,9 @@ async def main() -> int:
                     help="matter-server WebSocket URL")
     ap.add_argument("--node", type=int, default=3,
                     help="lamp node id")
-    ap.add_argument("--endpoint", type=int, default=1,
-                    help="endpoint that holds the binding table (usually 1)")
+    ap.add_argument("--endpoint", type=int, default=None,
+                    help="endpoint that holds the binding table. "
+                         "If omitted, it is auto-detected via get_node.")
     ap.add_argument("--dry-run", action="store_true",
                     help="only show what would be written, change nothing")
     args = ap.parse_args()
@@ -189,39 +215,54 @@ async def main() -> int:
 
             print(f"[*] OK — response: {resp.get('result', resp)}")
 
-        # ----- 4) Read current binding table -------------------------
-        binding_path = BINDING_PATH_TMPL.format(endpoint=args.endpoint)
-        print(f"\n[*] Reading binding table of node {args.node} "
-              f"endpoint {args.endpoint} (path {binding_path}) ...")
-        resp = await send_command(ws, "read_attribute", {
-            "node_id": args.node,
-            "attribute_path": binding_path,
-        }, message_id="read-binding")
-
-        if "error_code" in resp or "error" in resp:
-            sys.exit(f"ERROR during read_attribute (binding): {resp}")
-
-        current_bindings = _normalize_result(resp, binding_path)
-
-        print(f"[*] Current binding table ({len(current_bindings)} entries):")
-        for i, e in enumerate(current_bindings):
-            print(f"      [{i}] {e}")
-
-        # ----- 5) Clear binding table ----------------------------------
-        if not current_bindings:
-            print("\n[*] Binding table: nothing to do — already empty.")
-        elif args.dry_run:
-            print("\n[*] --dry-run: nothing written to binding table.")
+        # ----- 4) Find endpoint(s) with a Binding cluster ---------------
+        if args.endpoint is not None:
+            binding_endpoints = [args.endpoint]
         else:
-            print("\n[*] Clearing binding table (writing empty list) ...")
+            print(f"\n[*] Auto-detecting Binding cluster endpoint(s) on node {args.node} ...")
+            binding_endpoints = await discover_binding_endpoints(ws, args.node)
+
+        if not binding_endpoints:
+            print("[*] No Binding cluster found on this node — nothing to clean up.")
+        else:
+            print(f"[*] Binding cluster found on endpoint(s): {binding_endpoints}")
+
+        # ----- 5) Read and clear the binding table on each endpoint -----
+        for endpoint in binding_endpoints:
+            binding_path = BINDING_PATH_TMPL.format(endpoint=endpoint)
+            print(f"\n[*] Reading binding table of node {args.node} "
+                  f"endpoint {endpoint} (path {binding_path}) ...")
+            resp = await send_command(ws, "read_attribute", {
+                "node_id": args.node,
+                "attribute_path": binding_path,
+            }, message_id=f"read-binding-{endpoint}")
+
+            if "error_code" in resp or "error" in resp:
+                sys.exit(f"ERROR during read_attribute (binding, endpoint {endpoint}): {resp}")
+
+            current_bindings = _normalize_result(resp, binding_path)
+
+            print(f"[*] Current binding table ({len(current_bindings)} entries):")
+            for i, e in enumerate(current_bindings):
+                print(f"      [{i}] {e}")
+
+            if not current_bindings:
+                print("[*] Binding table: nothing to do — already empty.")
+                continue
+
+            if args.dry_run:
+                print("[*] --dry-run: nothing written to binding table.")
+                continue
+
+            print("[*] Clearing binding table (writing empty list) ...")
             resp = await send_command(ws, "write_attribute", {
                 "node_id": args.node,
                 "attribute_path": binding_path,
                 "value": [],
-            }, message_id="write-binding")
+            }, message_id=f"write-binding-{endpoint}")
 
             if "error_code" in resp or "error" in resp:
-                sys.exit(f"ERROR during write_attribute (binding): {resp}")
+                sys.exit(f"ERROR during write_attribute (binding, endpoint {endpoint}): {resp}")
 
             print(f"[*] OK — response: {resp.get('result', resp)}")
 
