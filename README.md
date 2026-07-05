@@ -82,25 +82,6 @@ To access the management dashboard: **press any button 6× rapidly** (within 2.5
 - AP always available: `shelly-cfg-XXXX` on `192.168.4.1`
 - STA connects to your router (if credentials are saved)
 
-<del>
-### WiFi persistent mode
-
-Enable via **Hardware** tab → **WiFi persistent** toggle. When ON:
-- WiFi stays active across reboots (coexistence with Thread via time-division multiplexing)
-- No need to press 6× — management dashboard always reachable
-- 6× press still works but won't disable Thread (both stay active)
-
-### Thread Border Router (TBR)
-
-Enable via **Hardware** tab → **Thread Border Router** toggle. When ON:
-- Routes IPv6 packets between WiFi backbone and Thread mesh
-- Requires WiFi persistent (auto-enabled when enabling TBR)
-- Allows Thread devices to communicate with non-Thread networks
-- Uses software coexistence (TDM) — single ESP32-C6 radio shared between WiFi and 802.15.4
-
-> **Note:** TBR on a single-SoC ESP32-C6 is functional but has reduced throughput compared to a dual-SoC setup (e.g. ESP32-S3 + ESP32-H2). Suitable for home automation, not industrial use.
-</del>
-
 ### Backup & restore
 
 Via the management dashboard → **Backup** tab:
