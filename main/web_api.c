@@ -477,61 +477,114 @@ static esp_err_t api_restore_post(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body too large or empty");
         return ESP_FAIL;
     }
-    char *body = (char *)calloc(1, content_len + 1);
-    if (!body) {
+    /* Stream the request body. The NVS base64 blob (up to ~85 KB) is decoded
+     * straight to the flash partition as it arrives, so we never hold the whole
+     * body in RAM — previously a single ~90 KB allocation that often OOMed on
+     * the ~200 KB heap while the Matter stack was running. Only the small header
+     * JSON (ota + scripts) is buffered for cJSON. The "nvs" field is emitted last
+     * by /api/backup, so the buffered header stays small. */
+    static const char MARKER[] = "\"nvs\":\"";
+    const size_t MARKER_LEN = sizeof(MARKER) - 1;
+
+    size_t hdr_cap = 4096, hdr_len = 0;
+    char *hdr = (char *)malloc(hdr_cap);
+    if (!hdr) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
         return ESP_FAIL;
     }
 
-    int received = 0;
-    while (received < content_len) {
-        int ret = httpd_req_recv(req, body + received, content_len - received);
-        if (ret <= 0) { free(body); httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "recv failed"); return ESP_FAIL; }
-        received += ret;
-    }
-    body[received] = '\0';
+    enum { PH_HEADER, PH_NVS, PH_TAIL } phase = PH_HEADER;
+    const esp_partition_t *nvs_part = NULL;
+    size_t nvs_dst = 0;
+    bool nvs_active = false, nvs_ok = true, failed = false;
+    char b64buf[1024];            /* multiple of 4 → base64 chunks stay aligned */
+    size_t b64n = 0;
 
-    /* Process NVS base64 blob FIRST (before cJSON parsing) to avoid OOM.
-     * The base64 blob can be ~64KB; cJSON would duplicate it. */
-    char *nvs_marker = strstr(body, "\"nvs\":\"");
-    if (nvs_marker) {
-        char *b64_start = nvs_marker + 7;
-        char *b64_end = strchr(b64_start, '"');
-        if (b64_end && b64_end > b64_start) {
-            size_t b64_len = b64_end - b64_start;
-            const esp_partition_t *nvs_part = esp_partition_find_first(
-                ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "nvs");
-            if (nvs_part) {
-                nvs_flash_deinit();
-                esp_partition_erase_range(nvs_part, 0, nvs_part->size);
-                size_t src_off = 0, dst_off = 0;
-                uint8_t dec_buf[768];
-                bool decode_ok = true;
-                while (src_off < b64_len && dst_off < nvs_part->size) {
-                    size_t chunk = b64_len - src_off;
-                    if (chunk > 1024) chunk = 1024;
-                    size_t olen = 0;
-                    int r = mbedtls_base64_decode(dec_buf, sizeof(dec_buf), &olen,
-                        (const unsigned char *)(b64_start + src_off), chunk);
-                    if (r != 0) { decode_ok = false; break; }
-                    if (olen > 0 && dst_off + olen <= nvs_part->size) {
-                        esp_partition_write(nvs_part, dst_off, dec_buf, olen);
-                        dst_off += olen;
-                    }
-                    src_off += chunk;
+    char rbuf[1024];
+    int received = 0;
+
+    while (received < content_len && !failed) {
+        int n = httpd_req_recv(req, rbuf, sizeof(rbuf));
+        if (n <= 0) { failed = true; break; }
+        received += n;
+
+        for (int i = 0; i < n && !failed; i++) {
+            char c = rbuf[i];
+
+            if (phase == PH_HEADER || phase == PH_TAIL) {
+                if (hdr_len + 1 >= hdr_cap) {
+                    char *nh = (char *)realloc(hdr, hdr_cap * 2);
+                    if (!nh) { failed = true; break; }
+                    hdr = nh; hdr_cap *= 2;
                 }
-                nvs_flash_init();
-                if (decode_ok && dst_off > 0) {
-                    ESP_LOGI(TAG, "restore: NVS written (%u bytes)", (unsigned)dst_off);
+                hdr[hdr_len++] = c;
+
+                if (phase == PH_HEADER && hdr_len >= MARKER_LEN &&
+                    memcmp(hdr + hdr_len - MARKER_LEN, MARKER, MARKER_LEN) == 0) {
+                    hdr_len -= MARKER_LEN;                              /* drop marker */
+                    if (hdr_len > 0 && hdr[hdr_len - 1] == ',') hdr_len--; /* drop separator */
+                    nvs_part = esp_partition_find_first(
+                        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "nvs");
+                    if (nvs_part) {
+                        nvs_flash_deinit();
+                        esp_partition_erase_range(nvs_part, 0, nvs_part->size);
+                        nvs_active = true;
+                    }
+                    phase = PH_NVS;
+                }
+            } else { /* PH_NVS: base64 value, decode straight to flash */
+                if (c == '"') {
+                    if (nvs_active && b64n > 0) {
+                        uint8_t dec[768]; size_t olen = 0;
+                        if (mbedtls_base64_decode(dec, sizeof(dec), &olen,
+                                (const unsigned char *)b64buf, b64n) == 0 &&
+                            olen > 0 && nvs_dst + olen <= nvs_part->size) {
+                            esp_partition_write(nvs_part, nvs_dst, dec, olen);
+                            nvs_dst += olen;
+                        } else {
+                            nvs_ok = false;
+                        }
+                    }
+                    b64n = 0;
+                    phase = PH_TAIL;
+                } else {
+                    b64buf[b64n++] = c;
+                    if (b64n == sizeof(b64buf)) {
+                        if (nvs_active) {
+                            uint8_t dec[768]; size_t olen = 0;
+                            if (mbedtls_base64_decode(dec, sizeof(dec), &olen,
+                                    (const unsigned char *)b64buf, b64n) == 0 &&
+                                olen > 0 && nvs_dst + olen <= nvs_part->size) {
+                                esp_partition_write(nvs_part, nvs_dst, dec, olen);
+                                nvs_dst += olen;
+                            } else {
+                                nvs_ok = false;
+                            }
+                        }
+                        b64n = 0;
+                    }
                 }
             }
-            /* Truncate the nvs value so cJSON doesn't choke on the large blob */
-            memmove(b64_start, b64_end, strlen(b64_end) + 1);
         }
     }
 
-    cJSON *root = cJSON_Parse(body);
-    free(body);
+    if (nvs_active) {
+        nvs_flash_init();
+        if (nvs_ok && nvs_dst > 0)
+            ESP_LOGI(TAG, "restore: NVS written (%u bytes)", (unsigned)nvs_dst);
+        else if (!nvs_ok)
+            ESP_LOGW(TAG, "restore: NVS decode error after %u bytes", (unsigned)nvs_dst);
+    }
+
+    if (failed) {
+        free(hdr);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "recv failed");
+        return ESP_FAIL;
+    }
+
+    hdr[hdr_len] = '\0';
+    cJSON *root = cJSON_Parse(hdr);
+    free(hdr);
     if (!root) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
         return ESP_FAIL;
