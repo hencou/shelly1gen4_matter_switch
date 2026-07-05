@@ -51,6 +51,20 @@ ACL_PATH = "0/31/0"
 # lamps/switches this is endpoint 1.
 BINDING_PATH_TMPL = "{endpoint}/30/0"
 
+# Group Key Management cluster (0x003F / 63) lives on endpoint 0.
+# GroupKeyMap (attribute 0) is the fabric-scoped list of {GroupId, GroupKeySetID}
+# mappings — this is effectively "which groups is this node in, for our fabric".
+# MaxGroupsPerFabric / MaxGroupKeysPerFabric tell us the device's hard limit,
+# which is what "Resource exhausted" means the node has hit.
+GROUP_KEY_MAP_PATH = "0/63/0"
+MAX_GROUPS_PER_FABRIC_PATH = "0/63/2"
+MAX_GROUP_KEYS_PER_FABRIC_PATH = "0/63/3"
+
+# Groups cluster (0x0004 / 4) is per-endpoint and holds the device-local group
+# membership table. There's no attribute to read that table directly; it's
+# cleared with the RemoveAllGroups command instead.
+GROUPS_CLUSTER_ID = 4
+
 
 async def send_command(
     ws: "websockets.WebSocketClientProtocol",
@@ -136,6 +150,28 @@ async def discover_binding_endpoints(ws, node_id: int) -> list[int]:
     return sorted(endpoints)
 
 
+async def discover_group_endpoints(ws, node_id: int) -> list[int]:
+    """Find which endpoint(s) expose the Groups cluster (0x0004 / 4) on this
+    node, the same way discover_binding_endpoints() does for cluster 30."""
+    resp = await send_command(ws, "get_node", {
+        "node_id": node_id,
+    }, message_id="get-node-groups")
+
+    if "error_code" in resp or "error" in resp:
+        sys.exit(f"ERROR during get_node: {resp}")
+
+    node_data = resp.get("result", {})
+    attributes = node_data.get("attributes", {})
+
+    endpoints = set()
+    for key in attributes:
+        parts = key.split("/")
+        if len(parts) == 3 and parts[1] == str(GROUPS_CLUSTER_ID):
+            endpoints.add(int(parts[0]))
+
+    return sorted(endpoints)
+
+
 async def main() -> int:
     ap = argparse.ArgumentParser(
         description="Wipe stale ACL entries from a Matter node.",
@@ -150,6 +186,8 @@ async def main() -> int:
                          "If omitted, it is auto-detected via get_node.")
     ap.add_argument("--dry-run", action="store_true",
                     help="only show what would be written, change nothing")
+    ap.add_argument("--skip-groups", action="store_true",
+                    help="skip the Group Key Management / Groups cleanup step")
     args = ap.parse_args()
 
     print(f"[*] Connecting to {args.ws} ...")
@@ -266,7 +304,89 @@ async def main() -> int:
 
             print(f"[*] OK — response: {resp.get('result', resp)}")
 
-        print("\n[*] Done. Try setting up the binding in HA again.")
+        # ----- 6) Group Key Management: inspect capacity + fabric groups ----
+        if args.skip_groups:
+            print("\n[*] Group cleanup skipped (--skip-groups).")
+        else:
+            print(f"\n[*] Reading Group Key Management state on node {args.node} ...")
+            resp = await send_command(ws, "read_attribute", {
+                "node_id": args.node,
+                "attribute_path": GROUP_KEY_MAP_PATH,
+            }, message_id="read-groupkeymap")
+
+            if "error_code" in resp or "error" in resp:
+                sys.exit(f"ERROR during read_attribute (group key map): {resp}")
+
+            group_key_map = _normalize_result(resp, GROUP_KEY_MAP_PATH)
+
+            resp = await send_command(ws, "read_attribute", {
+                "node_id": args.node,
+                "attribute_path": MAX_GROUPS_PER_FABRIC_PATH,
+            }, message_id="read-maxgroups")
+            max_groups = resp.get("result")
+
+            resp = await send_command(ws, "read_attribute", {
+                "node_id": args.node,
+                "attribute_path": MAX_GROUP_KEYS_PER_FABRIC_PATH,
+            }, message_id="read-maxgroupkeys")
+            max_group_keys = resp.get("result")
+
+            print(f"[*] MaxGroupsPerFabric={max_groups!r} "
+                  f"MaxGroupKeysPerFabric={max_group_keys!r}")
+            print(f"[*] Current GroupKeyMap ({len(group_key_map)} entries, "
+                  f"this fabric only):")
+            for i, e in enumerate(group_key_map):
+                print(f"      [{i}] {e}")
+
+            # ----- 7) Clear device-local Groups cluster membership ---------
+            print(f"\n[*] Auto-detecting Groups cluster endpoint(s) on node {args.node} ...")
+            group_endpoints = await discover_group_endpoints(ws, args.node)
+
+            if not group_endpoints:
+                print("[*] No Groups cluster found on this node.")
+            else:
+                print(f"[*] Groups cluster found on endpoint(s): {group_endpoints}")
+
+            for endpoint in group_endpoints:
+                if args.dry_run:
+                    print(f"[*] --dry-run: would send RemoveAllGroups to "
+                          f"endpoint {endpoint}.")
+                    continue
+
+                print(f"[*] Sending RemoveAllGroups to endpoint {endpoint} ...")
+                resp = await send_command(ws, "device_command", {
+                    "node_id": args.node,
+                    "endpoint_id": endpoint,
+                    "cluster_id": GROUPS_CLUSTER_ID,
+                    "command_name": "RemoveAllGroups",
+                    "payload": {},
+                }, message_id=f"remove-all-groups-{endpoint}")
+
+                if "error_code" in resp or "error" in resp:
+                    sys.exit(f"ERROR during device_command (RemoveAllGroups, "
+                              f"endpoint {endpoint}): {resp}")
+
+                print(f"[*] OK — response: {resp.get('result', resp)}")
+
+            # ----- 8) Clear the fabric-scoped GroupKeyMap -------------------
+            if not group_key_map:
+                print("\n[*] GroupKeyMap: nothing to do — already empty.")
+            elif args.dry_run:
+                print("\n[*] --dry-run: nothing written to GroupKeyMap.")
+            else:
+                print("\n[*] Clearing GroupKeyMap (writing empty list) ...")
+                resp = await send_command(ws, "write_attribute", {
+                    "node_id": args.node,
+                    "attribute_path": GROUP_KEY_MAP_PATH,
+                    "value": [],
+                }, message_id="write-groupkeymap")
+
+                if "error_code" in resp or "error" in resp:
+                    sys.exit(f"ERROR during write_attribute (group key map): {resp}")
+
+                print(f"[*] OK — response: {resp.get('result', resp)}")
+
+        print("\n[*] Done. Try adding the device to the group again.")
         return 0
 
 
