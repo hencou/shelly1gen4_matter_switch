@@ -58,6 +58,10 @@ void matter_factory_reset(void);
  * API (partition-agnostic). Keeps scripts + WiFi config. Caller reboots after. */
 void matter_delete_all_fabrics(void);
 
+/* Diagnostics: dump the current CHIP Binding table into a human-readable
+ * string. Returns the number of entries found. */
+int matter_binding_dump(char *buf, size_t buf_len);
+
 #ifdef __cplusplus
 }
 #endif

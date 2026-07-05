@@ -927,6 +927,41 @@ static esp_err_t api_script_delete(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* GET /api/diag — diagnostics: NVS usage of the "nvs" partition + the CHIP
+ * binding table as the firmware actually holds it. Used to tell whether a
+ * binding write persisted and whether the nvs partition is out of space. */
+static esp_err_t api_diag_get(httpd_req_t *req)
+{
+    static char out[2048];
+    int pos = 0;
+
+    nvs_stats_t st;
+    esp_err_t r = nvs_get_stats(NULL, &st);
+    if (r == ESP_OK) {
+        pos += snprintf(out + pos, sizeof(out) - pos,
+            "NVS (nvs partition):\n"
+            "  used_entries  = %d\n"
+            "  free_entries  = %d\n"
+            "  total_entries = %d\n"
+            "  namespaces    = %d\n\n",
+            (int) st.used_entries, (int) st.free_entries,
+            (int) st.total_entries, (int) st.namespace_count);
+    } else {
+        pos += snprintf(out + pos, sizeof(out) - pos,
+            "NVS stats unavailable: %s\n\n", esp_err_to_name(r));
+    }
+
+    char bind[1024];
+    int n = matter_binding_dump(bind, sizeof(bind));
+    pos += snprintf(out + pos, sizeof(out) - pos,
+        "Binding table (%d entr%s):\n%s\n",
+        n, (n == 1 ? "y" : "ies"), (n > 0 ? bind : "  <empty>"));
+
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req, out);
+    return ESP_OK;
+}
+
 /* ---------- HTTP server ---------- */
 
 void web_api_start_httpd(void)
@@ -937,7 +972,7 @@ void web_api_start_httpd(void)
     hc.recv_wait_timeout  = 30;
     hc.send_wait_timeout  = 10;
     hc.max_open_sockets   = 3;
-    hc.max_uri_handlers   = 18;
+    hc.max_uri_handlers   = 19;
     ESP_ERROR_CHECK(httpd_start(&srv, &hc));
 
     httpd_uri_t get_root          = { "/",                  HTTP_GET,    form_get,              NULL };
@@ -955,6 +990,7 @@ void web_api_start_httpd(void)
     httpd_uri_t get_script        = { "/api/script",        HTTP_GET,    api_script_get,        NULL };
     httpd_uri_t post_script       = { "/api/script",        HTTP_POST,   api_script_post,       NULL };
     httpd_uri_t del_script        = { "/api/script",        HTTP_DELETE, api_script_delete,     NULL };
+    httpd_uri_t get_diag          = { "/api/diag",          HTTP_GET,    api_diag_get,          NULL };
 
     httpd_register_uri_handler(srv, &get_root);
     httpd_register_uri_handler(srv, &post_upload);
@@ -971,4 +1007,5 @@ void web_api_start_httpd(void)
     httpd_register_uri_handler(srv, &get_script);
     httpd_register_uri_handler(srv, &post_script);
     httpd_register_uri_handler(srv, &del_script);
+    httpd_register_uri_handler(srv, &get_diag);
 }
