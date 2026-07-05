@@ -52,6 +52,7 @@ static const char *TAG = "ota";
 #define NVS_KEY_BENCH       "bench"
 #define NVS_KEY_SRP         "srp"
 #define NVS_KEY_HOSTNAME    "hostname"
+#define NVS_KEY_COMMISSION  "comm_pend"
 
 /* Runtime bench mode — initialised from NVS in bench_mode_init(). */
 int g_bench_mode = BENCH_MODE;
@@ -213,6 +214,31 @@ esp_err_t ota_bench_mode_save(int on)
     nvs_close(h);
     g_bench_mode = on;
     ESP_LOGI(TAG, "bench_mode saved: %d", on);
+    return err;
+}
+
+/* ---------- Commission pending flag ---------- */
+
+bool ota_commission_pending_get(void)
+{
+    nvs_handle_t h;
+    uint8_t v = 0;
+    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        nvs_get_u8(h, NVS_KEY_COMMISSION, &v);
+        nvs_close(h);
+    }
+    return v != 0;
+}
+
+esp_err_t ota_commission_pending_set(bool on)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    nvs_set_u8(h, NVS_KEY_COMMISSION, on ? 1 : 0);
+    nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "commission_pending saved: %d", on);
     return err;
 }
 

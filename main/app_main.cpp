@@ -253,7 +253,15 @@ extern "C" void app_main(void)
         for (int i = 0; i < SCRIPT_MAX_SLOTS; i++) {
             if (slot_types[i] != SLOT_TYPE_NONE) { has_slots = true; break; }
         }
-        if (!has_slots) {
+        /* Commission mode just cleared the fabrics and rebooted: the user
+         * explicitly wants to re-pair, so keep BLE advertising regardless of
+         * whether scripts are configured. Clear the flag so a later reboot
+         * without pairing returns to the normal WiFi-setup behaviour. */
+        bool commission_pending = ota_commission_pending_get();
+        if (commission_pending) {
+            ota_commission_pending_set(false);
+            ESP_LOGI(TAG, "Not commissioned, commission mode pending — BLE commissioning mode");
+        } else if (!has_slots) {
             ESP_LOGI(TAG, "Not commissioned, no scripts — WiFi setup mode (BLE off)");
             chip::DeviceLayer::ConnectivityMgr().SetBLEAdvertisingEnabled(false);
             ota_enable_wifi_runtime();

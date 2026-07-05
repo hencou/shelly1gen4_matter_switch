@@ -67,6 +67,13 @@ esp_err_t ota_srp_mode_set(bool on);
 /* Save bench mode value to NVS (used by web API). */
 esp_err_t ota_bench_mode_save(int on);
 
+/* Commission pending flag: set by the web API commission endpoint before it
+ * clears Matter fabrics and reboots. On the next boot the smart-boot logic
+ * uses it to stay in BLE commissioning mode instead of falling back to WiFi
+ * setup mode. Stored in NVS. */
+bool ota_commission_pending_get(void);
+esp_err_t ota_commission_pending_set(bool on);
+
 /* Hostname: stored in NVS, used as DHCP hostname.
  * Default: "shelly-XXXXXX" (last 3 bytes of MAC). */
 const char *ota_hostname_get(void);
