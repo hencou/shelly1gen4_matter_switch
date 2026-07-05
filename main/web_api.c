@@ -951,6 +951,39 @@ static esp_err_t api_diag_get(httpd_req_t *req)
             "NVS stats unavailable: %s\n\n", esp_err_to_name(r));
     }
 
+    /* Enumerate NVS namespaces + per-namespace entry counts. Reveals leftover
+     * namespaces on modules upgraded without a factory reset. */
+    pos += snprintf(out + pos, sizeof(out) - pos, "Namespaces:\n");
+    {
+        char names[24][16];
+        int  counts[24];
+        int  ns = 0;
+        nvs_iterator_t it = NULL;
+        esp_err_t ir = nvs_entry_find(NVS_DEFAULT_PART_NAME, NULL, NVS_TYPE_ANY, &it);
+        while (ir == ESP_OK && it != NULL) {
+            nvs_entry_info_t info;
+            nvs_entry_info(it, &info);
+            int idx = -1;
+            for (int i = 0; i < ns; i++) {
+                if (strncmp(names[i], info.namespace_name, sizeof(names[0])) == 0) { idx = i; break; }
+            }
+            if (idx < 0 && ns < 24) {
+                idx = ns++;
+                strncpy(names[idx], info.namespace_name, sizeof(names[0]) - 1);
+                names[idx][sizeof(names[0]) - 1] = '\0';
+                counts[idx] = 0;
+            }
+            if (idx >= 0) counts[idx]++;
+            ir = nvs_entry_next(&it);
+        }
+        nvs_release_iterator(it);
+        for (int i = 0; i < ns; i++) {
+            pos += snprintf(out + pos, sizeof(out) - pos,
+                "  %-16s %d entries\n", names[i], counts[i]);
+        }
+        pos += snprintf(out + pos, sizeof(out) - pos, "\n");
+    }
+
     char bind[1024];
     int n = matter_binding_dump(bind, sizeof(bind));
     pos += snprintf(out + pos, sizeof(out) - pos,
