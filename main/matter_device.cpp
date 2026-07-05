@@ -591,6 +591,30 @@ extern "C" void matter_delete_all_fabrics(void)
     ESP_LOGW(TAG, "matter_delete_all_fabrics: removed %u fabric(s)", (unsigned)count);
 }
 
+extern "C" int matter_binding_dump(char *buf, size_t buf_len)
+{
+    if (!buf || buf_len == 0) return 0;
+    size_t off = 0;
+    int count = 0;
+
+    chip::DeviceLayer::PlatformMgr().LockChipStack();
+    for (const auto &e : Binding::Table::GetInstance()) {
+        count++;
+        int n = snprintf(buf + off, buf_len - off,
+            "%s[%d] type=%u local_ep=%u remote_ep=%u node=0x%llx group=%u cluster=0x%lx fabric=%u",
+            (off > 0 ? "\n" : ""), count,
+            (unsigned) e.type, e.local, e.remote,
+            (unsigned long long) e.nodeId, (unsigned) e.groupId,
+            (unsigned long) e.clusterId.value_or(0), (unsigned) e.fabricIndex);
+        if (n < 0 || (size_t) n >= buf_len - off) { off = buf_len - 1; break; }
+        off += n;
+    }
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+
+    buf[off] = '\0';
+    return count;
+}
+
 extern "C" uint16_t matter_get_slot_endpoint(uint8_t slot)
 {
     if (slot >= s_num_slots) return 0;
