@@ -6,7 +6,7 @@ extern "C" {
 
 /* Firmware version string — displayed on the management dashboard */
 #ifndef FW_VERSION
-#define FW_VERSION "1.5.2"
+#define FW_VERSION "1.5.3"
 #endif
 
 /* Pin mapping — adjust via `idf.py menuconfig` */
