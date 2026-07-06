@@ -71,7 +71,9 @@ Expected output: `build/shelly1gen4_matter_switch.bin` (~1.6-1.8 MB).
 
 The Shelly 1 Gen4 has **7 holes in a row** on the back — this is the **J6 connector** (silkscreen label `J6`) of the integrated ESP32-C6 module. This is the same row of pins where a Shelly Plus Add-on connects, but it can also be used to flash the ESP32-C6.
 
-OTA flashing from the original Shelly firmware does **not** work — Shelly verifies OTA images with an ECDSA signature. The first flash must be done via UART.
+You can also install this firmware **directly from the stock Shelly firmware over WiFi**, without opening the device, using a Shelly Web UI OTA zip (`python3 tools/make-webui-ota-zip.py`, uploaded via the Shelly device web interface — see [README.md → Firmware updates](README.md#firmware-updates)).
+
+⚠️ **However, the Web UI OTA route cannot back up the stock Shelly firmware** — it only writes the new app. UART flashing (this section) is the **only** way to read out and save the original 8 MB stock image first. If you might ever want to return to stock, do the UART backup below **before** flashing anything. Restoring stock later also requires UART.
 
 > **Source**: this section follows the canonical pinout from
 > [`automatous-io/shelly-1-gen4-matter-thread` FLASHING.md](https://github.com/automatous-io/shelly-1-gen4-matter-thread/blob/main/docs/FLASHING.md)

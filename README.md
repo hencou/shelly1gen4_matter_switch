@@ -10,6 +10,7 @@
 - **Thread + WiFi** — Thread for Matter communication, WiFi for management/OTA
 - **Smart boot** — auto-detects factory reset vs configured vs commissioned state
 - **WiFi management dashboard** — configure scripts, WiFi, endpoints, backup/restore
+- **Multiple update paths** — Matter OTA over Thread, Shelly Web UI OTA (also directly from stock Shelly firmware), and `.bin` upload via the dashboard. See [Firmware updates](#firmware-updates).
 
 ## Endpoint types
 
@@ -44,7 +45,10 @@ Each script slot can be configured as one of these Matter endpoint types:
 
 ### 1. First flash
 
-Flash via UART (see [INSTALL.md](INSTALL.md)). OTA from original Shelly firmware is not possible (signature verification).
+Two options for getting this firmware onto a stock Shelly 1 Gen4:
+
+- **UART flash** (see [INSTALL.md](INSTALL.md)) — the classic route. Requires opening the device and wiring a USB-UART adapter to the J6 connector. This is the **only** way to make a backup of the stock Shelly firmware first (see the warning under [Firmware updates](#firmware-updates)).
+- **Shelly Web UI OTA** — install directly from the stock Shelly firmware over WiFi, no UART needed. Upload a Web UI OTA zip through the Shelly device web interface. See [Firmware updates](#firmware-updates) for how to build the zip and the important caveat about backups.
 
 ### 2. Factory reset → WiFi setup mode
 
@@ -95,6 +99,40 @@ Via the web management dashboard → **Factory Reset** button. This wipes:
 - All Matter fabrics and commissioning data (NVS namespaces)
 
 After factory reset the module reboots into WiFi setup mode (step 2).
+
+## Firmware updates
+
+Once the custom firmware is running you can update it three ways. All three flash the **same** application binary (`build/shelly1gen4_matter_switch.bin`) — they only differ in transport.
+
+> ⚠️ **No stock Shelly backup via OTA.** Installing this firmware directly from the stock Shelly firmware (Shelly Web UI OTA) does **not** and cannot make a backup of the original Shelly firmware — the OTA process only writes the new app and never reads the existing flash. The **only** way to back up the stock firmware is over **UART** with a tool such as [ESPConnect](https://thelastoutpostworkshop.github.io/microcontroller_devkit/espconnect/) or `esptool.py read_flash` (see [INSTALL.md](INSTALL.md)). If you may ever want to return to stock, make that UART backup **before** you flash — after the OTA it is too late.
+
+### 1. Matter OTA (over Thread)
+
+Update over the existing Thread/Matter connection — no WiFi or cabling needed. Build the `.ota` image and serve it from a Matter OTA provider (e.g. Home Assistant):
+
+```bash
+idf.py build
+python3 tools/make-matter-ota.py      # → shelly1gen4-matter-switch-v<version>.ota
+```
+
+The image embeds the vendor/product ID and software version; the device only accepts an image with a higher software version than it currently runs. Bump `CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION[_STRING]` in `main/CHIPProjectConfig.h` for each release.
+
+> Tip: `make-matter-ota.py` just wraps whatever is in `build/`. Always `idf.py build` first (use `idf.py fullclean` to force a genuine recompile) and confirm the `.ota` is fresh — a stale `build/` produces a stale `.ota`.
+
+### 2. Shelly Web UI OTA (zip) — also from stock firmware
+
+Build a zip that the Shelly device web interface accepts as a local firmware update. This works both **from the stock Shelly firmware** (initial install, no UART) and **from this firmware** (updates):
+
+```bash
+idf.py build
+python3 tools/make-webui-ota-zip.py   # → shelly1gen4-matter-switch-v<version>-ota.zip
+```
+
+Upload the zip via the Shelly device's own web interface (local firmware update). The zip keeps the existing bootloader (its bundled bootloader is marked `min_version 0.0.0`, so nothing at offset `0x0` is overwritten) and uses the stock partition layout (PT at `0x10000`). The firmware migrates the partition table automatically on first boot where needed.
+
+### 3. `.bin` upload via the management dashboard
+
+For modules already running this firmware: open the management dashboard (**6× rapid button press** → WiFi), go to the **WiFi & OTA** tab, and either provide a firmware URL or upload `build/shelly1gen4_matter_switch.bin` directly. The device flashes the inactive OTA slot and reboots into it.
 
 ## Pin mapping
 
@@ -250,6 +288,11 @@ shelly1gen4_matter_switch/
 │   ├── secrets.h           # compile-time WiFi credentials (gitignored)
 │   └── CHIPProjectConfig.h # vendor/product name overrides
 ├── components/lua/         # Lua 5.4 as ESP-IDF component
+├── tools/
+│   ├── make-matter-ota.py       # build Matter OTA image (.ota) — see Firmware updates
+│   ├── make-webui-ota-zip.py    # build Shelly Web UI OTA zip (stock-compatible)
+│   ├── make_factory_bin_file.sh # merge binaries for UART/ESPConnect flashing
+│   └── create_matter_cluster_group.py  # set up multicast group + bindings
 ├── SCRIPTS.md              # example Lua scripts
 ├── INSTALL.md
 └── INSTALL_VSCODE_WINDOWS.md
