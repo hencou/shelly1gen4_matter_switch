@@ -421,35 +421,44 @@ async def run_logic(args):
         print("\n" + "-"*50)
         print(f"[STEP 5] Writing binding table to {len(args.switch)} switch(es)...")
 
-        bindings = [
-            {"group": args.group_id, "cluster": 6},    # OnOff
-            {"group": args.group_id, "cluster": 8},    # LevelControl (dimming)
-            {"group": args.group_id, "cluster": 768},  # ColorControl (0x0300)
+        # Binding TargetStruct (cluster 0x1E / 30, attribute 0) uses integer TLV
+        # field IDs — string keys ("group"/"cluster") get silently zeroed by the
+        # device, exactly like the ACL struct in STEP 4. Group binding = group (2)
+        # + cluster (4) only, no node/endpoint. fabricIndex (254) is auto-filled.
+        bindings_tlv = [
+            {"2": args.group_id, "4": 6},    # OnOff
+            {"2": args.group_id, "4": 8},    # LevelControl (dimming)
+            {"2": args.group_id, "4": 768},  # ColorControl (0x0300)
         ]
 
         for sw in args.switch:
             print(f"  --> Binding on Switch (Node {sw}, Endpoint {args.switch_endpoint})...")
-            # Try set_node_binding first (purpose-built API)
+            # write_attribute with integer TLV keys is the reliable path.
+            # set_node_binding returns success but sends no WriteRequest for
+            # group bindings, so the write never reaches the device.
             try:
-                result = await client.send_command("set_node_binding", {
+                result = await client.send_command("write_attribute", {
                     "node_id": sw,
-                    "endpoint": args.switch_endpoint,
-                    "bindings": bindings
+                    "attribute_path": f"{args.switch_endpoint}/30/0",
+                    "value": bindings_tlv
                 })
-                print(f"    [OK] Binding written via set_node_binding!")
+                print(f"    [OK] Binding written via write_attribute (group TLV)!")
                 print(f"    Result: {result}")
             except Exception as e:
-                print(f"    [!] set_node_binding failed ({e}), trying write_attribute...")
+                print(f"    [!] write_attribute failed ({e}), trying set_node_binding...")
                 try:
-                    result = await client.send_command("write_attribute", {
+                    result = await client.send_command("set_node_binding", {
                         "node_id": sw,
-                        "attribute_path": f"{args.switch_endpoint}/30/0",
-                        "value": bindings
+                        "endpoint": args.switch_endpoint,
+                        "bindings": [
+                            {"group": args.group_id, "cluster": 6},
+                            {"group": args.group_id, "cluster": 8},
+                            {"group": args.group_id, "cluster": 768},
+                        ]
                     })
-                    print(f"    [OK] Binding written via write_attribute!")
-                    print(f"    Result: {result}")
+                    print(f"    [OK] Binding written via set_node_binding! Result: {result}")
                 except Exception as e2:
-                    print(f"    [!] write_attribute also failed: {e2}")
+                    print(f"    [!] set_node_binding also failed: {e2}")
 
         # =======================================================================
         # STEP 6: VERIFICATION - READ BINDING BACK FROM EACH SWITCH
