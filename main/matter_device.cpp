@@ -47,8 +47,10 @@ extern "C" {
 #include "esp_openthread_types.h"
 #if CONFIG_OPENTHREAD_BORDER_ROUTER
 #include "esp_openthread.h"
+#include "esp_timer.h"
 #include <openthread/instance.h>
 #include <openthread/srp_server.h>
+#include <openthread/netdata.h>
 #include <openthread/thread.h>
 #endif
 
@@ -507,50 +509,102 @@ extern "C" void matter_disable_thread(void)
 }
 
 #if CONFIG_OPENTHREAD_BORDER_ROUTER
-static bool s_srp_server_enabled = false;
+/* Fallback SRP server: only fills the void when no real Thread Border Router
+ * is present. A BR (e.g. Google Nest) runs the authoritative SRP server AND an
+ * advertising proxy that bridges registrations to the LAN mDNS — without which
+ * an off-mesh controller (matter.js/HA) cannot discover any Matter device.
+ * Our node has no advertising proxy, so if it wins the SRP anycast election it
+ * silently hides the whole mesh from the controller. We therefore run the SRP
+ * server only as a fallback and yield the moment a border router appears.
+ *
+ * Detection of a border router keys on external routes / on-mesh prefixes in
+ * the Thread Network Data — things a BR publishes (OMR prefix, on-link/default
+ * routes) but a plain SRP-server node does not. That way multiple fallback
+ * nodes never mistake each other for a BR (so they don't toggle each other),
+ * while all of them yield together as soon as the real BR is back. Detection
+ * is deliberately biased toward "BR present" (yield) — the dangerous failure
+ * is falsely enabling and hijacking mesh-wide discovery. */
+#define SRP_EVAL_PERIOD_US        (5 * 1000 * 1000)  /* re-evaluate every 5 s */
+#define SRP_NO_BR_DEBOUNCE_TICKS  6                  /* enable after ~30 s w/o BR */
 
-static void srp_role_changed_cb(otChangedFlags aFlags, void *aContext)
+static bool             s_srp_server_enabled = false;
+static bool             s_srp_fallback_active = false;
+static esp_timer_handle_t s_srp_eval_timer = nullptr;
+static int              s_srp_no_br_ticks = 0;
+
+/* Must be called with the Thread stack lock held. */
+static bool other_border_router_present(otInstance *instance)
 {
-    if (s_srp_server_enabled) return;
-    if (!(aFlags & OT_CHANGED_THREAD_ROLE)) return;
+    uint16_t self_rloc = otThreadGetRloc16(instance);
 
-    otInstance *instance = esp_openthread_get_instance();
-    if (!instance) return;
-
-    otDeviceRole role = otThreadGetDeviceRole(instance);
-    if (role == OT_DEVICE_ROLE_ROUTER || role == OT_DEVICE_ROLE_LEADER) {
-        otSrpServerSetEnabled(instance, true);
-        s_srp_server_enabled = true;
-        ESP_LOGI(TAG, "SRP server enabled (role=%s) — Thread devices can register and resolve services",
-                 role == OT_DEVICE_ROLE_LEADER ? "leader" : "router");
+    otNetworkDataIterator it = OT_NETWORK_DATA_ITERATOR_INIT;
+    otExternalRouteConfig route;
+    while (otNetDataGetNextRoute(instance, &it, &route) == OT_ERROR_NONE) {
+        if (route.mRloc16 != self_rloc)
+            return true;
     }
+
+    it = OT_NETWORK_DATA_ITERATOR_INIT;
+    otBorderRouterConfig prefix;
+    while (otNetDataGetNextOnMeshPrefix(instance, &it, &prefix) == OT_ERROR_NONE) {
+        if (prefix.mRloc16 != self_rloc)
+            return true;
+    }
+    return false;
+}
+
+/* Must be called with the Thread stack lock held. */
+static void srp_set_enabled_locked(otInstance *instance, bool enable)
+{
+    if (enable == s_srp_server_enabled) return;
+    otSrpServerSetEnabled(instance, enable);
+    s_srp_server_enabled = enable;
+    ESP_LOGW(TAG, "SRP fallback server %s", enable
+             ? "ENABLED (no border router present)"
+             : "DISABLED (border router present — yielding)");
+}
+
+static void srp_eval_cb(void *)
+{
+    chip::DeviceLayer::ThreadStackMgr().LockThreadStack();
+    otInstance *instance = esp_openthread_get_instance();
+    if (instance) {
+        otDeviceRole role = otThreadGetDeviceRole(instance);
+        bool eligible = (role == OT_DEVICE_ROLE_ROUTER || role == OT_DEVICE_ROLE_LEADER);
+
+        if (other_border_router_present(instance)) {
+            s_srp_no_br_ticks = 0;
+            srp_set_enabled_locked(instance, false);   /* yield immediately */
+        } else {
+            if (s_srp_no_br_ticks < SRP_NO_BR_DEBOUNCE_TICKS) s_srp_no_br_ticks++;
+            if (eligible && s_srp_no_br_ticks >= SRP_NO_BR_DEBOUNCE_TICKS)
+                srp_set_enabled_locked(instance, true);
+        }
+    }
+    chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
 }
 #endif
 
 extern "C" esp_err_t matter_srp_server_start(void)
 {
 #if CONFIG_OPENTHREAD_BORDER_ROUTER
-    chip::DeviceLayer::ThreadStackMgr().LockThreadStack();
+    if (s_srp_fallback_active) return ESP_OK;
 
-    otInstance *instance = esp_openthread_get_instance();
-    if (!instance) {
-        chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
-        ESP_LOGE(TAG, "SRP server: no OpenThread instance");
-        return ESP_ERR_INVALID_STATE;
+    const esp_timer_create_args_t args = {
+        .callback = &srp_eval_cb,
+        .arg = nullptr,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "srp_eval",
+        .skip_unhandled_events = true,
+    };
+    esp_err_t err = esp_timer_create(&args, &s_srp_eval_timer);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SRP fallback: timer create failed (%s)", esp_err_to_name(err));
+        return err;
     }
-
-    otDeviceRole role = otThreadGetDeviceRole(instance);
-    if (role == OT_DEVICE_ROLE_ROUTER || role == OT_DEVICE_ROLE_LEADER) {
-        otSrpServerSetEnabled(instance, true);
-        s_srp_server_enabled = true;
-        ESP_LOGI(TAG, "SRP server enabled immediately (already %s)",
-                 role == OT_DEVICE_ROLE_LEADER ? "leader" : "router");
-    } else {
-        otSetStateChangedCallback(instance, srp_role_changed_cb, NULL);
-        ESP_LOGI(TAG, "SRP server deferred — waiting for router/leader role (current: %d)", (int)role);
-    }
-
-    chip::DeviceLayer::ThreadStackMgr().UnlockThreadStack();
+    esp_timer_start_periodic(s_srp_eval_timer, SRP_EVAL_PERIOD_US);
+    s_srp_fallback_active = true;
+    ESP_LOGI(TAG, "SRP fallback controller started — yields to any Thread border router");
     return ESP_OK;
 #else
     ESP_LOGW(TAG, "SRP server not compiled in (CONFIG_OPENTHREAD_BORDER_ROUTER=n)");

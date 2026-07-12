@@ -156,12 +156,13 @@ extern "C" void app_main(void)
 
     bool commissioned = chip::Server::GetInstance().GetFabricTable().FabricCount() > 0;
 
-    /* SRP server: provides DNS-SD service discovery on Thread mesh without
-     * requiring a full border router or WiFi.  Enables CASE sessions between
-     * Thread devices (e.g. Shelly → IKEA lamp) without an external TBR. */
+    /* SRP fallback server: provides DNS-SD service discovery on the Thread mesh
+     * only when no real border router is present, so local device-to-device
+     * bindings survive a TBR/HA outage. It yields to any border router the
+     * moment one appears (a BR has the LAN advertising proxy our node lacks). */
     if (ota_srp_mode_get() && commissioned) {
         matter_srp_server_start();
-        ESP_LOGI(TAG, "BOOT-STEP: SRP server started (Thread DNS-SD)");
+        ESP_LOGI(TAG, "BOOT-STEP: SRP fallback controller started");
     }
 
     // =========================================================================
