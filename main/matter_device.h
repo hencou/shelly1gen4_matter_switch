@@ -46,6 +46,12 @@ void matter_update_relay_onoff(bool on);
 /* Disable Thread radio so WiFi can use the 2.4 GHz radio exclusively. */
 void matter_disable_thread(void);
 
+/* Start the Thread connectivity watchdog. Recovers a node that gets stuck
+ * DETACHED (unreachable over Thread) without a manual reboot: soft-toggles the
+ * Thread interface after ~2 min, reboots after ~5 min. No-op while runtime
+ * WiFi mode is active (Thread is then intentionally off). */
+void matter_thread_watchdog_start(void);
+
 /* Start the fallback SRP server controller on the Thread mesh.
  * Runs an SRP server (DNS-SD service discovery) only while no real border
  * router is present, so local device-to-device bindings keep working during a

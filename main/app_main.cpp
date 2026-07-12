@@ -165,6 +165,13 @@ extern "C" void app_main(void)
         ESP_LOGI(TAG, "BOOT-STEP: SRP fallback controller started");
     }
 
+    /* Thread connectivity watchdog: auto-recover a node that gets stuck
+     * detached (unreachable over Thread) instead of requiring a manual reboot. */
+    if (commissioned) {
+        matter_thread_watchdog_start();
+        ESP_LOGI(TAG, "BOOT-STEP: Thread connectivity watchdog started");
+    }
+
     // =========================================================================
     // MULTICAST GROUP KEY — install KeySet 1 + GroupKeyMap
     // =========================================================================
