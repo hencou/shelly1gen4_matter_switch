@@ -22,7 +22,10 @@
 extern "C" {
 #include "app_config.h"
 #include "relay.h"
+#include "ota.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "esp_system.h"
 }
 
 #include <esp_matter.h>
@@ -41,6 +44,7 @@ extern "C" {
 #include <credentials/FabricTable.h>
 #include <platform/PlatformManager.h>
 #include <platform/ThreadStackManager.h>
+#include <platform/ConnectivityManager.h>
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
 #include <platform/ESP32/OpenthreadLauncher.h>
@@ -505,6 +509,77 @@ extern "C" void matter_disable_thread(void)
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
     ESP_LOGW(TAG, "Disabling Thread to free 2.4 GHz radio for WiFi");
     chip::DeviceLayer::ThreadStackMgr().SetThreadEnabled(false);
+#endif
+}
+
+#if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+/* Thread connectivity watchdog. OpenThread normally re-attaches on its own, but
+ * on ESP32-C6 + Matter a node can occasionally stay DETACHED after a partition/
+ * leader change or a radio-coex hiccup, becoming unreachable over Thread (HA
+ * cannot drive the relay, bindings do not emit) until a manual reboot. This
+ * watchdog watches the attach state and recovers automatically:
+ *   - soft: toggle the Thread interface to force a fresh attach,
+ *   - hard: reboot if still detached after a longer period. */
+#define TWDG_PERIOD_US   (30ULL * 1000 * 1000)   /* check every 30 s */
+#define TWDG_SOFT_TICKS  4                        /* ~2 min detached → toggle */
+#define TWDG_HARD_TICKS  10                       /* ~5 min detached → reboot */
+
+static esp_timer_handle_t s_twdg_timer = nullptr;
+static int                s_twdg_detached_ticks = 0;
+
+static void thread_watchdog_cb(void *)
+{
+    /* WiFi runtime mode intentionally disables Thread — never interfere. */
+    if (ota_wifi_runtime_active()) {
+        s_twdg_detached_ticks = 0;
+        return;
+    }
+
+    auto &conn = chip::DeviceLayer::ConnectivityMgr();
+    if (!conn.IsThreadProvisioned() || !conn.IsThreadEnabled()) {
+        s_twdg_detached_ticks = 0;   /* not on Thread / intentionally off */
+        return;
+    }
+    if (conn.IsThreadAttached()) {
+        if (s_twdg_detached_ticks)
+            ESP_LOGI(TAG, "Thread re-attached — watchdog reset");
+        s_twdg_detached_ticks = 0;
+        return;
+    }
+
+    s_twdg_detached_ticks++;
+    ESP_LOGW(TAG, "Thread detached — watchdog tick %d", s_twdg_detached_ticks);
+
+    if (s_twdg_detached_ticks == TWDG_SOFT_TICKS) {
+        ESP_LOGW(TAG, "Thread detached ~%d s — toggling interface to force re-attach",
+                 (int)(TWDG_SOFT_TICKS * 30));
+        chip::DeviceLayer::ThreadStackMgr().SetThreadEnabled(false);
+        chip::DeviceLayer::ThreadStackMgr().SetThreadEnabled(true);
+    } else if (s_twdg_detached_ticks >= TWDG_HARD_TICKS) {
+        ESP_LOGE(TAG, "Thread still detached ~%d s — rebooting to recover",
+                 (int)(TWDG_HARD_TICKS * 30));
+        esp_restart();
+    }
+}
+#endif
+
+extern "C" void matter_thread_watchdog_start(void)
+{
+#if CHIP_DEVICE_CONFIG_ENABLE_THREAD
+    if (s_twdg_timer) return;
+    const esp_timer_create_args_t args = {
+        .callback = &thread_watchdog_cb,
+        .arg = nullptr,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "thread_wdg",
+        .skip_unhandled_events = true,
+    };
+    if (esp_timer_create(&args, &s_twdg_timer) != ESP_OK) {
+        ESP_LOGE(TAG, "Thread watchdog: timer create failed");
+        return;
+    }
+    esp_timer_start_periodic(s_twdg_timer, TWDG_PERIOD_US);
+    ESP_LOGI(TAG, "Thread connectivity watchdog started (soft ~2 min, hard ~5 min)");
 #endif
 }
 

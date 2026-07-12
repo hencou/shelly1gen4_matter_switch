@@ -594,6 +594,11 @@ void ota_enable_wifi_runtime(void)
     }
 }
 
+bool ota_wifi_runtime_active(void)
+{
+    return s_wifi_runtime_started;
+}
+
 /* ---------- Public entrypoints ---------- */
 
 void ota_handle_pending(void)

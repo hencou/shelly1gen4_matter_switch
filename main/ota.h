@@ -44,6 +44,11 @@ void ota_request_ota_reboot(void);
  * If STA connection fails, WiFi credentials are wiped and AP mode is started. */
 void ota_enable_wifi_runtime(void);
 
+/* True while runtime WiFi is active (6x press / WiFi setup mode). In this
+ * state Thread is intentionally disabled, so the Thread watchdog must not
+ * treat "not attached" as a fault. */
+bool ota_wifi_runtime_active(void);
+
 /* Save WiFi creds + URL in NVS (can also be done via web form). */
 esp_err_t ota_save_credentials(const char *ssid, const char *password,
                                const char *firmware_url);
