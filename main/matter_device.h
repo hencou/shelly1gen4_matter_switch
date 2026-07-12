@@ -46,9 +46,12 @@ void matter_update_relay_onoff(bool on);
 /* Disable Thread radio so WiFi can use the 2.4 GHz radio exclusively. */
 void matter_disable_thread(void);
 
-/* Start SRP server on the Thread mesh.
- * Provides DNS-SD service discovery so other Thread devices can resolve
- * node addresses and establish CASE sessions without an external TBR. */
+/* Start the fallback SRP server controller on the Thread mesh.
+ * Runs an SRP server (DNS-SD service discovery) only while no real border
+ * router is present, so local device-to-device bindings keep working during a
+ * TBR/HA outage. Yields to any border router the moment one appears — a BR has
+ * the LAN advertising proxy this node lacks, and hogging the SRP anycast role
+ * would otherwise hide the whole mesh from off-mesh controllers. */
 esp_err_t matter_srp_server_start(void);
 
 /* Factory reset → wipes Matter NVS, leaves the fabric, reboot. */
