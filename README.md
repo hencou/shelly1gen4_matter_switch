@@ -1,4 +1,4 @@
-# shelly1gen4_matter_switch
+# shelly_gen4_matter_module
 
 **Custom Matter-over-Thread firmware** for the **Shelly 1 Gen4** (ESP32-C6) with **Lua scripting** for fully configurable endpoints.
 
