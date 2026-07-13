@@ -17,9 +17,11 @@ extern "C" {
 #include <string.h>
 
 #include "app_config.h"
+#include "hw_config.h"
 #include "button.h"
 #include "relay.h"
 #include "sensors.h"
+#include "power_meter.h"
 #include "ota.h"
 #include "status_led.h"
 #include "script_engine.h"
@@ -64,6 +66,11 @@ extern "C" void on_occupancy(bool occupied)
 extern "C" void on_analog(uint8_t duty_pct)
 {
     script_engine_analog_update(duty_pct);
+}
+
+extern "C" void on_power(const power_meter_reading_t *r)
+{
+    matter_update_power(r->voltage_v, r->current_a, r->power_w, r->frequency_hz);
 }
 
 /* Stock Shelly 1 Gen4 stores its partition table at 0x10000.
@@ -132,6 +139,10 @@ extern "C" void app_main(void)
      * ESP-IDF v5.4 has no Kconfig for this, so we register explicitly. */
     esp_vfs_eventfd_config_t eventfd_config = { .max_fds = 8 };
     ESP_ERROR_CHECK(esp_vfs_eventfd_register(&eventfd_config));
+
+    /* Select the hardware profile (relay/switch/button/LED GPIOs + power
+     * meter) from NVS before any driver init. Default = Shelly 1 Gen4. */
+    hw_config_init();
 
     bench_mode_init();
 
@@ -235,6 +246,13 @@ extern "C" void app_main(void)
 
     sensors_init(on_temperature, on_occupancy, on_analog);
     ESP_LOGI(TAG, "BOOT-STEP: sensors_init done");
+
+    /* BL0942 power meter (Shelly 1PM Gen4 only) — reports voltage/current/
+     * power/frequency to the Electrical Power Measurement Matter endpoint. */
+    if (hw_profile()->has_pm) {
+        power_meter_init(hw_profile()->pm_uart_tx, hw_profile()->pm_uart_rx, on_power);
+        ESP_LOGI(TAG, "BOOT-STEP: power_meter_init done");
+    }
 
     if (commissioned) {
         status_led_set(STATUS_LED_HEARTBEAT);

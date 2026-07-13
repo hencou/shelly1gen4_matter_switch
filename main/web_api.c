@@ -6,6 +6,8 @@
 #include "web_api.h"
 #include "ota.h"
 #include "app_config.h"
+#include "hw_config.h"
+#include "power_meter.h"
 #include "script_engine.h"
 #include "dashboard_html.h"
 #include "matter_device.h"
@@ -197,17 +199,22 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
 
     const char *rst = reset_reason_str(esp_reset_reason());
 
-    int btn_level = gpio_get_level(PIN_SWITCH_INPUT);
+    const hw_profile_t *hw = hw_profile();
+
+    int btn_level = gpio_get_level(hw->switch_gpio);
     int btn_active = g_bench_mode ? !btn_level : btn_level;
 
-    int pcb_level = gpio_get_level(4);
+    int pcb_level = gpio_get_level(hw->button_gpio);
     int pcb_active = !pcb_level;
 
-    int dig_level = gpio_get_level(PIN_TOUCH_INPUT);
+    int dig_level = hw->has_addon ? gpio_get_level(PIN_TOUCH_INPUT) : 0;
 
     char ana_str[32];
     char temp_str[32] = "N/A (bench mode)";
-    if (g_bench_mode) {
+    if (!hw->has_addon) {
+        snprintf(ana_str, sizeof(ana_str), "N/A (no Add-on)");
+        snprintf(temp_str, sizeof(temp_str), "N/A (no Add-on)");
+    } else if (g_bench_mode) {
         snprintf(ana_str, sizeof(ana_str), "N/A (bench mode)");
     } else {
         {
@@ -274,8 +281,33 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         }
     }
 
+    char dig_str[40];
+    if (hw->has_addon) {
+        snprintf(dig_str, sizeof(dig_str), "%s (GPIO%d=%d)",
+                 dig_level ? "HIGH" : "LOW", PIN_TOUCH_INPUT, dig_level);
+    } else {
+        snprintf(dig_str, sizeof(dig_str), "N/A (no Add-on)");
+    }
+
+    char power_str[80];
+    if (hw->has_pm) {
+        power_meter_reading_t pm;
+        if (power_meter_get(&pm)) {
+            snprintf(power_str, sizeof(power_str),
+                     "%.1f V, %.3f A, %.1f W, %.1f Wh, %.2f Hz",
+                     pm.voltage_v, pm.current_a, pm.power_w, pm.energy_wh,
+                     pm.frequency_hz);
+        } else {
+            snprintf(power_str, sizeof(power_str), "waiting for BL0942...");
+        }
+    } else {
+        snprintf(power_str, sizeof(power_str), "N/A (no power meter)");
+    }
+
     pos = snprintf(json, sizeof(json),
         "{\"firmware\":\"%s %s (%s %s)\","
+        "\"device_type\":\"%s\","
+        "\"device_type_id\":%d,"
         "\"chip\":\"ESP32-C6 rev %d, %d core(s)\","
         "\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\","
         "\"wifi_mode\":\"%s\","
@@ -287,11 +319,13 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         "\"bench_mode\":\"%s\","
         "\"srp_mode\":\"%s\","
         "\"pushbutton\":\"%s (GPIO%d=%d)\","
-        "\"pcb_button\":\"%s (GPIO4=%d)\","
-        "\"digital_in\":\"%s (GPIO%d=%d)\","
+        "\"pcb_button\":\"%s (GPIO%d=%d)\","
+        "\"digital_in\":\"%s\","
         "\"analog_in\":\"%s\","
-        "\"temperature\":\"%s\"}",
+        "\"temperature\":\"%s\","
+        "\"power\":\"%s\"}",
         FW_VERSION, app->version, app->date, app->time,
+        hw->name, (int)hw->type,
         ci.revision, ci.cores,
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
         wmode_str,
@@ -302,11 +336,12 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         rst,
         g_bench_mode ? "ON" : "OFF",
         ota_srp_mode_get() ? "ON" : "OFF",
-        btn_active ? "PRESSED" : "RELEASED", PIN_SWITCH_INPUT, btn_level,
-        pcb_active ? "PRESSED" : "RELEASED", pcb_level,
-        dig_level ? "HIGH" : "LOW", PIN_TOUCH_INPUT, dig_level,
+        btn_active ? "PRESSED" : "RELEASED", hw->switch_gpio, btn_level,
+        pcb_active ? "PRESSED" : "RELEASED", hw->button_gpio, pcb_level,
+        dig_str,
         ana_str,
-        temp_str);
+        temp_str,
+        power_str);
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, pos);
@@ -326,6 +361,69 @@ static esp_err_t api_srp_mode_post(httpd_req_t *req)
 {
     bool new_val = !ota_srp_mode_get();
     ota_srp_mode_set(new_val);
+    httpd_resp_sendstr(req, "OK");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
+static esp_err_t api_hw_config_get(httpd_req_t *req)
+{
+    char json[512];
+    int pos = 0;
+    const hw_profile_t *cur = hw_profile();
+
+    pos += snprintf(json + pos, sizeof(json) - pos,
+                    "{\"selected\":%d,\"types\":[", (int)cur->type);
+    for (int i = 0; i < HW_TYPE_COUNT; i++) {
+        const hw_profile_t *p = hw_profile_for((hw_device_type_t)i);
+        pos += snprintf(json + pos, sizeof(json) - pos,
+                        "%s{\"id\":%d,\"name\":\"%s\",\"pm\":%s,\"addon\":%s}",
+                        i ? "," : "", i, p->name,
+                        p->has_pm ? "true" : "false",
+                        p->has_addon ? "true" : "false");
+    }
+    pos += snprintf(json + pos, sizeof(json) - pos, "]}");
+
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json, pos);
+}
+
+static esp_err_t api_hw_config_post(httpd_req_t *req)
+{
+    char body[128] = { 0 };
+    int len = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (len <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "empty body");
+        return ESP_FAIL;
+    }
+    body[len] = '\0';
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
+        return ESP_FAIL;
+    }
+    cJSON *type = cJSON_GetObjectItem(root, "type");
+    if (!cJSON_IsNumber(type)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "missing type");
+        return ESP_FAIL;
+    }
+    int t = type->valueint;
+    cJSON_Delete(root);
+
+    if (t < 0 || t >= HW_TYPE_COUNT) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "type out of range");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = hw_device_type_set((hw_device_type_t)t);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "save failed");
+        return ESP_FAIL;
+    }
+
     httpd_resp_sendstr(req, "OK");
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
@@ -1015,6 +1113,8 @@ void web_api_start_httpd(void)
     httpd_uri_t get_hardware      = { "/api/hardware",      HTTP_GET,    api_hardware_get,      NULL };
     httpd_uri_t post_bench        = { "/api/bench-mode",    HTTP_POST,   api_bench_mode_post,   NULL };
     httpd_uri_t post_srp          = { "/api/srp-mode",     HTTP_POST,   api_srp_mode_post,     NULL };
+    httpd_uri_t get_hw_config     = { "/api/hw-config",     HTTP_GET,    api_hw_config_get,     NULL };
+    httpd_uri_t post_hw_config    = { "/api/hw-config",     HTTP_POST,   api_hw_config_post,    NULL };
     httpd_uri_t post_restart      = { "/api/restart",       HTTP_POST,   api_restart_post,      NULL };
     httpd_uri_t post_factory      = { "/api/factory-reset", HTTP_POST,   api_factory_reset_post,NULL };
     httpd_uri_t post_commission   = { "/api/commission",    HTTP_POST,   api_commission_post,   NULL };
@@ -1032,6 +1132,8 @@ void web_api_start_httpd(void)
     httpd_register_uri_handler(srv, &get_hardware);
     httpd_register_uri_handler(srv, &post_bench);
     httpd_register_uri_handler(srv, &post_srp);
+    httpd_register_uri_handler(srv, &get_hw_config);
+    httpd_register_uri_handler(srv, &post_hw_config);
     httpd_register_uri_handler(srv, &post_restart);
     httpd_register_uri_handler(srv, &post_factory);
     httpd_register_uri_handler(srv, &post_commission);

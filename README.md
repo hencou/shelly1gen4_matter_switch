@@ -33,9 +33,32 @@ Each script slot can be configured as one of these Matter endpoint types:
 
 ## Target hardware
 
+One firmware image supports three Gen4 models (all ESP32-C6, 8 MB flash). Select
+the model on the management dashboard (**Hardware → Device Type**); the choice is
+stored in NVS and applied on the next boot. The correct GPIO mapping is then used
+for the relay, wall-switch input, onboard button and status LED.
+
+| Model | Relay | Switch | Button | Status LED | Add-on | Power meter |
+|---|---|---|---|---|---|---|
+| **Shelly 1 Gen4** (default) | GPIO5 | GPIO10 | GPIO4 | GPIO15 | yes | — |
+| **Shelly 1 Mini Gen4** | GPIO10 | GPIO12 | GPIO22 | GPIO5 | no | — |
+| **Shelly 1PM Gen4** | GPIO4 | GPIO10 | GPIO1 | GPIO11 | yes | BL0942 (UART1 TX=GPIO6 RX=GPIO7) |
+
+Notes:
+- **Changing the device type does not require Matter re-commissioning** — the
+  firmware exposes a generic switch model, so a type change is only a GPIO remap.
+- **Warning:** selecting the wrong model drives the wrong GPIOs. Pick the model
+  that matches your physical hardware.
+- The **Shelly Plus Add-on** (DS18B20 + touch + analog occupancy) is available on
+  the 1 Gen4 and 1PM Gen4, and **not** on the Mini.
+- On the **1PM Gen4** the BL0942 reports voltage, current, active power,
+  accumulated energy and line frequency via a Matter **Electrical Power
+  Measurement** endpoint, and on the dashboard Hardware tab. The default scaling
+  constants follow the BL0942 reference design; calibrate them against a known
+  load if the reported values are off by a fixed factor.
+
 | Component | Details |
 |---|---|
-| Shelly 1 Gen4 (ESP32-C6, 8 MB flash) | Target hardware |
 | Shelly Plus Add-on | DS18B20 (TX=GPIO9/RX=GPIO16) + TTP223 touch (GPIO18) + Analog IN (GPIO17) |
 | Thread Border Router | Google TV Streamer 4K (or any Thread BR) |
 | Matter controller | Home Assistant Matter Server, Google Home, Apple Home |

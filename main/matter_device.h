@@ -40,6 +40,13 @@ void matter_send_color_temp_stop(uint16_t local_endpoint_id);
 void matter_update_temperature(int16_t centi_c);
 void matter_update_occupancy(bool occupied);
 
+/* Update the Electrical Power Measurement endpoint (Shelly 1PM Gen4 only).
+ * No-op when the power-meter endpoint was not created (non-PM profile).
+ * Units: volts, amperes, watts, hertz — scaled to the Matter mV/mA/mW/mHz
+ * representation internally. */
+void matter_update_power(float voltage_v, float current_a,
+                         float power_w, float frequency_hz);
+
 /* Update relay OnOff attribute (report to HA). Called from script engine. */
 void matter_update_relay_onoff(bool on);
 

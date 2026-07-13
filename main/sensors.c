@@ -14,6 +14,7 @@
 
 #include "sensors.h"
 #include "app_config.h"
+#include "hw_config.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -216,6 +217,14 @@ void sensors_init(temp_cb_t temp_cb, occupancy_cb_t occ_cb, analog_cb_t analog_c
     s_temp_cb   = temp_cb;
     s_occ_cb    = occ_cb;
     s_analog_cb = analog_cb;
+
+    if (!hw_profile()->has_addon) {
+        /* Add-on inputs (DS18B20 1-Wire + analog occupancy) only exist on the
+         * full-size Shelly 1 Gen4. Mini/PM have no Add-on connector — skip the
+         * sensor tasks so their GPIOs are left untouched. */
+        ESP_LOGI(TAG, "no Add-on on this device — sensor tasks skipped");
+        return;
+    }
 
     if (g_bench_mode) {
         /* Bench mode: skip sensor tasks so GPIO16 (U0TXD) and GPIO17 (U0RXD)

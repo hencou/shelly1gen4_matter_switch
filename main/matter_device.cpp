@@ -21,6 +21,7 @@
 
 extern "C" {
 #include "app_config.h"
+#include "hw_config.h"
 #include "relay.h"
 #include "ota.h"
 #include "esp_log.h"
@@ -87,6 +88,9 @@ using namespace chip::app::Clusters;
 
 /* Dynamic endpoint tracking — indexed by script slot */
 static uint16_t s_slot_endpoints[SCRIPT_MAX_SLOTS] = {0};
+
+/* Electrical Power Measurement endpoint (Shelly 1PM Gen4 only; 0 = not present) */
+static uint16_t s_pm_endpoint = 0;
 static script_slot_type_t s_slot_types[SCRIPT_MAX_SLOTS] = {SLOT_TYPE_NONE};
 static uint8_t s_num_slots = 0;
 
@@ -492,6 +496,20 @@ extern "C" void matter_update_occupancy(bool occupied)
     chip::DeviceLayer::PlatformMgr().UnlockChipStack();
 }
 
+extern "C" void matter_update_power(float voltage_v, float current_a,
+                                    float power_w, float frequency_hz)
+{
+    if (!s_pm_endpoint) return;
+    namespace EPM = chip::app::Clusters::ElectricalPowerMeasurement::Attributes;
+    chip::DeviceLayer::PlatformMgr().LockChipStack();
+    /* Matter units: mW / mV / mA / mHz */
+    EPM::ActivePower::Set(s_pm_endpoint,   (int64_t)(power_w     * 1000.0f));
+    EPM::Voltage::Set(s_pm_endpoint,       (int64_t)(voltage_v   * 1000.0f));
+    EPM::ActiveCurrent::Set(s_pm_endpoint, (int64_t)(current_a   * 1000.0f));
+    EPM::Frequency::Set(s_pm_endpoint,     (int64_t)(frequency_hz * 1000.0f));
+    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+}
+
 extern "C" void matter_update_relay_onoff(bool on)
 {
     esp_matter_attr_val_t v = esp_matter_bool(on);
@@ -874,6 +892,28 @@ extern "C" esp_err_t matter_start(const script_slot_type_t *slot_types, uint8_t 
                      slot_type_name(slot_types[i]));
         } else {
             ESP_LOGW(TAG, "Slot %d: failed to create endpoint for type %d", i, slot_types[i]);
+        }
+    }
+
+    /* Electrical Power Measurement endpoint — only on PM hardware (1PM Gen4).
+     * electrical_sensor::create sets up descriptor + power_topology +
+     * electrical_power_measurement (with the mandatory ActivePower attribute).
+     * The optional Voltage/ActiveCurrent/Frequency attributes are added here so
+     * matter_update_power() can report them. */
+    if (hw_profile()->has_pm) {
+        electrical_sensor::config_t pm_cfg;
+        endpoint_t *pm_ep = electrical_sensor::create(node, &pm_cfg, ENDPOINT_FLAG_NONE, NULL);
+        if (pm_ep) {
+            cluster_t *epm = cluster::get(pm_ep, ElectricalPowerMeasurement::Id);
+            if (epm) {
+                electrical_power_measurement::attribute::create_voltage(epm, nullable<int64_t>());
+                electrical_power_measurement::attribute::create_active_current(epm, nullable<int64_t>());
+                electrical_power_measurement::attribute::create_frequency(epm, nullable<int64_t>());
+            }
+            s_pm_endpoint = endpoint::get_id(pm_ep);
+            ESP_LOGI(TAG, "EP%u = Electrical Power Measurement (BL0942)", s_pm_endpoint);
+        } else {
+            ESP_LOGW(TAG, "failed to create electrical sensor endpoint");
         }
     }
 
