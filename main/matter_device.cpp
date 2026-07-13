@@ -500,14 +500,19 @@ extern "C" void matter_update_power(float voltage_v, float current_a,
                                     float power_w, float frequency_hz)
 {
     if (!s_pm_endpoint) return;
-    namespace EPM = chip::app::Clusters::ElectricalPowerMeasurement::Attributes;
-    chip::DeviceLayer::PlatformMgr().LockChipStack();
-    /* Matter units: mW / mV / mA / mHz */
-    EPM::ActivePower::Set(s_pm_endpoint,   (int64_t)(power_w     * 1000.0f));
-    EPM::Voltage::Set(s_pm_endpoint,       (int64_t)(voltage_v   * 1000.0f));
-    EPM::ActiveCurrent::Set(s_pm_endpoint, (int64_t)(current_a   * 1000.0f));
-    EPM::Frequency::Set(s_pm_endpoint,     (int64_t)(frequency_hz * 1000.0f));
-    chip::DeviceLayer::PlatformMgr().UnlockChipStack();
+    namespace EPM = chip::app::Clusters::ElectricalPowerMeasurement;
+    /* Matter units: mW / mV / mA / mHz. These attributes are nullable int64.
+     * The ElectricalPowerMeasurement cluster is created dynamically (not in the
+     * static ZAP config), so no generated Get/Set accessors exist — use the
+     * esp-matter attribute store update path (locks the stack internally). */
+    esp_matter_attr_val_t vp = esp_matter_nullable_int64(nullable<int64_t>((int64_t)(power_w      * 1000.0f)));
+    esp_matter_attr_val_t vv = esp_matter_nullable_int64(nullable<int64_t>((int64_t)(voltage_v    * 1000.0f)));
+    esp_matter_attr_val_t vc = esp_matter_nullable_int64(nullable<int64_t>((int64_t)(current_a    * 1000.0f)));
+    esp_matter_attr_val_t vf = esp_matter_nullable_int64(nullable<int64_t>((int64_t)(frequency_hz * 1000.0f)));
+    attribute::update(s_pm_endpoint, EPM::Id, EPM::Attributes::ActivePower::Id,   &vp);
+    attribute::update(s_pm_endpoint, EPM::Id, EPM::Attributes::Voltage::Id,       &vv);
+    attribute::update(s_pm_endpoint, EPM::Id, EPM::Attributes::ActiveCurrent::Id, &vc);
+    attribute::update(s_pm_endpoint, EPM::Id, EPM::Attributes::Frequency::Id,     &vf);
 }
 
 extern "C" void matter_update_relay_onoff(bool on)
