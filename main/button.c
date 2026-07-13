@@ -40,6 +40,7 @@
 
 #include "button.h"
 #include "app_config.h"
+#include "hw_config.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -242,32 +243,38 @@ void button_driver_init(button_cb_t cb)
 {
     s_cb = cb;
 
-    /* INPUT_PUSHBUTTON: GPIO10, active-high in production (optocoupler 230V),
-     * active-low in BENCH_MODE (internal pull-up, button to GND). */
-    s_state[INPUT_PUSHBUTTON].gpio       = PIN_SWITCH_INPUT;
+    const hw_profile_t *hw = hw_profile();
+    const int switch_gpio = hw->switch_gpio;
+    const int touch_gpio  = PIN_TOUCH_INPUT;
+    const bool touch_on   = hw->has_addon;   /* Add-on inputs: 1 Gen4 + 1PM, not Mini */
+
+    /* INPUT_PUSHBUTTON: wall-switch input, active-high in production
+     * (optocoupler 230V), active-low in BENCH_MODE (internal pull-up). */
+    s_state[INPUT_PUSHBUTTON].gpio       = switch_gpio;
     s_state[INPUT_PUSHBUTTON].enabled    = true;
     s_state[INPUT_PUSHBUTTON].active_low = (g_bench_mode != 0);
 
-    /* INPUT_TOUCH: GPIO18 Add-on digital input terminal.
-     * Connecting to GND = pressed -> active-low.
-     * Internal pull-up provides a definite idle-HIGH state; the Add-on
-     * isolator does not supply a pull-up on the ESP32 side of this line. */
-    s_state[INPUT_TOUCH].gpio       = PIN_TOUCH_INPUT;
-    s_state[INPUT_TOUCH].enabled    = true;
-    s_state[INPUT_TOUCH].active_low = true;   /* was false, corrected */
+    /* INPUT_TOUCH: Add-on digital input terminal (GPIO18). Only present on
+     * the full-size 1 Gen4; disabled on Mini/PM which have no Add-on.
+     * Connecting to GND = pressed -> active-low. Internal pull-up provides
+     * a definite idle-HIGH state; the Add-on isolator does not supply a
+     * pull-up on the ESP32 side of this line. */
+    s_state[INPUT_TOUCH].gpio       = touch_gpio;
+    s_state[INPUT_TOUCH].enabled    = touch_on;
+    s_state[INPUT_TOUCH].active_low = true;
 
-    /* INPUT_DEVICE_BTN: GPIO4 onboard pair button, always active-low. */
-    s_state[INPUT_DEVICE_BTN].gpio       = 4;
+    /* INPUT_DEVICE_BTN: onboard pair button, always active-low. */
+    s_state[INPUT_DEVICE_BTN].gpio       = hw->button_gpio;
     s_state[INPUT_DEVICE_BTN].enabled    = true;
     s_state[INPUT_DEVICE_BTN].active_low = true;
 
     /* ---------- GPIO-config ---------- */
 
     ESP_LOGI(TAG, "BD-STEP-1: gpio_config pushbutton GPIO%d bench=%d (active_low=%d)",
-             PIN_SWITCH_INPUT, g_bench_mode, s_state[INPUT_PUSHBUTTON].active_low);
+             switch_gpio, g_bench_mode, s_state[INPUT_PUSHBUTTON].active_low);
 
     gpio_config_t pushbutton_cfg = {
-        .pin_bit_mask = (1ULL << PIN_SWITCH_INPUT),
+        .pin_bit_mask = (1ULL << switch_gpio),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = g_bench_mode ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -276,17 +283,21 @@ void button_driver_init(button_cb_t cb)
     gpio_config(&pushbutton_cfg);
     ESP_LOGI(TAG, "BD-STEP-2: gpio_config pushbutton done");
 
-    /* Add-on digital in: internal pull-up so the pin idles HIGH when
-     * nothing drives it (the isolator does not pull up the ESP32 side). */
-    gpio_config_t touch_cfg = {
-        .pin_bit_mask = (1ULL << PIN_TOUCH_INPUT),
-        .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_ANYEDGE,
-    };
-    gpio_config(&touch_cfg);
-    ESP_LOGI(TAG, "BD-STEP-2b: gpio_config touch/addon-digital-in done");
+    if (touch_on) {
+        /* Add-on digital in: internal pull-up so the pin idles HIGH when
+         * nothing drives it (the isolator does not pull up the ESP32 side). */
+        gpio_config_t touch_cfg = {
+            .pin_bit_mask = (1ULL << touch_gpio),
+            .mode         = GPIO_MODE_INPUT,
+            .pull_up_en   = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type    = GPIO_INTR_ANYEDGE,
+        };
+        gpio_config(&touch_cfg);
+        ESP_LOGI(TAG, "BD-STEP-2b: gpio_config touch/addon-digital-in done");
+    } else {
+        ESP_LOGI(TAG, "BD-STEP-2b: touch/addon-digital-in skipped (no Add-on)");
+    }
 
     gpio_config_t devbtn_cfg = {
         .pin_bit_mask = (1ULL << s_state[INPUT_DEVICE_BTN].gpio),
@@ -306,14 +317,16 @@ void button_driver_init(button_cb_t cb)
     esp_err_t isr_svc_err = gpio_install_isr_service(0);
     ESP_LOGI(TAG, "BD-STEP-4: gpio_install_isr_service -> %d (0=OK)", isr_svc_err);
 
-    gpio_isr_handler_add(PIN_SWITCH_INPUT, btn_isr,
+    gpio_isr_handler_add(switch_gpio, btn_isr,
                          (void *)(uintptr_t)INPUT_PUSHBUTTON);
-    ESP_LOGI(TAG, "BD-STEP-5a: isr_handler_add pushbutton (GPIO%d) done", PIN_SWITCH_INPUT);
+    ESP_LOGI(TAG, "BD-STEP-5a: isr_handler_add pushbutton (GPIO%d) done", switch_gpio);
 
-    gpio_isr_handler_add(PIN_TOUCH_INPUT, btn_isr,
-                         (void *)(uintptr_t)INPUT_TOUCH);
-    ESP_LOGI(TAG, "BD-STEP-5b: isr_handler_add touch/addon-digital-in (GPIO%d) done",
-             PIN_TOUCH_INPUT);
+    if (touch_on) {
+        gpio_isr_handler_add(touch_gpio, btn_isr,
+                             (void *)(uintptr_t)INPUT_TOUCH);
+        ESP_LOGI(TAG, "BD-STEP-5b: isr_handler_add touch/addon-digital-in (GPIO%d) done",
+                 touch_gpio);
+    }
 
     gpio_isr_handler_add(s_state[INPUT_DEVICE_BTN].gpio,
                          btn_isr, (void *)(uintptr_t)INPUT_DEVICE_BTN);
@@ -324,7 +337,7 @@ void button_driver_init(button_cb_t cb)
     ESP_LOGI(TAG, "BD-STEP-6: xTaskCreate btn_task -> %s",
              btn_r == pdPASS ? "OK" : "FAIL");
 
-    ESP_LOGI(TAG, "button driver init (pushbutton=GPIO%d addon-digital-in=GPIO%d device_btn=GPIO%d)",
-             PIN_SWITCH_INPUT, PIN_TOUCH_INPUT,
+    ESP_LOGI(TAG, "button driver init (pushbutton=GPIO%d addon-digital-in=%s device_btn=GPIO%d)",
+             switch_gpio, touch_on ? "on" : "off",
              s_state[INPUT_DEVICE_BTN].gpio);
 }

@@ -9,6 +9,7 @@
 
 #include "status_led.h"
 #include "app_config.h"
+#include "hw_config.h"
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -93,8 +94,8 @@ static void schedule_next(uint32_t period_us)
 
 esp_err_t status_led_init(void)
 {
-    s_pin = PIN_STATUS_LED;
-    s_active_high = STATUS_LED_ACTIVE_HIGH;
+    s_pin = hw_profile()->led_gpio;
+    s_active_high = hw_profile()->led_active_high;
 
     if (s_pin < 0) {
         ESP_LOGI(TAG, "Status LED disabled (PIN_STATUS_LED=%d)", s_pin);

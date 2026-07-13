@@ -5,6 +5,7 @@
 
 #include "relay.h"
 #include "app_config.h"
+#include "hw_config.h"
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -16,6 +17,7 @@ static const char *NVS_NAMESPACE = "relay";
 static const char *NVS_KEY_STATE = "state";
 
 static bool s_state;
+static int  s_relay_gpio = -1;
 
 static void persist(void)
 {
@@ -42,21 +44,23 @@ static bool restore(void)
 
 void relay_init(void)
 {
+    s_relay_gpio = hw_profile()->relay_gpio;
+
     gpio_config_t cfg = {
-        .pin_bit_mask = (1ULL << PIN_RELAY),
+        .pin_bit_mask = (1ULL << s_relay_gpio),
         .mode = GPIO_MODE_OUTPUT,
     };
     gpio_config(&cfg);
 
     s_state = restore();
-    gpio_set_level(PIN_RELAY, s_state ? 1 : 0);
-    ESP_LOGI(TAG, "relay init, state=%s", s_state ? "ON" : "OFF");
+    gpio_set_level(s_relay_gpio, s_state ? 1 : 0);
+    ESP_LOGI(TAG, "relay init on GPIO%d, state=%s", s_relay_gpio, s_state ? "ON" : "OFF");
 }
 
 void relay_set(bool on)
 {
     s_state = on;
-    gpio_set_level(PIN_RELAY, on ? 1 : 0);
+    gpio_set_level(s_relay_gpio, on ? 1 : 0);
     persist();
 }
 
