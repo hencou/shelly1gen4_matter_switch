@@ -25,7 +25,7 @@ static const char *TAG = "power_meter";
 
 /* ---- BL0942 protocol constants ---- */
 #define BL0942_UART_PORT     UART_NUM_1
-#define BL0942_BAUD          4800          /* chip power-on default */
+#define BL0942_BAUD          9600          /* Shelly 1PM Gen4 (per ESPHome device DB) */
 #define BL0942_ADDR          0x00
 #define BL0942_READ_CMD      0x58
 #define BL0942_FULL_PACKET   0xAA

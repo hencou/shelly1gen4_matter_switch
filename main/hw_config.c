@@ -41,7 +41,7 @@ static const hw_profile_t s_profiles[HW_TYPE_COUNT] = {
     [HW_1PM_GEN4] = {
         .type = HW_1PM_GEN4, .name = "Shelly 1PM Gen4",
         .relay_gpio = 4, .switch_gpio = 10, .button_gpio = 1,
-        .led_gpio = 11, .led_active_high = false,
+        .led_gpio = 0, .led_active_high = false,
         .has_addon = true, .has_pm = true, .pm_uart_tx = 6, .pm_uart_rx = 7,
     },
 };

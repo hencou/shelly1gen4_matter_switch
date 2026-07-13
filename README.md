@@ -42,7 +42,7 @@ for the relay, wall-switch input, onboard button and status LED.
 |---|---|---|---|---|---|---|
 | **Shelly 1 Gen4** (default) | GPIO5 | GPIO10 | GPIO4 | GPIO15 | yes | — |
 | **Shelly 1 Mini Gen4** | GPIO10 | GPIO12 | GPIO22 | GPIO5 | no | — |
-| **Shelly 1PM Gen4** | GPIO4 | GPIO10 | GPIO1 | GPIO11 | yes | BL0942 (UART1 TX=GPIO6 RX=GPIO7) |
+| **Shelly 1PM Gen4** | GPIO4 | GPIO10 | GPIO1 | GPIO0 | yes | BL0942 (UART1 TX=GPIO6 RX=GPIO7, 9600 baud) |
 
 Notes:
 - **Changing the device type does not require Matter re-commissioning** — the
