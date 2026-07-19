@@ -19,7 +19,10 @@ bool chip_temp_read(float *out)
 
     bool ok = false;
     if (!s_tsens) {
-        temperature_sensor_config_t tc = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 100);
+        /* Use a range that fits a single hardware measurement range (the C6
+         * sensor rejects a span wider than one range). -10..80 covers normal
+         * SoC operating temperatures with the best accuracy. */
+        temperature_sensor_config_t tc = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
         if (temperature_sensor_install(&tc, &s_tsens) == ESP_OK) {
             temperature_sensor_enable(s_tsens);
         } else {
