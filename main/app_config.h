@@ -6,7 +6,7 @@ extern "C" {
 
 /* Firmware version string — displayed on the management dashboard */
 #ifndef FW_VERSION
-#define FW_VERSION "1.5.3"
+#define FW_VERSION "1.5.4"
 #endif
 
 /* Pin mapping — adjust via `idf.py menuconfig` */
@@ -93,6 +93,7 @@ typedef enum {
                            * active-low in BENCH_MODE with internal pull-up) */
     INPUT_TOUCH,          /* TTP223 on Add-on digital input (always active-high) */
     INPUT_DEVICE_BTN,     /* GPIO4 — onboard pair button (always active-low, pull-up) */
+    INPUT_SWITCH_2,       /* 2nd wall-switch input (Shelly 2PM Gen4 only) */
     INPUT_COUNT
 } input_id_t;
 

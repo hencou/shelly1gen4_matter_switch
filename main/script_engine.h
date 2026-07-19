@@ -33,7 +33,8 @@ typedef enum {
     SLOT_TYPE_OCCUPANCY,          /* OccupancySensing Server — reports to HA */
     SLOT_TYPE_ILLUMINANCE,        /* IlluminanceMeasurement Server — reports to HA */
     SLOT_TYPE_TEMPERATURE,        /* TemperatureMeasurement Server — reports to HA */
-    SLOT_TYPE_RELAY,              /* OnOff Light Server — controls internal relay */
+    SLOT_TYPE_RELAY,              /* OnOff Light Server — controls internal relay (ch 1) */
+    SLOT_TYPE_RELAY2,             /* OnOff Light Server — controls internal relay 2 (2PM) */
 } script_slot_type_t;
 
 /* Script execution trigger */

@@ -22,6 +22,7 @@ extern "C" {
 #include "relay.h"
 #include "sensors.h"
 #include "power_meter.h"
+#include "ade7953.h"
 #include "ota.h"
 #include "status_led.h"
 #include "script_engine.h"
@@ -70,7 +71,14 @@ extern "C" void on_analog(uint8_t duty_pct)
 
 extern "C" void on_power(const power_meter_reading_t *r)
 {
-    matter_update_power(r->voltage_v, r->current_a, r->power_w, r->frequency_hz);
+    matter_update_power_ch(0, r->voltage_v, r->current_a, r->power_w, r->frequency_hz);
+}
+
+/* ADE7953 dual-channel callback (2PM Gen4). */
+extern "C" void on_power_ade(const power_meter_reading_t *a, const power_meter_reading_t *b)
+{
+    matter_update_power_ch(0, a->voltage_v, a->current_a, a->power_w, a->frequency_hz);
+    matter_update_power_ch(1, b->voltage_v, b->current_a, b->power_w, b->frequency_hz);
 }
 
 /* Stock Shelly 1 Gen4 stores its partition table at 0x10000.
@@ -247,11 +255,16 @@ extern "C" void app_main(void)
     sensors_init(on_temperature, on_occupancy, on_analog);
     ESP_LOGI(TAG, "BOOT-STEP: sensors_init done");
 
-    /* BL0942 power meter (Shelly 1PM Gen4 only) — reports voltage/current/
-     * power/frequency to the Electrical Power Measurement Matter endpoint. */
-    if (hw_profile()->has_pm) {
+    /* Power meter — reports voltage/current/power/frequency to the Electrical
+     * Power Measurement Matter endpoint(s). 1PM Gen4 = BL0942 (UART, 1 channel);
+     * 2PM Gen4 = ADE7953 (I2C, 2 channels). */
+    if (hw_profile()->pm_type == PM_BL0942) {
         power_meter_init(hw_profile()->pm_uart_tx, hw_profile()->pm_uart_rx, on_power);
-        ESP_LOGI(TAG, "BOOT-STEP: power_meter_init done");
+        ESP_LOGI(TAG, "BOOT-STEP: power_meter_init (BL0942) done");
+    } else if (hw_profile()->pm_type == PM_ADE7953) {
+        ade7953_init(hw_profile()->pm_i2c_sda, hw_profile()->pm_i2c_scl,
+                     hw_profile()->pm_i2c_irq, on_power_ade);
+        ESP_LOGI(TAG, "BOOT-STEP: ade7953_init done");
     }
 
     if (commissioned) {

@@ -8,6 +8,9 @@
 #include "app_config.h"
 #include "hw_config.h"
 #include "power_meter.h"
+#include "ade7953.h"
+#include "relay.h"
+#include "chip_temp.h"
 #include "script_engine.h"
 #include "dashboard_html.h"
 #include "matter_device.h"
@@ -184,16 +187,9 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
 
     char ctemp_str[32] = "N/A";
     {
-        temperature_sensor_handle_t tsens = NULL;
-        temperature_sensor_config_t tc = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 50);
-        if (temperature_sensor_install(&tc, &tsens) == ESP_OK) {
-            temperature_sensor_enable(tsens);
-            float t;
-            if (temperature_sensor_get_celsius(tsens, &t) == ESP_OK) {
-                snprintf(ctemp_str, sizeof(ctemp_str), "%.1f C", t);
-            }
-            temperature_sensor_disable(tsens);
-            temperature_sensor_uninstall(tsens);
+        float t;
+        if (chip_temp_read(&t)) {
+            snprintf(ctemp_str, sizeof(ctemp_str), "%.1f C", t);
         }
     }
 
@@ -289,8 +285,19 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         snprintf(dig_str, sizeof(dig_str), "N/A (no Add-on)");
     }
 
-    char power_str[80];
-    if (hw->has_pm) {
+    char power_str[200];
+    if (hw->pm_type == PM_ADE7953) {
+        power_meter_reading_t a, b;
+        bool ha = ade7953_get(0, &a), hb = ade7953_get(1, &b);
+        if (ha || hb) {
+            snprintf(power_str, sizeof(power_str),
+                     "A: %.1f V, %.3f A, %.1f W, %.1f Wh | B: %.3f A, %.1f W, %.1f Wh (%.2f Hz)",
+                     a.voltage_v, a.current_a, a.power_w, a.energy_wh,
+                     b.current_a, b.power_w, b.energy_wh, a.frequency_hz);
+        } else {
+            snprintf(power_str, sizeof(power_str), "waiting for ADE7953...");
+        }
+    } else if (hw->pm_type == PM_BL0942) {
         power_meter_reading_t pm;
         if (power_meter_get(&pm)) {
             snprintf(power_str, sizeof(power_str),
@@ -302,6 +309,25 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         }
     } else {
         snprintf(power_str, sizeof(power_str), "N/A (no power meter)");
+    }
+
+    /* Relay + 2nd switch state (2nd channel only present on 2PM). */
+    char relay_str[48];
+    if (relay_channel_count() >= 2) {
+        snprintf(relay_str, sizeof(relay_str), "ch1=%s, ch2=%s",
+                 relay_get_ch(0) ? "ON" : "OFF", relay_get_ch(1) ? "ON" : "OFF");
+    } else {
+        snprintf(relay_str, sizeof(relay_str), "%s", relay_get_ch(0) ? "ON" : "OFF");
+    }
+
+    char switch2_str[40];
+    if (hw->switch2_gpio >= 0) {
+        int s2 = gpio_get_level(hw->switch2_gpio);
+        snprintf(switch2_str, sizeof(switch2_str), "%s (GPIO%d=%d)",
+                 (g_bench_mode ? !s2 : s2) ? "PRESSED" : "RELEASED",
+                 hw->switch2_gpio, s2);
+    } else {
+        snprintf(switch2_str, sizeof(switch2_str), "N/A");
     }
 
     pos = snprintf(json, sizeof(json),
@@ -320,6 +346,8 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         "\"srp_mode\":\"%s\","
         "\"pushbutton\":\"%s (GPIO%d=%d)\","
         "\"pcb_button\":\"%s (GPIO%d=%d)\","
+        "\"switch2\":\"%s\","
+        "\"relay\":\"%s\","
         "\"digital_in\":\"%s\","
         "\"analog_in\":\"%s\","
         "\"temperature\":\"%s\","
@@ -338,6 +366,8 @@ static esp_err_t api_hardware_get(httpd_req_t *req)
         ota_srp_mode_get() ? "ON" : "OFF",
         btn_active ? "PRESSED" : "RELEASED", hw->switch_gpio, btn_level,
         pcb_active ? "PRESSED" : "RELEASED", hw->button_gpio, pcb_level,
+        switch2_str,
+        relay_str,
         dig_str,
         ana_str,
         temp_str,

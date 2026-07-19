@@ -198,6 +198,20 @@ function run()
 end
 ```
 
+To expose the **Shelly's internal (ESP32-C6) temperature** instead of the Add-on
+DS18B20, use `input.chip_temperature()` — this works on every model (also the
+plain 1 Gen4 without Add-on). It returns `nil` if the sensor is unavailable:
+
+```lua
+function run()
+  local temp = input.chip_temperature()
+  if temp ~= nil then
+    endpoint.set("measured_value", math.floor(temp * 100))
+    log("chip temp: " .. temp .. " C")
+  end
+end
+```
+
 ---
 
 ## 7. Occupancy sensor (analog IN)
@@ -375,17 +389,21 @@ end
 
 ### Input
 - `input.button_event()` → string or nil
-- `input.button_id()` → integer (0=SW, 1=Digital IN, 2=PCB)
+- `input.button_id()` → integer (0=SW, 1=Digital IN, 2=PCB, 3=SW2 on 2PM)
 - `input.sw()` → boolean
 - `input.digital()` → boolean
 - `input.device_btn()` → boolean
 - `input.analog()` → integer (0–100 %)
-- `input.temperature()` → number (°C)
+- `input.temperature()` → number (°C, DS18B20 Add-on)
+- `input.chip_temperature()` → number or nil (°C, ESP32-C6 internal sensor)
 
 ### Output
-- `output.relay(bool)` / `output.relay_set(bool)` — set relay
-- `output.relay_toggle()` — toggle relay
-- `output.relay_state()` → boolean
+Relay functions take an optional 1-based channel (`1`=relay 1, `2`=relay 2 on the
+2PM); omitting it targets relay 1, so existing single-relay scripts keep working.
+- `output.relay_set(on)` / `output.relay_set(ch, on)` — set relay
+- `output.relay(...)` — alias for `output.relay_set`
+- `output.relay_toggle([ch])` — toggle relay
+- `output.relay_state([ch])` → boolean
 
 ### Endpoint (client commands)
 - `endpoint.command("toggle")`

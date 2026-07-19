@@ -28,21 +28,43 @@ static const char *NVS_KEY = "dev_type";
 static const hw_profile_t s_profiles[HW_TYPE_COUNT] = {
     [HW_1_GEN4] = {
         .type = HW_1_GEN4, .name = "Shelly 1 Gen4",
-        .relay_gpio = 5, .switch_gpio = 10, .button_gpio = 4,
+        .relay_gpio = 5, .relay2_gpio = -1,
+        .switch_gpio = 10, .switch2_gpio = -1, .button_gpio = 4,
         .led_gpio = 15, .led_active_high = false,
-        .has_addon = true, .has_pm = false, .pm_uart_tx = -1, .pm_uart_rx = -1,
+        .has_addon = true, .has_pm = false, .pm_type = PM_NONE,
+        .pm_uart_tx = -1, .pm_uart_rx = -1,
+        .pm_i2c_sda = -1, .pm_i2c_scl = -1, .pm_i2c_irq = -1,
     },
     [HW_1_MINI_GEN4] = {
         .type = HW_1_MINI_GEN4, .name = "Shelly 1 Mini Gen4",
-        .relay_gpio = 10, .switch_gpio = 12, .button_gpio = 22,
+        .relay_gpio = 10, .relay2_gpio = -1,
+        .switch_gpio = 12, .switch2_gpio = -1, .button_gpio = 22,
         .led_gpio = 5, .led_active_high = false,
-        .has_addon = false, .has_pm = false, .pm_uart_tx = -1, .pm_uart_rx = -1,
+        .has_addon = false, .has_pm = false, .pm_type = PM_NONE,
+        .pm_uart_tx = -1, .pm_uart_rx = -1,
+        .pm_i2c_sda = -1, .pm_i2c_scl = -1, .pm_i2c_irq = -1,
     },
     [HW_1PM_GEN4] = {
         .type = HW_1PM_GEN4, .name = "Shelly 1PM Gen4",
-        .relay_gpio = 4, .switch_gpio = 10, .button_gpio = 1,
+        .relay_gpio = 4, .relay2_gpio = -1,
+        .switch_gpio = 10, .switch2_gpio = -1, .button_gpio = 1,
         .led_gpio = 0, .led_active_high = false,
-        .has_addon = true, .has_pm = true, .pm_uart_tx = 6, .pm_uart_rx = 7,
+        .has_addon = true, .has_pm = true, .pm_type = PM_BL0942,
+        .pm_uart_tx = 6, .pm_uart_rx = 7,
+        .pm_i2c_sda = -1, .pm_i2c_scl = -1, .pm_i2c_irq = -1,
+    },
+    [HW_2PM_GEN4] = {
+        /* Shelly Plus 2PM Gen4 — pins per the working ESPHome device config
+         * (relays on GPIO5/GPIO3, switches on GPIO11/GPIO10). The human-readable
+         * "GPIO Pinout" table on esphome.io swaps relay/switch on these four
+         * pins; VERIFY on real hardware before connecting mains. */
+        .type = HW_2PM_GEN4, .name = "Shelly 2PM Gen4",
+        .relay_gpio = 5, .relay2_gpio = 3,
+        .switch_gpio = 11, .switch2_gpio = 10, .button_gpio = 12,
+        .led_gpio = 0, .led_active_high = false,
+        .has_addon = false, .has_pm = true, .pm_type = PM_ADE7953,
+        .pm_uart_tx = -1, .pm_uart_rx = -1,
+        .pm_i2c_sda = 6, .pm_i2c_scl = 7, .pm_i2c_irq = 19,
     },
 };
 

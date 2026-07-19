@@ -17,6 +17,7 @@
 #include "relay.h"
 #include "sensors.h"
 #include "matter_device.h"
+#include "chip_temp.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -69,9 +70,6 @@ typedef struct {
 
 static volatile script_event_t s_last_btn_event = {0, 0};
 static volatile bool s_btn_event_pending = false;
-
-/* Relay state */
-static volatile bool s_relay_state = false;
 
 /* ---------- NVS helpers ---------- */
 
@@ -193,6 +191,17 @@ static int l_input_temperature(lua_State *L)
     return 1;
 }
 
+static int l_input_chip_temperature(lua_State *L)
+{
+    float t;
+    if (chip_temp_read(&t)) {
+        lua_pushnumber(L, t);
+    } else {
+        lua_pushnil(L);
+    }
+    return 1;
+}
+
 static int l_input_button_event(lua_State *L)
 {
     if (!s_btn_event_pending) {
@@ -226,6 +235,7 @@ static const luaL_Reg input_lib[] = {
     {"sw",           l_input_sw},
     {"device_btn",   l_input_device_btn},
     {"temperature",  l_input_temperature},
+    {"chip_temperature", l_input_chip_temperature},
     {"button_event", l_input_button_event},
     {"button_id",    l_input_button_id},
     {NULL, NULL}
@@ -233,26 +243,42 @@ static const luaL_Reg input_lib[] = {
 
 /* ---------- Lua API: output ---------- */
 
+/* Optional leading channel argument (1-based in Lua). Returns 0-based channel
+ * and sets *val_idx to the Lua stack index of the following value argument.
+ *   relay_set(on)      -> ch 0, value at index 1
+ *   relay_set(ch, on)  -> ch = ch-1, value at index 2 */
+static int relay_arg_channel(lua_State *L, int *val_idx)
+{
+    if (lua_gettop(L) >= 2 && lua_isnumber(L, 1)) {
+        *val_idx = 2;
+        return (int)lua_tointeger(L, 1) - 1;
+    }
+    *val_idx = 1;
+    return 0;
+}
+
 static int l_output_relay(lua_State *L)
 {
-    bool on = lua_toboolean(L, 1);
-    s_relay_state = on;
-    relay_set(on);
-    matter_update_relay_onoff(on);
+    int vi;
+    int ch = relay_arg_channel(L, &vi);
+    bool on = lua_toboolean(L, vi);
+    relay_set_ch(ch, on);
+    matter_update_relay_onoff(ch, on);
     return 0;
 }
 
 static int l_output_relay_toggle(lua_State *L)
 {
-    s_relay_state = !s_relay_state;
-    relay_set(s_relay_state);
-    matter_update_relay_onoff(s_relay_state);
+    int ch = lua_isnumber(L, 1) ? (int)lua_tointeger(L, 1) - 1 : 0;
+    relay_toggle_ch(ch);
+    matter_update_relay_onoff(ch, relay_get_ch(ch));
     return 0;
 }
 
 static int l_output_relay_state(lua_State *L)
 {
-    lua_pushboolean(L, s_relay_state);
+    int ch = lua_isnumber(L, 1) ? (int)lua_tointeger(L, 1) - 1 : 0;
+    lua_pushboolean(L, relay_get_ch(ch));
     return 1;
 }
 
@@ -287,7 +313,7 @@ static int l_endpoint_set(lua_State *L)
     } else if (strcmp(attr, "on_off") == 0) {
         bool val = lua_toboolean(L, 2);
         ESP_LOGI(TAG, "slot %d: set on_off=%d", slot, val);
-        matter_update_relay_onoff(val);
+        matter_update_relay_onoff(0, val);
     } else {
         ESP_LOGW(TAG, "slot %d: unknown attr '%s'", slot, attr);
     }

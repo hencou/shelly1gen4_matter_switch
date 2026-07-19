@@ -33,16 +33,32 @@ Each script slot can be configured as one of these Matter endpoint types:
 
 ## Target hardware
 
-One firmware image supports three Gen4 models (all ESP32-C6, 8 MB flash). Select
+One firmware image supports four Gen4 models (all ESP32-C6, 8 MB flash). Select
 the model on the management dashboard (**Hardware → Device Type**); the choice is
 stored in NVS and applied on the next boot. The correct GPIO mapping is then used
-for the relay, wall-switch input, onboard button and status LED.
+for the relay(s), wall-switch input(s), onboard button and status LED.
 
 | Model | Relay | Switch | Button | Status LED | Add-on | Power meter |
 |---|---|---|---|---|---|---|
 | **Shelly 1 Gen4** (default) | GPIO5 | GPIO10 | GPIO4 | GPIO15 | yes | — |
 | **Shelly 1 Mini Gen4** | GPIO10 | GPIO12 | GPIO22 | GPIO5 | no | — |
 | **Shelly 1PM Gen4** | GPIO4 | GPIO10 | GPIO1 | GPIO0 | yes | BL0942 (UART1 TX=GPIO6 RX=GPIO7, 9600 baud) |
+| **Shelly 2PM Gen4** | GPIO5 + GPIO3 | GPIO11 + GPIO10 | GPIO12 | GPIO0 | no | ADE7953 dual-channel (I2C SDA=GPIO6 SCL=GPIO7, IRQ=GPIO19) |
+
+> ⚠️ **Test status:** only the **Shelly 1 Gen4** has been verified on real
+> hardware. The **1 Mini Gen4**, **1PM Gen4** and **2PM Gen4** profiles are
+> implemented from the published pinouts but have **not** been hardware-tested.
+> The BL0942 and ADE7953 scaling constants are placeholders and **must** be
+> calibrated against a known load on real hardware before the reported
+> voltage/current/power values are trustworthy.
+
+> ⚠️ **2PM pinout conflict — VERIFY before connecting mains.** The ESPHome device
+> DB (https://devices.esphome.io/devices/shelly-plus-2pm-gen-4/) is internally
+> inconsistent: its human-readable "GPIO Pinout" table swaps relay ↔ switch on
+> GPIO5/GPIO3/GPIO11/GPIO10 relative to its working YAML config. This firmware
+> follows the **YAML config** (relays on GPIO5/GPIO3, switches on GPIO11/GPIO10).
+> Confirm the mapping on your own 2PM before wiring it to mains — driving a
+> switch-input pin as a relay output can damage the device.
 
 Notes:
 - **Changing the device type does not require Matter re-commissioning** — the
@@ -50,12 +66,14 @@ Notes:
 - **Warning:** selecting the wrong model drives the wrong GPIOs. Pick the model
   that matches your physical hardware.
 - The **Shelly Plus Add-on** (DS18B20 + touch + analog occupancy) is available on
-  the 1 Gen4 and 1PM Gen4, and **not** on the Mini.
+  the 1 Gen4 and 1PM Gen4, and **not** on the Mini or 2PM.
 - On the **1PM Gen4** the BL0942 reports voltage, current, active power,
   accumulated energy and line frequency via a Matter **Electrical Power
-  Measurement** endpoint, and on the dashboard Hardware tab. The default scaling
-  constants follow the BL0942 reference design; calibrate them against a known
-  load if the reported values are off by a fixed factor.
+  Measurement** endpoint, and on the dashboard Hardware tab.
+- The **2PM Gen4** uses an ADE7953 measuring two channels (A = relay 1,
+  B = relay 2). Each channel is exposed as its own **Electrical Power
+  Measurement** endpoint. The two relays are two OnOff Light endpoints and both
+  wall-switch inputs are reported to scripts (see the Lua section).
 
 | Component | Details |
 |---|---|
@@ -196,12 +214,13 @@ For modules already running this firmware: open the management dashboard (**6× 
 | Function | Returns | Description |
 |---|---|---|
 | `input.button_event()` | string or nil | Last button event (see events table below) |
-| `input.button_id()` | integer | Input that triggered the event: `0`=SW, `1`=Digital IN, `2`=PCB button |
+| `input.button_id()` | integer | Input that triggered the event: `0`=SW, `1`=Digital IN, `2`=PCB button, `3`=SW2 (2PM) |
 | `input.sw()` | boolean | Current state of SW input (GPIO10) |
 | `input.digital()` | boolean | Current state of Digital IN (GPIO18) |
 | `input.device_btn()` | boolean | Current state of PCB button (GPIO4) |
 | `input.analog()` | integer | Analog IN duty cycle 0–100 % (GPIO17) |
-| `input.temperature()` | number | DS18B20 temperature in °C |
+| `input.temperature()` | number | DS18B20 (Add-on) temperature in °C |
+| `input.chip_temperature()` | number or nil | ESP32-C6 internal temperature in °C (all models) |
 
 ### Button events
 
@@ -223,15 +242,26 @@ For modules already running this firmware: open the management dashboard (**6× 
 | `0` | SW (pushbutton terminal) | GPIO10 |
 | `1` | Digital IN (add-on) | GPIO18 |
 | `2` | PCB button (onboard) | GPIO4 |
+| `3` | SW2 (2nd wall switch, 2PM only) | GPIO10 (2PM) |
 
 ### Output functions
 
+The relay functions take an **optional 1-based channel** argument (`1` = relay 1,
+`2` = relay 2 on the 2PM). When omitted, channel 1 is used.
+
 | Function | Description |
 |---|---|
-| `output.relay(bool)` | Set relay on/off |
-| `output.relay_set(bool)` | Alias for `output.relay()` |
-| `output.relay_toggle()` | Toggle relay state |
-| `output.relay_state()` | Returns current relay state (boolean) |
+| `output.relay_set(on)` | Set relay 1 on/off (`on` = boolean) |
+| `output.relay_set(ch, on)` | Set relay `ch` (1 or 2) on/off |
+| `output.relay(...)` | Alias for `output.relay_set` |
+| `output.relay_toggle([ch])` | Toggle relay `ch` (default 1) |
+| `output.relay_state([ch])` | Returns state of relay `ch` (default 1) as boolean |
+
+> **Script migration note:** the relay API is now channel-indexed. Existing
+> single-relay scripts using `output.relay_set(true)` / `output.relay_toggle()` /
+> `output.relay_state()` **keep working unchanged** (they act on relay 1). Only
+> 2PM scripts that need the second relay must pass a channel:
+> `output.relay_set(2, true)`.
 
 ### Endpoint functions (client endpoints)
 
@@ -303,8 +333,11 @@ shelly1gen4_matter_switch/
 │   ├── app_main.cpp        # boot sequence, smart boot logic
 │   ├── matter_device.cpp   # dynamic endpoint creation + command emit
 │   ├── script_engine.c     # Lua 5.4 scripting engine
-│   ├── button.c/.h         # button driver (3 inputs, debounce, gestures)
-│   ├── relay.c/.h          # relay GPIO control
+│   ├── hw_config.c/.h      # runtime hardware profile (1/Mini/1PM/2PM)
+│   ├── button.c/.h         # button driver (wall switches, PCB button, gestures)
+│   ├── relay.c/.h          # relay GPIO control (1 or 2 channels)
+│   ├── power_meter.c/.h    # BL0942 driver (1PM Gen4)
+│   ├── ade7953.c/.h        # ADE7953 dual-channel driver (2PM Gen4)
 │   ├── sensors.c/.h        # DS18B20 + analog occupancy
 │   ├── ota.c/.h            # WiFi runtime, management dashboard, OTA
 │   ├── status_led.c/.h     # LED patterns
