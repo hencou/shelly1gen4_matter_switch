@@ -62,7 +62,7 @@ static const hw_profile_t s_profiles[HW_TYPE_COUNT] = {
         .relay_gpio = 5, .relay2_gpio = 3,
         .switch_gpio = 11, .switch2_gpio = 10, .button_gpio = 12,
         .led_gpio = 0, .led_active_high = false,
-        .has_addon = false, .has_pm = true, .pm_type = PM_ADE7953,
+        .has_addon = true, .has_pm = true, .pm_type = PM_ADE7953,
         .pm_uart_tx = -1, .pm_uart_rx = -1,
         .pm_i2c_sda = 6, .pm_i2c_scl = 7, .pm_i2c_irq = 19,
     },
