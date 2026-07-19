@@ -268,6 +268,13 @@ void button_driver_init(button_cb_t cb)
     s_state[INPUT_DEVICE_BTN].enabled    = true;
     s_state[INPUT_DEVICE_BTN].active_low = true;
 
+    /* INPUT_SWITCH_2: 2nd wall-switch input, only on the 2PM (switch2_gpio >= 0).
+     * Same polarity semantics as INPUT_PUSHBUTTON. */
+    const int switch2_gpio = hw->switch2_gpio;
+    s_state[INPUT_SWITCH_2].gpio       = switch2_gpio;
+    s_state[INPUT_SWITCH_2].enabled    = (switch2_gpio >= 0);
+    s_state[INPUT_SWITCH_2].active_low = (g_bench_mode != 0);
+
     /* ---------- GPIO-config ---------- */
 
     ESP_LOGI(TAG, "BD-STEP-1: gpio_config pushbutton GPIO%d bench=%d (active_low=%d)",
@@ -309,6 +316,18 @@ void button_driver_init(button_cb_t cb)
     gpio_config(&devbtn_cfg);
     ESP_LOGI(TAG, "BD-STEP-2c: gpio_config device_btn done");
 
+    if (s_state[INPUT_SWITCH_2].enabled) {
+        gpio_config_t switch2_cfg = {
+            .pin_bit_mask = (1ULL << switch2_gpio),
+            .mode         = GPIO_MODE_INPUT,
+            .pull_up_en   = g_bench_mode ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type    = GPIO_INTR_ANYEDGE,
+        };
+        gpio_config(&switch2_cfg);
+        ESP_LOGI(TAG, "BD-STEP-2d: gpio_config switch_2 (GPIO%d) done", switch2_gpio);
+    }
+
     /* ---------- queue + ISR-service ---------- */
 
     s_evt_q = xQueueCreate(16, sizeof(btn_isr_msg_t));
@@ -332,6 +351,12 @@ void button_driver_init(button_cb_t cb)
                          btn_isr, (void *)(uintptr_t)INPUT_DEVICE_BTN);
     ESP_LOGI(TAG, "BD-STEP-5c: isr_handler_add device_btn (GPIO%d) done",
              s_state[INPUT_DEVICE_BTN].gpio);
+
+    if (s_state[INPUT_SWITCH_2].enabled) {
+        gpio_isr_handler_add(switch2_gpio, btn_isr,
+                             (void *)(uintptr_t)INPUT_SWITCH_2);
+        ESP_LOGI(TAG, "BD-STEP-5d: isr_handler_add switch_2 (GPIO%d) done", switch2_gpio);
+    }
 
     BaseType_t btn_r = xTaskCreate(btn_task, "btn_task", 3072, NULL, 10, NULL);
     ESP_LOGI(TAG, "BD-STEP-6: xTaskCreate btn_task -> %s",

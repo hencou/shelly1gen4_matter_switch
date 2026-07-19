@@ -90,7 +90,7 @@ using namespace chip::app::Clusters;
 static uint16_t s_slot_endpoints[SCRIPT_MAX_SLOTS] = {0};
 
 /* Electrical Power Measurement endpoint (Shelly 1PM Gen4 only; 0 = not present) */
-static uint16_t s_pm_endpoint = 0;
+static uint16_t s_pm_endpoint[2] = { 0, 0 };   /* [0]=ch A, [1]=ch B (2PM) */
 static script_slot_type_t s_slot_types[SCRIPT_MAX_SLOTS] = {SLOT_TYPE_NONE};
 static uint8_t s_num_slots = 0;
 
@@ -496,10 +496,11 @@ extern "C" void matter_update_occupancy(bool occupied)
     chip::DeviceLayer::PlatformMgr().UnlockChipStack();
 }
 
-extern "C" void matter_update_power(float voltage_v, float current_a,
-                                    float power_w, float frequency_hz)
+extern "C" void matter_update_power_ch(int ch, float voltage_v, float current_a,
+                                       float power_w, float frequency_hz)
 {
-    if (!s_pm_endpoint) return;
+    if (ch < 0 || ch > 1 || !s_pm_endpoint[ch]) return;
+    uint16_t ep = s_pm_endpoint[ch];
     namespace EPM = chip::app::Clusters::ElectricalPowerMeasurement;
     /* Matter units: mW / mV / mA / mHz. These attributes are nullable int64.
      * The ElectricalPowerMeasurement cluster is created dynamically (not in the
@@ -509,17 +510,24 @@ extern "C" void matter_update_power(float voltage_v, float current_a,
     esp_matter_attr_val_t vv = esp_matter_nullable_int64(nullable<int64_t>((int64_t)(voltage_v    * 1000.0f)));
     esp_matter_attr_val_t vc = esp_matter_nullable_int64(nullable<int64_t>((int64_t)(current_a    * 1000.0f)));
     esp_matter_attr_val_t vf = esp_matter_nullable_int64(nullable<int64_t>((int64_t)(frequency_hz * 1000.0f)));
-    attribute::update(s_pm_endpoint, EPM::Id, EPM::Attributes::ActivePower::Id,   &vp);
-    attribute::update(s_pm_endpoint, EPM::Id, EPM::Attributes::Voltage::Id,       &vv);
-    attribute::update(s_pm_endpoint, EPM::Id, EPM::Attributes::ActiveCurrent::Id, &vc);
-    attribute::update(s_pm_endpoint, EPM::Id, EPM::Attributes::Frequency::Id,     &vf);
+    attribute::update(ep, EPM::Id, EPM::Attributes::ActivePower::Id,   &vp);
+    attribute::update(ep, EPM::Id, EPM::Attributes::Voltage::Id,       &vv);
+    attribute::update(ep, EPM::Id, EPM::Attributes::ActiveCurrent::Id, &vc);
+    attribute::update(ep, EPM::Id, EPM::Attributes::Frequency::Id,     &vf);
 }
 
-extern "C" void matter_update_relay_onoff(bool on)
+extern "C" void matter_update_power(float voltage_v, float current_a,
+                                    float power_w, float frequency_hz)
 {
+    matter_update_power_ch(0, voltage_v, current_a, power_w, frequency_hz);
+}
+
+extern "C" void matter_update_relay_onoff(int ch, bool on)
+{
+    script_slot_type_t want = (ch == 1) ? SLOT_TYPE_RELAY2 : SLOT_TYPE_RELAY;
     esp_matter_attr_val_t v = esp_matter_bool(on);
     for (int i = 0; i < s_num_slots; i++) {
-        if (s_slot_types[i] == SLOT_TYPE_RELAY && s_slot_endpoints[i]) {
+        if (s_slot_types[i] == want && s_slot_endpoints[i]) {
             attribute::update(s_slot_endpoints[i],
                 OnOff::Id,
                 OnOff::Attributes::OnOff::Id, &v);
@@ -791,11 +799,15 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type, uint16_t e
     if (cluster_id != OnOff::Id || attribute_id != OnOff::Attributes::OnOff::Id)
         return ESP_OK;
 
-    /* Check if this endpoint is a relay slot */
+    /* Check if this endpoint is a relay slot (RELAY -> ch0, RELAY2 -> ch1) */
     for (int i = 0; i < s_num_slots; i++) {
-        if (s_slot_types[i] == SLOT_TYPE_RELAY && s_slot_endpoints[i] == endpoint_id) {
-            relay_set(val->val.b);
-            ESP_LOGI(TAG, "EP%u OnOff -> relay %s", endpoint_id,
+        if (s_slot_endpoints[i] != endpoint_id) continue;
+        int ch = -1;
+        if (s_slot_types[i] == SLOT_TYPE_RELAY)  ch = 0;
+        if (s_slot_types[i] == SLOT_TYPE_RELAY2) ch = 1;
+        if (ch >= 0) {
+            relay_set_ch(ch, val->val.b);
+            ESP_LOGI(TAG, "EP%u OnOff -> relay ch%d %s", endpoint_id, ch,
                      val->val.b ? "ON" : "OFF");
             break;
         }
@@ -849,7 +861,12 @@ static endpoint_t *create_endpoint_for_type(node_t *node, script_slot_type_t typ
     }
     case SLOT_TYPE_RELAY: {
         on_off_light::config_t cfg;
-        cfg.on_off.on_off = relay_get();
+        cfg.on_off.on_off = relay_get_ch(0);
+        return on_off_light::create(node, &cfg, ENDPOINT_FLAG_NONE, NULL);
+    }
+    case SLOT_TYPE_RELAY2: {
+        on_off_light::config_t cfg;
+        cfg.on_off.on_off = relay_get_ch(1);
         return on_off_light::create(node, &cfg, ENDPOINT_FLAG_NONE, NULL);
     }
     case SLOT_TYPE_ILLUMINANCE:
@@ -866,7 +883,8 @@ static const char *slot_type_name(script_slot_type_t type)
     case SLOT_TYPE_ONOFF_STATE:  return "OnOff State-Follow (client)";
     case SLOT_TYPE_TEMPERATURE:  return "Temperature Sensor";
     case SLOT_TYPE_OCCUPANCY:    return "Occupancy Sensor";
-    case SLOT_TYPE_RELAY:        return "OnOff Light (relay)";
+    case SLOT_TYPE_RELAY:        return "OnOff Light (relay 1)";
+    case SLOT_TYPE_RELAY2:       return "OnOff Light (relay 2)";
     case SLOT_TYPE_ILLUMINANCE:  return "Illuminance Sensor";
     default:                     return "Unknown";
     }
@@ -900,25 +918,30 @@ extern "C" esp_err_t matter_start(const script_slot_type_t *slot_types, uint8_t 
         }
     }
 
-    /* Electrical Power Measurement endpoint — only on PM hardware (1PM Gen4).
+    /* Electrical Power Measurement endpoint(s) — on PM hardware.
+     * 1PM Gen4 (BL0942): one channel. 2PM Gen4 (ADE7953): two channels.
      * electrical_sensor::create sets up descriptor + power_topology +
      * electrical_power_measurement (with the mandatory ActivePower attribute).
      * The optional Voltage/ActiveCurrent/Frequency attributes are added here so
-     * matter_update_power() can report them. */
+     * matter_update_power_ch() can report them. */
     if (hw_profile()->has_pm) {
-        electrical_sensor::config_t pm_cfg;
-        endpoint_t *pm_ep = electrical_sensor::create(node, &pm_cfg, ENDPOINT_FLAG_NONE, NULL);
-        if (pm_ep) {
-            cluster_t *epm = cluster::get(pm_ep, ElectricalPowerMeasurement::Id);
-            if (epm) {
-                electrical_power_measurement::attribute::create_voltage(epm, nullable<int64_t>());
-                electrical_power_measurement::attribute::create_active_current(epm, nullable<int64_t>());
-                electrical_power_measurement::attribute::create_frequency(epm, nullable<int64_t>());
+        int pm_channels = (hw_profile()->pm_type == PM_ADE7953) ? 2 : 1;
+        for (int ch = 0; ch < pm_channels; ch++) {
+            electrical_sensor::config_t pm_cfg;
+            endpoint_t *pm_ep = electrical_sensor::create(node, &pm_cfg, ENDPOINT_FLAG_NONE, NULL);
+            if (pm_ep) {
+                cluster_t *epm = cluster::get(pm_ep, ElectricalPowerMeasurement::Id);
+                if (epm) {
+                    electrical_power_measurement::attribute::create_voltage(epm, nullable<int64_t>());
+                    electrical_power_measurement::attribute::create_active_current(epm, nullable<int64_t>());
+                    electrical_power_measurement::attribute::create_frequency(epm, nullable<int64_t>());
+                }
+                s_pm_endpoint[ch] = endpoint::get_id(pm_ep);
+                ESP_LOGI(TAG, "EP%u = Electrical Power Measurement (ch%d)",
+                         s_pm_endpoint[ch], ch);
+            } else {
+                ESP_LOGW(TAG, "failed to create electrical sensor endpoint (ch%d)", ch);
             }
-            s_pm_endpoint = endpoint::get_id(pm_ep);
-            ESP_LOGI(TAG, "EP%u = Electrical Power Measurement (BL0942)", s_pm_endpoint);
-        } else {
-            ESP_LOGW(TAG, "failed to create electrical sensor endpoint");
         }
     }
 
