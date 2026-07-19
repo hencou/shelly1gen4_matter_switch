@@ -43,7 +43,7 @@ for the relay(s), wall-switch input(s), onboard button and status LED.
 | **Shelly 1 Gen4** (default) | GPIO5 | GPIO10 | GPIO4 | GPIO15 | yes | — |
 | **Shelly 1 Mini Gen4** | GPIO10 | GPIO12 | GPIO22 | GPIO5 | no | — |
 | **Shelly 1PM Gen4** | GPIO4 | GPIO10 | GPIO1 | GPIO0 | yes | BL0942 (UART1 TX=GPIO6 RX=GPIO7, 9600 baud) |
-| **Shelly 2PM Gen4** | GPIO5 + GPIO3 | GPIO11 + GPIO10 | GPIO12 | GPIO0 | no | ADE7953 dual-channel (I2C SDA=GPIO6 SCL=GPIO7, IRQ=GPIO19) |
+| **Shelly 2PM Gen4** | GPIO5 + GPIO3 | GPIO11 + GPIO10 | GPIO12 | GPIO0 | yes | ADE7953 dual-channel (I2C SDA=GPIO6 SCL=GPIO7, IRQ=GPIO19) |
 
 > ⚠️ **Test status:** only the **Shelly 1 Gen4** has been verified on real
 > hardware. The **1 Mini Gen4**, **1PM Gen4** and **2PM Gen4** profiles are
@@ -66,7 +66,7 @@ Notes:
 - **Warning:** selecting the wrong model drives the wrong GPIOs. Pick the model
   that matches your physical hardware.
 - The **Shelly Plus Add-on** (DS18B20 + touch + analog occupancy) is available on
-  the 1 Gen4 and 1PM Gen4, and **not** on the Mini or 2PM.
+  the 1 Gen4, 1PM Gen4 and 2PM Gen4, and **not** on the Mini.
 - On the **1PM Gen4** the BL0942 reports voltage, current, active power,
   accumulated energy and line frequency via a Matter **Electrical Power
   Measurement** endpoint, and on the dashboard Hardware tab.
@@ -237,12 +237,16 @@ For modules already running this firmware: open the management dashboard (**6× 
 
 ### Input IDs
 
+The SW / button / Digital-IN GPIOs depend on the selected model (see the
+hardware table above). The `GPIO` column below lists the default **Shelly 1 Gen4**
+pins; the 2PM-specific pins are noted separately.
+
 | ID | Input | GPIO |
 |---|---|---|
-| `0` | SW (pushbutton terminal) | GPIO10 |
+| `0` | SW (1st wall switch) | GPIO10 (1 Gen4) — **GPIO11 on 2PM** |
 | `1` | Digital IN (add-on) | GPIO18 |
 | `2` | PCB button (onboard) | GPIO4 |
-| `3` | SW2 (2nd wall switch, 2PM only) | GPIO10 (2PM) |
+| `3` | SW2 (2nd wall switch, 2PM only) | **GPIO10 on 2PM** |
 
 ### Output functions
 
