@@ -1,10 +1,10 @@
 /*
  * Runtime hardware profile selection. See hw_config.h.
  *
- * Pin assignments per device. The 1/Mini/1PM pins are verified on real
- * hardware (source: automatous-io/shelly-1-gen4-matter-thread docs/GPIO.md);
- * the 2PM pins follow the ESPHome device config (see the 2PM note below and
- * README.md — only the 1 Gen4 is confirmed on hardware here):
+ * Pin assignments per device. The 1/Mini/1PM pins are taken from published
+ * Gen4 GPIO documentation; the 2PM pins follow the ESPHome device config (see
+ * the 2PM note below and README.md — only the 1 Gen4 is confirmed on hardware
+ * here):
  *
  *   Function      | 1 Gen4 | 1 Mini Gen4 | 1PM Gen4              | 2PM Gen4
  *   Relay         | GPIO5  | GPIO10      | GPIO4                | GPIO5 + GPIO3

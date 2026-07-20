@@ -75,9 +75,8 @@ You can also install this firmware **directly from the stock Shelly firmware ove
 
 ⚠️ **However, the Web UI OTA route cannot back up the stock Shelly firmware** — it only writes the new app. UART flashing (this section) is the **only** way to read out and save the original 8 MB stock image first. If you might ever want to return to stock, do the UART backup below **before** flashing anything. Restoring stock later also requires UART.
 
-> **Source**: this section follows the canonical pinout from
-> [`automatous-io/shelly-1-gen4-matter-thread` FLASHING.md](https://github.com/automatous-io/shelly-1-gen4-matter-thread/blob/main/docs/FLASHING.md)
-> — verified on hardware revision `v0.1.2` (printed on the PCB).
+> **Note**: the J6 pinout below was verified on hardware revision `v0.1.2`
+> (printed on the PCB).
 
 ### J6 Pinout
 
