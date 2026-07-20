@@ -1,4 +1,4 @@
-# Installation via Visual Studio Code on Windows 11 (WSL2) — `shelly1gen4_matter_switch`
+# Installation via Visual Studio Code on Windows 11 (WSL2) — `shelly_gen4_matter_module`
 
 Step-by-step guide to build and flash this Matter-over-Thread firmware project from **Visual Studio Code on Windows 11**, with the build running in **WSL2 (Ubuntu 22.04)**.
 
@@ -196,9 +196,9 @@ Place the project zip in Windows (e.g. `Downloads`), then in Ubuntu:
 ```bash
 mkdir -p ~/projects
 cd ~/projects
-cp "/mnt/c/Users/<your-windows-user>/Downloads/shelly1gen4_matter_switch.zip" .
-unzip shelly1gen4_matter_switch.zip
-cd shelly1gen4_matter_switch
+cp "/mnt/c/Users/<your-windows-user>/Downloads/shelly_gen4_matter_module.zip" .
+unzip shelly_gen4_matter_module.zip
+cd shelly_gen4_matter_module
 ```
 
 ⚠️ Project must be in WSL filesystem (`~/projects/...`), **not** in `/mnt/c/...`. Builds from `/mnt/c/` are 5-10× slower due to cross-FS overhead.
@@ -363,7 +363,7 @@ Cluster 6 = OnOff, cluster 8 = LevelControl.
 The firmware supports two OTA paths:
 
 ### WiFi OTA (primary, ready to use)
-1. `idf.py build` produces new `build/shelly1gen4_matter_switch.bin`
+1. `idf.py build` produces new `build/shelly_gen4_matter_module.bin`
 2. Copy this file to HA's `/config/www/`
 3. Click **10× rapidly** on your System 55 pushbutton on the Shelly
 4. First time: phone → SoftAP `shelly-ota-XXXXXX` → `http://192.168.4.1/` → enter SSID/pass/URL
@@ -381,7 +381,7 @@ After one-time installation:
 ```bash
 # 1. Start Ubuntu (start menu → Ubuntu 22.04 LTS)
 # 2. Open project
-cd ~/projects/shelly1gen4_matter_switch
+cd ~/projects/shelly_gen4_matter_module
 code .
 
 # 3. Forward ESP32 (PowerShell admin)

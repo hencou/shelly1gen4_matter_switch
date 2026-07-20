@@ -69,31 +69,30 @@ void bench_mode_init(void);
 /* Default color temperature (2700 K = ~370 mireds) sent on double-press. */
 #define DEFAULT_COLOR_TEMP_MIREDS  370
 
-/* Matter endpoints */
-#define EP_SWITCH_PUSHBUTTON   1
-#define EP_SWITCH_STATE     2
-#define EP_TEMPERATURE      3
-#define EP_OCCUPANCY        4
-#define EP_RELAY            5
-
 /* Logical input source identifiers.
- * All 3 inputs have uniform behavior (see on_button_event in app_main.cpp):
- *   - SHORT_PRESS       -> Matter Toggle to EP1 bound devices (momentary)
+ * All inputs share the same gesture handling (see on_button_event in
+ * app_main.cpp):
+ *   - SHORT_PRESS       -> Matter Toggle to bound devices (momentary)
  *   - DOUBLE_PRESS      -> Matter ColorControl MoveToColorTemperature (2700K default)
  *   - LONG_PRESS_START  -> Matter LevelControl MoveWithOnOff (dim, turns on lamp if off)
  *   - LONG_PRESS_STOP   -> Matter LevelControl Stop
  *   - SHORT_LONG_START  -> Matter ColorControl MoveColorTemperature (warm/cool)
  *   - SHORT_LONG_STOP   -> Matter ColorControl StopMoveStep
- *   - CONTACT_CLOSED    -> Matter On to EP2 bound devices (state-follow)
- *   - CONTACT_OPEN      -> Matter Off to EP2 bound devices (state-follow)
+ *   - CONTACT_CLOSED    -> Matter On to state-follow bound devices
+ *   - CONTACT_OPEN      -> Matter Off to state-follow bound devices
  *   - 6x click          -> enable WiFi alongside Thread (non-persistent)
+ *
+ * GPIOs are taken from the active hardware profile (see hw_config.c); the
+ * GPIOs noted below are the Shelly 1 Gen4 defaults.
  */
 typedef enum {
-    INPUT_PUSHBUTTON = 0,    /* GPIO10 — System 55 pushbutton (active-high in production,
-                           * active-low in BENCH_MODE with internal pull-up) */
-    INPUT_TOUCH,          /* TTP223 on Add-on digital input (always active-high) */
-    INPUT_DEVICE_BTN,     /* GPIO4 — onboard pair button (always active-low, pull-up) */
-    INPUT_SWITCH_2,       /* 2nd wall-switch input (Shelly 2PM Gen4 only) */
+    INPUT_PUSHBUTTON = 0, /* wall-switch input (GPIO10 on 1 Gen4): active-high in
+                           * production, active-low in BENCH_MODE (internal pull-up) */
+    INPUT_TOUCH,          /* Add-on digital input (GPIO18): active-low (Add-on pulls
+                           * up to 3V3, connecting to GND = pressed) */
+    INPUT_DEVICE_BTN,     /* onboard pair button (GPIO4 on 1 Gen4): active-low, pull-up */
+    INPUT_SWITCH_2,       /* 2nd wall-switch input (Shelly 2PM Gen4 only): same
+                           * polarity as INPUT_PUSHBUTTON */
     INPUT_COUNT
 } input_id_t;
 

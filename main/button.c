@@ -1,10 +1,12 @@
 /*
- * Button driver for all 3 inputs of the Shelly 1 Gen4:
- *   INPUT_PUSHBUTTON     (GPIO10) System 55 pushbutton
- *   INPUT_TOUCH       (GPIO18) Add-on digital input terminal
+ * Button driver for the device inputs. GPIOs come from the active hardware
+ * profile (hw_config.c); the values below are the Shelly 1 Gen4 defaults.
+ *   INPUT_PUSHBUTTON  (GPIO10) wall-switch / pushbutton input
+ *   INPUT_TOUCH       (GPIO18) Add-on digital input terminal (Add-on models only)
  *   INPUT_DEVICE_BTN  (GPIO4)  onboard pair button
+ *   INPUT_SWITCH_2    (GPIO10) 2nd wall-switch input (Shelly 2PM Gen4 only)
  *
- * All 3 inputs have the same behavior (see on_button_event in app_main.cpp):
+ * All inputs have the same behavior (see on_button_event in app_main.cpp):
  *   SHORT_PRESS       -> Matter Toggle + relay tick
  *   DOUBLE_PRESS      -> ColorControl MoveToColorTemperature (2700K)
  *   LONG_PRESS_START  -> dim start (LevelControl MoveWithOnOff — turns on lamp if off)

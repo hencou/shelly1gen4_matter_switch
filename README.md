@@ -1,6 +1,6 @@
 # shelly_gen4_matter_module
 
-**Custom Matter-over-Thread firmware** for the **Shelly 1 Gen4** (ESP32-C6) with **Lua scripting** for fully configurable endpoints.
+**Custom Matter-over-Thread firmware** for the **Shelly Gen4** line (ESP32-C6) — one image for the Shelly 1, 1 Mini, 1PM and 2PM Gen4 — with **Lua scripting** for fully configurable endpoints.
 
 ## Features
 
@@ -22,7 +22,7 @@ Each script slot can be configured as one of these Matter endpoint types:
 | **OnOff State-follow** | 0x0103 Light Switch (client) | On/Off follows switch position |
 | **Temperature Sensor** | 0x0302 Temp. Sensor (server) | DS18B20 via 1-Wire |
 | **Occupancy Sensor** | 0x0107 Occupancy Sensor (server) | Analog IN duty cycle |
-| **Relay (OnOff Light)** | 0x0100 OnOff Light (server) | Physical relay on GPIO5 |
+| **Relay (OnOff Light)** | 0x0100 OnOff Light (server) | Physical relay (GPIO from the active hardware profile; 2 relays on the 2PM) |
 
 ## Based on
 
@@ -143,7 +143,7 @@ After factory reset the module reboots into WiFi setup mode (step 2).
 
 ## Firmware updates
 
-Once the custom firmware is running you can update it three ways. All three flash the **same** application binary (`build/shelly1gen4_matter_switch.bin`) — they only differ in transport.
+Once the custom firmware is running you can update it three ways. All three flash the **same** application binary (`build/shelly_gen4_matter_module.bin`) — they only differ in transport.
 
 > ⚠️ **No stock Shelly backup via OTA.** Installing this firmware directly from the stock Shelly firmware (Shelly Web UI OTA) does **not** and cannot make a backup of the original Shelly firmware — the OTA process only writes the new app and never reads the existing flash. The **only** way to back up the stock firmware is over **UART** with a tool such as [ESPConnect](https://thelastoutpostworkshop.github.io/microcontroller_devkit/espconnect/) or `esptool.py read_flash` (see [INSTALL.md](INSTALL.md)). If you may ever want to return to stock, make that UART backup **before** you flash — after the OTA it is too late.
 
@@ -153,7 +153,7 @@ Update over the existing Thread/Matter connection — no WiFi or cabling needed.
 
 ```bash
 idf.py build
-python3 tools/make-matter-ota.py      # → shelly1gen4-matter-switch-v<version>.ota
+python3 tools/make-matter-ota.py      # → shelly-gen4-matter-module-v<version>.ota
 ```
 
 The image embeds the vendor/product ID and software version; the device only accepts an image with a higher software version than it currently runs. Bump `CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION[_STRING]` in `main/CHIPProjectConfig.h` for each release.
@@ -166,14 +166,14 @@ Build a zip that the Shelly device web interface accepts as a local firmware upd
 
 ```bash
 idf.py build
-python3 tools/make-webui-ota-zip.py   # → shelly1gen4-matter-switch-v<version>-ota.zip
+python3 tools/make-webui-ota-zip.py   # → shelly-gen4-matter-module-v<version>-ota.zip
 ```
 
 Upload the zip via the Shelly device's own web interface (local firmware update). The zip keeps the existing bootloader (its bundled bootloader is marked `min_version 0.0.0`, so nothing at offset `0x0` is overwritten) and uses the stock partition layout (PT at `0x10000`). The firmware migrates the partition table automatically on first boot where needed.
 
 ### 3. `.bin` upload via the management dashboard
 
-For modules already running this firmware: open the management dashboard (**6× rapid button press** → WiFi), go to the **WiFi & OTA** tab, and either provide a firmware URL or upload `build/shelly1gen4_matter_switch.bin` directly. The device flashes the inactive OTA slot and reboots into it.
+For modules already running this firmware: open the management dashboard (**6× rapid button press** → WiFi), go to the **WiFi & OTA** tab, and either provide a firmware URL or upload `build/shelly_gen4_matter_module.bin` directly. The device flashes the inactive OTA slot and reboots into it.
 
 ## Pin mapping
 
@@ -329,7 +329,7 @@ Controls GPIO10 polarity and sensor initialization. Configurable at runtime via 
 ## File structure
 
 ```
-shelly1gen4_matter_switch/
+shelly_gen4_matter_module/
 ├── CMakeLists.txt
 ├── sdkconfig.defaults
 ├── main/

@@ -1,19 +1,22 @@
 /*
  * Runtime hardware profile selection. See hw_config.h.
  *
- * Pin assignments per device (verified on real hardware, source:
- * automatous-io/shelly-1-gen4-matter-thread docs/GPIO.md):
+ * Pin assignments per device. The 1/Mini/1PM pins are taken from published
+ * Gen4 GPIO documentation; the 2PM pins follow the ESPHome device config (see
+ * the 2PM note below and README.md — only the 1 Gen4 is confirmed on hardware
+ * here):
  *
- *   Function      | 1 Gen4 | 1 Mini Gen4 | 1PM Gen4
- *   Relay         | GPIO5  | GPIO10      | GPIO4
- *   Switch input  | GPIO10 | GPIO12      | GPIO10
- *   Button        | GPIO4  | GPIO22      | GPIO1
- *   Status LED    | GPIO15 | GPIO5       | GPIO11   (all active-low)
- *   Power meter   | -      | -           | BL0942 UART1 TX=GPIO6 RX=GPIO7
- *   Add-on        | yes    | no          | yes
+ *   Function      | 1 Gen4 | 1 Mini Gen4 | 1PM Gen4              | 2PM Gen4
+ *   Relay         | GPIO5  | GPIO10      | GPIO4                | GPIO5 + GPIO3
+ *   Switch input  | GPIO10 | GPIO12      | GPIO10               | GPIO11 + GPIO10
+ *   Button        | GPIO4  | GPIO22      | GPIO1                | GPIO12
+ *   Status LED    | GPIO15 | GPIO5       | GPIO0                | GPIO0   (all active-low)
+ *   Power meter   | -      | -           | BL0942 UART1         | ADE7953 I2C
+ *                 |        |             | TX=GPIO6 RX=GPIO7    | SDA=GPIO6 SCL=GPIO7 IRQ=GPIO19
+ *   Add-on        | yes    | no          | yes                  | yes
  *
- * Only the Mini lacks the Shelly Plus Add-on connector; the 1 Gen4 and the
- * 1PM Gen4 both expose it (1-Wire/touch/analog on GPIO9/16/17/18).
+ * Only the Mini lacks the Shelly Plus Add-on connector; the 1 Gen4, 1PM Gen4
+ * and 2PM Gen4 all expose it (1-Wire/touch/analog on GPIO9/16/17/18).
  */
 
 #include "hw_config.h"

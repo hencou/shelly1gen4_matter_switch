@@ -5,11 +5,11 @@
 # Point it at the project root (defaults to the current directory):
 #
 #     python3 tools/make-webui-ota-zip.py
-#     python3 tools/make-webui-ota-zip.py /path/to/shelly1gen4_matter_switch
+#     python3 tools/make-webui-ota-zip.py /path/to/shelly_gen4_matter_module
 #
 # It reads the project name and version from build/project_description.json,
 # pulls the bootloader, partition table, otadata and app from build/, adds an
-# empty filesystem image, and writes shelly1gen4-matter-switch-v<version>-ota.zip.
+# empty filesystem image, and writes shelly-gen4-matter-module-v<version>-ota.zip.
 #
 # Every part in the zip comes from the build; no Shelly binaries are included.
 # Shelly's OTA requires a boot part; the zip includes the bootloader with
@@ -60,7 +60,7 @@ def main():
     if missing:
         sys.exit("missing build outputs:\n  " + "\n  ".join(missing))
 
-    stem = f"shelly1gen4-matter-switch-v{version}-ota"
+    stem = f"shelly-gen4-matter-module-v{version}-ota"
     zip_out = os.path.join(project_dir, f"{stem}.zip")
 
     with tempfile.TemporaryDirectory() as tmp:

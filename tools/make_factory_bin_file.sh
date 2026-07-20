@@ -2,7 +2,7 @@
 # Build a single merged flash image for ESPConnect / web-based flashing.
 #
 # Usage:
-#   ./tools/make-merged.sh                # produces shelly1gen4_matter_switch_factory.bin in project root
+#   ./tools/make-merged.sh                # produces shelly_gen4_matter_module_factory.bin in project root
 #   WIN_DOWNLOADS=/mnt/c/Users/user/Downloads ./tools/make_factory_bin_file.sh
 #                                         # also copies the merged bin to your Windows Downloads
 #
@@ -14,13 +14,13 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="${PROJECT_DIR}/build"
-OUT="${PROJECT_DIR}/shelly1gen4_matter_switch_factory.bin"
+OUT="${PROJECT_DIR}/shelly_gen4_matter_module_factory.bin"
 
 REQUIRED=(
     "${BUILD_DIR}/bootloader/bootloader.bin"
     "${BUILD_DIR}/partition_table/partition-table.bin"
     "${BUILD_DIR}/ota_data_initial.bin"
-    "${BUILD_DIR}/shelly1gen4_matter_switch.bin"
+    "${BUILD_DIR}/shelly_gen4_matter_module.bin"
 )
 for f in "${REQUIRED[@]}"; do
     if [[ ! -f "$f" ]]; then
@@ -40,7 +40,7 @@ esptool.py --chip esp32c6 merge_bin \
     0x0      "${BUILD_DIR}/bootloader/bootloader.bin" \
     0x8000   "${BUILD_DIR}/partition_table/partition-table.bin" \
     0x11000  "${BUILD_DIR}/ota_data_initial.bin" \
-    0x20000  "${BUILD_DIR}/shelly1gen4_matter_switch.bin"
+    0x20000  "${BUILD_DIR}/shelly_gen4_matter_module.bin"
 
 SIZE=$(stat -c %s "${OUT}")
 printf "\nMerged image: %s (%s bytes)\n" "${OUT}" "${SIZE}"

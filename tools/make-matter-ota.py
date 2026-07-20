@@ -5,7 +5,7 @@
 # Point it at the project root (defaults to the current directory):
 #
 #     python3 tools/make-matter-ota.py
-#     python3 tools/make-matter-ota.py /path/to/shelly1gen4_matter_switch
+#     python3 tools/make-matter-ota.py /path/to/shelly_gen4_matter_module
 #
 # Every field that the device matches against is read from the build:
 #
@@ -15,7 +15,7 @@
 #     (CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION[_STRING]).
 #
 # It wraps build/<project>.bin with the upstream Matter ota_image_tool.py
-# and writes shelly1gen4-matter-switch-v<version>.ota next to the build.
+# and writes shelly-gen4-matter-module-v<version>.ota next to the build.
 #
 # Run it in the same esp-matter environment you build in. ota_image_tool.py
 # is located in the connectedhomeip checkout via $ESP_MATTER_PATH (or set
@@ -72,7 +72,7 @@ def main():
     version = int(define(header, "CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION").split()[0], 0)
     version_str = define(header, "CHIP_DEVICE_CONFIG_DEVICE_SOFTWARE_VERSION_STRING").split('"')[1]
 
-    out = os.path.join(project_dir, f"shelly1gen4-matter-switch-v{version_str}.ota")
+    out = os.path.join(project_dir, f"shelly-gen4-matter-module-v{version_str}.ota")
 
     cmd = [sys.executable, find_ota_image_tool(), "create",
            "-v", f"0x{vid:04X}", "-p", f"0x{pid:04X}",

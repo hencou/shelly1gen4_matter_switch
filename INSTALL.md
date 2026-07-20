@@ -1,4 +1,4 @@
-# Installation and build guide — `shelly1gen4_matter_switch`
+# Installation and build guide — `shelly_gen4_matter_module`
 
 ⚠️ First build takes **20–45 minutes** because connectedhomeip must compile. After that, incremental builds with ccache take ~1-3 min.
 
@@ -50,7 +50,7 @@ export IDF_CCACHE_ENABLE=1
 . ~/esp/esp-idf/export.sh
 . ~/esp/esp-matter/export.sh
 
-cd ~/projects/shelly1gen4_matter_switch
+cd ~/projects/shelly_gen4_matter_module
 idf.py set-target esp32c6
 idf.py menuconfig     # adjust GPIOs if needed
 idf.py build          # first time 20-45 min, then 1-3 min
@@ -65,7 +65,7 @@ In `menuconfig`:
 - **Component config → CHIP Device Layer** → leave defaults (Thread enabled, BLE pairing enabled)
 - **Partition Table → Custom** → already set correctly via `sdkconfig.defaults`
 
-Expected output: `build/shelly1gen4_matter_switch.bin` (~1.6-1.8 MB).
+Expected output: `build/shelly_gen4_matter_module.bin` (~1.6-1.8 MB).
 
 ## 4. UART flashing via the J6 connector on the back
 
@@ -75,9 +75,8 @@ You can also install this firmware **directly from the stock Shelly firmware ove
 
 ⚠️ **However, the Web UI OTA route cannot back up the stock Shelly firmware** — it only writes the new app. UART flashing (this section) is the **only** way to read out and save the original 8 MB stock image first. If you might ever want to return to stock, do the UART backup below **before** flashing anything. Restoring stock later also requires UART.
 
-> **Source**: this section follows the canonical pinout from
-> [`automatous-io/shelly-1-gen4-matter-thread` FLASHING.md](https://github.com/automatous-io/shelly-1-gen4-matter-thread/blob/main/docs/FLASHING.md)
-> — verified on hardware revision `v0.1.2` (printed on the PCB).
+> **Note**: the J6 pinout below was verified on hardware revision `v0.1.2`
+> (printed on the PCB).
 
 ### J6 Pinout
 
@@ -165,19 +164,19 @@ Our build produces 4 separate binaries that each need to be at their own offset 
 
 ```bash
 . ~/esp/esp-idf/export.sh
-cd ~/projects/shelly1gen4_matter_switch
+cd ~/projects/shelly_gen4_matter_module
 idf.py build      # ensures all 4 binaries are up to date
 
 esptool.py --chip esp32c6 merge_bin \
-    -o shelly1gen4_matter_switch_merged.bin \
+    -o shelly_gen4_matter_module_merged.bin \
     --flash_mode dio --flash_freq 80m --flash_size 8MB \
     0x0      build/bootloader/bootloader.bin \
     0x8000   build/partition_table/partition-table.bin \
     0xf000   build/ota_data_initial.bin \
-    0x20000  build/shelly1gen4_matter_switch.bin
+    0x20000  build/shelly_gen4_matter_module.bin
 
 # Copy to Windows side for ESPConnect (replace <USERNAME>)
-cp shelly1gen4_matter_switch_merged.bin /mnt/c/Users/<USERNAME>/Downloads/
+cp shelly_gen4_matter_module_merged.bin /mnt/c/Users/<USERNAME>/Downloads/
 ```
 
 Tip: put those last three commands in a script `tools/make-merged.sh` for later iterations.
@@ -190,7 +189,7 @@ Tip: put those last three commands in a script `tools/make-merged.sh` for later 
 4. ESPConnect shows chip info including **MAC address** — note for backup naming.
 5. **Optional but recommended**: **Flash Tools → Download Flash Backup** → 8 MB stock image (`shelly-1-gen4-stock-AABBCCDDEEFF.bin`). Takes 5–10 min. Verify file ≈ 8,388,608 bytes. Keep safe — only way back to factory.
 6. **Flash Tools → Flash Firmware**:
-   - File: `shelly1gen4_matter_switch_merged.bin`
+   - File: `shelly_gen4_matter_module_merged.bin`
    - Offset: `0x0`
    - **Erase entire flash before writing**: on
    - Click **Flash**. ~1-2 min.
@@ -301,7 +300,7 @@ Press the button → the lamp should respond directly, **without HA in the path*
 
 ## 10. OTA — firmware updates without UART
 
-1. Build new firmware: `idf.py build`. Place `build/shelly1gen4_matter_switch.bin` on a web server reachable from your WiFi network (e.g. HA `/config/www/`).
+1. Build new firmware: `idf.py build`. Place `build/shelly_gen4_matter_module.bin` on a web server reachable from your WiFi network (e.g. HA `/config/www/`).
 2. Press **6× rapidly** on any button → WiFi management dashboard activates.
 3. Navigate to the WiFi tab in the dashboard → enter SSID + password + OTA URL.
 4. The device downloads and flashes the new firmware, then reboots.
