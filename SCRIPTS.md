@@ -245,11 +245,14 @@ end
 
 Use `input.button_id()` to distinguish which physical input triggered the event.
 
-| ID | Input | GPIO |
+GPIOs are model-dependent (taken from the active hardware profile); the values below are the Shelly 1 Gen4 defaults.
+
+| ID | Input | GPIO (1 Gen4) |
 |---|---|---|
 | `0` | SW (pushbutton terminal) | GPIO10 |
-| `1` | Digital IN (add-on / TTP223) | GPIO18 |
+| `1` | Digital IN (add-on) | GPIO18 (Add-on models only) |
 | `2` | PCB button (onboard) | GPIO4 |
+| `3` | SW2 (2nd wall switch) | Shelly 2PM Gen4 only (GPIO10) |
 
 | Setting | Value |
 |---|---|

@@ -19,7 +19,7 @@ set(EXTRA_COMPONENT_DIRS
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(shelly1gen4_matter_switch)
+project(shelly_gen4_matter_module)
 
 # CHIP_HAVE_CONFIG_H is cruciaal — anders mist platform target selectie
 # (ChipDevicePlatformEvent typedef, ConnectivityManagerImpl static_cast).

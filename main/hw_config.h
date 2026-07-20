@@ -13,8 +13,10 @@ extern "C" {
  *
  * The Gen4 line shares one ESP32-C6 module (ESP-Shelly-C68F) but wires the
  * relay, wall-switch input, onboard button and status LED to different GPIOs
- * per device. Pin assignments (verified on real hardware) come from the
- * automatous-io/shelly-1-gen4-matter-thread project's docs/GPIO.md.
+ * per device. The 1/Mini/1PM pin assignments (verified on real hardware) come
+ * from the automatous-io/shelly-1-gen4-matter-thread project's docs/GPIO.md;
+ * the 2PM pins follow the ESPHome device config. See hw_config.c for the full
+ * table — only the 1 Gen4 is confirmed on hardware here.
  *
  * The active profile is chosen at runtime (stored in NVS, selectable on the
  * management dashboard) instead of compile time, so one firmware image serves
