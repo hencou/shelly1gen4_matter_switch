@@ -296,8 +296,6 @@ The relay functions take an **optional 1-based channel** argument (`1` = relay 1
 | **Configured** (scripts, no fabrics) | OFF | ON (BLE commissioning) | After configuring endpoints + reboot |
 | **Commissioned** (normal) | OFF | ON (Thread active) | After commissioning |
 | **6× press** (management) | ON — APSTA mode | Thread disabled | Press any button 6× rapidly |
-| **WiFi persistent** (setting) | ON — APSTA mode | ON (coexistence) | Toggle in Hardware tab |
-| **WiFi persistent + TBR** | ON — APSTA + TBR | ON (border router) | Toggle both in Hardware tab |
 
 ## Status LED
 
